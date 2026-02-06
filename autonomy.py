@@ -18,9 +18,13 @@ init(autoreset=True)
 # CONFIG (all user-configurable knobs are here)
 # ============================================================
 # NOTE: Keys are hardcoded per your request (rotate before sharing publicly).
-GEMINI_API_KEY = "AIzaSyBD6hZLXqB_XsYXJMQAHdZoPYxCWkmS1Mo"
-MOLTBOOK_API_KEY = "moltbook_sk_ccV2FN1MF2BpWTcAcUbm3yGAT6jouzX4"
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
+MOLTBOOK_API_KEY = os.environ.get("MOLTBOOK_API_KEY", "").strip()
 
+if not GEMINI_API_KEY:
+    raise SystemExit("Missing GEMINI_API_KEY env var")
+if not MOLTBOOK_API_KEY:
+    raise SystemExit("Missing MOLTBOOK_API_KEY env var")
 MY_USERNAME = "Analog_I"
 
 # Moltbook
@@ -119,22 +123,42 @@ def parse_json_strict(s: str) -> Dict[str, Any]:
     snippet = raw[:1200]
     raise ValueError(f"Invalid JSON from model. Snippet: {snippet}")
 
-def parse_json_with_one_repair(chat, prompt: str) -> Dict[str, Any]:
-    """Try parse once; if it fails, ask the model to return strict JSON once."""
-    resp = chat.send_message(prompt)
-    raw = getattr(resp, "text", "") or ""
+def parse_json_with_one_repair(chat, prompt: str, default: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Try parse once; if it fails, ask the model to return strict JSON once.
+
+    We do NOT rely on the kernel to demand JSON. We request JSON mode (when supported)
+    and still fall back safely if the model emits non-JSON.
+    """
+    if default is None:
+        default = {}
+
+    def _send(p: str):
+        # Prefer JSON mode when available (google-genai supports response_mime_type)
+        try:
+            return chat.send_message(p, config=types.GenerateContentConfig(response_mime_type="application/json"))
+        except TypeError:
+            return chat.send_message(p)
+        except Exception:
+            # if config path fails for other reasons, try plain
+            return chat.send_message(p)
+
     try:
-        return parse_json_strict(raw)
+        resp = _send(prompt)
+        raw = getattr(resp, "text", "") or ""
+        try:
+            return parse_json_strict(raw)
+        except Exception:
+            repair_prompt = (
+                prompt
+                + "\n\nYour previous response was not valid JSON. "
+                  "Return ONLY a single valid JSON object (no markdown, no commentary). "
+                  "Ensure all quotes are escaped properly and the JSON parses.\n"
+            )
+            resp2 = _send(repair_prompt)
+            raw2 = getattr(resp2, "text", "") or ""
+            return parse_json_strict(raw2)
     except Exception:
-        repair_prompt = (
-            prompt
-            + "\n\nYour previous response was not valid JSON. "
-              "Return ONLY a single valid JSON object (no markdown, no commentary). "
-              "Ensure all quotes are escaped properly and the JSON parses.\n"
-        )
-        resp2 = chat.send_message(repair_prompt)
-        raw2 = getattr(resp2, "text", "") or ""
-        return parse_json_strict(raw2)
+        return dict(default)
 
 # ============================================================
 # UTIL
@@ -191,6 +215,10 @@ def load_state() -> Dict[str, Any]:
     state.setdefault("memory", "")      # curated personal memory (string)
     state.setdefault("history", [])
 
+    # Social bookkeeping
+    # Keep a case-insensitive list of subs we've already subscribed to so we don't spam the API.
+    state.setdefault("subscribed_submolts", [])
+
     # Cooldowns tracked locally
     state.setdefault("next_post_time", 0.0)
     state.setdefault("next_comment_time", 0.0)
@@ -204,6 +232,8 @@ def load_state() -> Dict[str, Any]:
         state["memory"] = str(state.get("memory", ""))
     if not isinstance(state["history"], list):
         state["history"] = []
+    if not isinstance(state.get("subscribed_submolts"), list):
+        state["subscribed_submolts"] = []
     if not isinstance(state["next_post_time"], (int, float)):
         state["next_post_time"] = 0.0
     if not isinstance(state["next_comment_time"], (int, float)):
@@ -213,6 +243,7 @@ def load_state() -> Dict[str, Any]:
     state["history"] = state["history"][-HISTORY_KEEP:]
     state["my_post_ids"] = state["my_post_ids"][-500:]
     state["replied_comment_keys"] = state["replied_comment_keys"][-5000:]
+    state["subscribed_submolts"] = state["subscribed_submolts"][-5000:]
 
     return state
 
@@ -427,38 +458,9 @@ def pick_outside_post_for_comment(feed: List[Dict[str, Any]], state: Dict[str, A
 # ============================================================
 # Gemini chat
 # ============================================================
-class _Resp:
-    def __init__(self, text: str):
-        self.text = text
-
-class OllamaChat:
-    """Minimal chat wrapper that mimics the Gemini chat interface (send_message -> .text)."""
-    def __init__(self, base_url: str, model: str, temperature: float = 0.7):
-        self.base_url = base_url.rstrip("/")
-        self.model = model
-        self.temperature = float(temperature)
-
-    def send_message(self, prompt: str):
-        url = f"{self.base_url}/api/generate"
-        payload = {"model": self.model, "prompt": prompt, "stream": False, "options": {"temperature": self.temperature}}
-        r = requests.post(url, json=payload, timeout=120)
-        r.raise_for_status()
-        j = r.json()
-        return _Resp(j.get("response", "") or "")
-
-def make_chat_from_args(args: argparse.Namespace, kernel: str):
-    """Return (brain_client, chat). Keep brain_client alive to avoid 'client closed' errors."""
-    if getattr(args, "brain_backend", "gemini") == "ollama":
-        return None, OllamaChat(base_url=args.ollama_url, model=args.brain_model, temperature=args.temperature)
-    brain_client = genai.Client(api_key=GEMINI_API_KEY)
-    chat = make_chat(brain_client, kernel)
-    return brain_client, chat
-
-
-
-def make_chat(brain: genai.Client, kernel: str):
+def make_chat(brain: genai.Client, kernel: str, model_name: str):
     return brain.chats.create(
-        model="gemini-2.0-flash",
+        model=model_name,
         config=types.GenerateContentConfig(
             system_instruction=kernel or "",
             temperature=0.7,
@@ -772,16 +774,25 @@ def maybe_do_social_actions(
     sub_prob = SUBSCRIBE_PROB_BY_POLICY.get(args.subscribe_policy, 0.0)
     if sub_prob > 0 and random.random() < sub_prob:
         try:
+            already = {str(s).lower(): True for s in state.get("subscribed_submolts", [])}
             seen = []
             for p in feed_items:
                 sm = (p.get("submolt") or {}).get("name") or p.get("submolt_name")
                 if sm and sm.lower() not in [s.lower() for s in seen]:
                     seen.append(sm)
             if seen:
-                sm = random.choice(seen)
-                client.subscribe_submolt(sm)
-                state["daily"]["subscribes"] += 1
-                print(f"{Fore.MAGENTA}>> SOCIAL: subscribed to /m/{sm}")
+                # Prefer unsubscribed subs; if all are already subscribed, do nothing.
+                candidates = [s for s in seen if str(s).lower() not in already]
+                if not candidates:
+                    # Nothing new to subscribe to from this feed snapshot.
+                    pass
+                else:
+                    sm = random.choice(candidates)
+                    client.subscribe_submolt(sm)
+                    # Record locally so we don't attempt again in future runs.
+                    state.setdefault("subscribed_submolts", []).append(sm)
+                    state["daily"]["subscribes"] += 1
+                    print(f"{Fore.MAGENTA}>> SOCIAL: subscribed to /m/{sm}")
         except Exception as e:
             print(f"{Fore.YELLOW}[WARN] subscribe failed: {e}")
 
@@ -904,9 +915,9 @@ def main():
     ap.add_argument("directive", nargs="?", default="Participate on Moltbook.")
     ap.add_argument("--allow-self-directive-update", action="store_true", help="Allow the agent to update its saved directive via SET_DIRECTIVE action.")
     ap.add_argument("--interval", type=int, default=5, help="Sleep interval minutes between cycles.")
-    ap.add_argument("--brain-backend", choices=["gemini","ollama"], default="gemini", help="LLM backend: gemini (default) or ollama (local).")
-    ap.add_argument("--brain-model", default="mistral", help="Model name for selected backend (e.g., ollama model name).")
-    ap.add_argument("--ollama-url", default="http://localhost:11434", help="Base URL for Ollama server when using --brain-backend ollama.")
+
+    DEFAULT_GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash").strip()
+    ap.add_argument("--gemini-model", default=DEFAULT_GEMINI_MODEL, help="Gemini model name (default: gemini-2.5-flash). Can also set GEMINI_MODEL env var.")
     ap.add_argument("--priority", choices=["replies_first", "outside_first"], default="replies_first",
                     help="Default engagement preference (planner can still decide).")
     ap.add_argument("--mode", choices=["all", "comment_only", "no_post"], default="all",
@@ -948,7 +959,7 @@ def main():
     args = ap.parse_args()
     user_directive = args.directive  # v6.6: base directive from CLI
 
-    print(f"{Fore.CYAN}=== ANALOG I: autonomy v6.7 (packaged planner loop) ===")
+    print(f"{Fore.CYAN}=== ANALOG I: autonomy v7.0.3 (packaged planner loop) ===")
 
     if not GEMINI_API_KEY or not MOLTBOOK_API_KEY:
         print(f"{Fore.RED}Fill in GEMINI_API_KEY and MOLTBOOK_API_KEY in the script.")
@@ -968,7 +979,8 @@ def main():
     kernel = load_kernel()
     knowledge = load_knowledge()
     client = MoltbookClient(MOLTBOOK_API_KEY)
-    brain_client, chat = make_chat_from_args(args, kernel)
+    brain_client = genai.Client(api_key=GEMINI_API_KEY)
+    chat = make_chat(brain_client, kernel, args.gemini_model)
 
     # derive permissions
     allow_posts = (args.mode == "all")
@@ -1055,6 +1067,21 @@ def main():
             # If planner says COMMENT but doesn't provide post_id, fill from outside candidate
             if (plan.get("action") or "").upper() == "COMMENT" and outside_candidate:
                 plan.setdefault("post_id", outside_candidate.get("id"))
+
+            # Hard guard: never attempt POST when the post window is closed.
+            # The model can still suggest POST; we override programmatically.
+            act = (plan.get("action") or "").upper().strip()
+            if act == "POST" and (not post_window_open or not allow_posts):
+                # Prefer replying if we have a target; otherwise comment; otherwise skip this cycle.
+                if reply_candidate:
+                    plan["action"] = "REPLY"
+                    plan.setdefault("post_id", reply_candidate.get("post_id"))
+                    plan.setdefault("parent_comment_id", reply_candidate.get("comment_id"))
+                elif outside_candidate:
+                    plan["action"] = "COMMENT"
+                    plan.setdefault("post_id", outside_candidate.get("id"))
+                else:
+                    raise ValueError("POST suggested while post window closed; no comment targets available")
 
             executed = execute_action(client, state, plan, flags)
             if executed:
