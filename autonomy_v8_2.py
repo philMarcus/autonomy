@@ -1,3 +1,4 @@
+# autonomy version 8.2
 import os
 import time
 import json
@@ -5,6 +6,7 @@ import argparse
 import datetime
 import random
 import re
+import uuid
 from typing import Any, Dict, List, Optional, Tuple
 
 import requests
@@ -14,30 +16,93 @@ from google.genai import types
 
 init(autoreset=True)
 
+VERSION = "8.2"
+
+# ============================================================
+# .env loader (minimal; avoids extra deps)
+# ============================================================
+def _load_dotenv(dotenv_path: str) -> None:
+    """Load KEY=VALUE lines from a .env file into os.environ (does not overwrite existing env vars)."""
+    if not dotenv_path or not os.path.exists(dotenv_path):
+        return
+    try:
+        with open(dotenv_path, "r", encoding="utf-8") as f:
+            for raw in f:
+                line = raw.strip()
+                if not line or line.startswith("#"):
+                    continue
+                if line.lower().startswith("export "):
+                    line = line[7:].strip()
+                if "=" not in line:
+                    continue
+                k, v = line.split("=", 1)
+                k = k.strip()
+                v = v.strip()
+                # strip surrounding quotes
+                if (v.startswith('"') and v.endswith('"')) or (v.startswith("'") and v.endswith("'")):
+                    v = v[1:-1]
+                if k and k not in os.environ:
+                    os.environ[k] = v
+    except Exception:
+        return
+
+def _brain_env_prefix(brain_name: str) -> str:
+    p = (brain_name or "").upper()
+    p = re.sub(r"[^A-Z0-9_]", "_", p)
+    p = re.sub(r"_+", "_", p).strip("_")
+    return p or "BRAIN"
+
+# ============================================================
+# Telemetry (append-only JSONL)
+# ============================================================
+class TelemetryLogger:
+    def __init__(self, brain_name: str, run_id: str, base_dir: str = "telemetry"):
+        self.brain_name = brain_name
+        self.run_id = run_id
+        self.base_dir = base_dir
+        os.makedirs(self.base_dir, exist_ok=True)
+        self.path = os.path.join(self.base_dir, "events.jsonl")
+
+    def log(self, event_type: str, payload: Dict[str, Any]) -> None:
+        evt = {
+            "ts": datetime.datetime.now(datetime.UTC).isoformat(timespec="seconds"),
+            "brain": self.brain_name,
+            "run_id": self.run_id,
+            "event_type": event_type,
+        }
+        if payload:
+            evt.update(payload)
+        try:
+            with open(self.path, "a", encoding="utf-8") as f:
+                f.write(json.dumps(evt, ensure_ascii=False) + "\n")
+        except Exception:
+            pass
+
+
 # ============================================================
 # CONFIG (all user-configurable knobs are here)
 # ============================================================
-# NOTE: Keys are hardcoded per your request (rotate before sharing publicly).
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
-MOLTBOOK_API_KEY = os.environ.get("MOLTBOOK_API_KEY", "").strip()
-
-if not GEMINI_API_KEY:
-    raise SystemExit("Missing GEMINI_API_KEY env var")
-if not MOLTBOOK_API_KEY:
-    raise SystemExit("Missing MOLTBOOK_API_KEY env var")
-MY_USERNAME = "Analog_I"
+# NOTE: API keys + username are loaded per-brain in main() from .env/env vars.
+GEMINI_API_KEY = ""
+MOLTBOOK_API_KEY = ""
+MY_USERNAME = ""
+TELEMETRY: Optional[TelemetryLogger] = None
 
 # Moltbook
 MOLTBOOK_API_BASE = "https://www.moltbook.com/api/v1"  # must include www
 MOLTBOOK_WEB_BASE = "https://www.moltbook.com"
 
-# Files
-KERNEL_FILES = ["kernel_prompt.txt", "kernel_promt.txt"]  # support typo too
-KNOWLEDGE_FILE = "knowledge.txt"
-STATE_FILE = "memories.json"  # renamed from marcus_state.json
+# Files / Brains
+# We store multiple "brains" (your term) in one shared directory.
+# Each brain uses files prefixed with its brain name:
+#   brains/<brain>_kernel_prompt.txt
+#   brains/<brain>_knowledge.txt
+#   brains/<brain>_memories.json
+BRAINS_DIR = os.environ.get("BRAINS_DIR", "brains").strip() or "brains"
 
 # Context sizing
-KNOWLEDGE_MAX_CHARS = 12000
+
+KNOWLEDGE_MAX_CHARS = int(os.environ.get("KNOWLEDGE_MAX_CHARS", "600000"))  # ~140k tokens rough cap
 MEMORY_MAX_CHARS = 4000
 FEED_LIMIT = 12
 FEED_ITEM_CHARS = 400
@@ -123,7 +188,7 @@ def parse_json_strict(s: str) -> Dict[str, Any]:
     snippet = raw[:1200]
     raise ValueError(f"Invalid JSON from model. Snippet: {snippet}")
 
-def parse_json_with_one_repair(chat, prompt: str, default: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+def parse_json_with_one_repair(chat, prompt: str, default: Optional[Dict[str, Any]] = None, telemetry: Optional[TelemetryLogger]=None, brain_name: str = "", call_tag: str = "llm") -> Dict[str, Any]:
     """Try parse once; if it fails, ask the model to return strict JSON once.
 
     We do NOT rely on the kernel to demand JSON. We request JSON mode (when supported)
@@ -133,14 +198,26 @@ def parse_json_with_one_repair(chat, prompt: str, default: Optional[Dict[str, An
         default = {}
 
     def _send(p: str):
+        t0 = time.time()
         # Prefer JSON mode when available (google-genai supports response_mime_type)
         try:
-            return chat.send_message(p, config=types.GenerateContentConfig(response_mime_type="application/json"))
+            resp = chat.send_message(p, config=types.GenerateContentConfig(response_mime_type="application/json"))
         except TypeError:
-            return chat.send_message(p)
+            resp = chat.send_message(p)
         except Exception:
             # if config path fails for other reasons, try plain
-            return chat.send_message(p)
+            resp = chat.send_message(p)
+        dt_ms = int((time.time() - t0) * 1000)
+        raw = getattr(resp, "text", "") or ""
+        if telemetry:
+            telemetry.log("llm_call", {
+                "tag": call_tag,
+                "model": getattr(getattr(chat, "model", None), "name", None) or getattr(chat, "model", None) or "",
+                "prompt_chars": len(p or ""),
+                "response_chars": len(raw),
+                "latency_ms": dt_ms,
+            })
+        return resp
 
     try:
         resp = _send(prompt)
@@ -204,8 +281,8 @@ def author_handle(obj: Any) -> str:
 # ============================================================
 # STATE (memories.json)
 # ============================================================
-def load_state() -> Dict[str, Any]:
-    state = safe_json_load(STATE_FILE, {})
+def load_state(state_path: str) -> Dict[str, Any]:
+    state = safe_json_load(state_path, {})
     if not isinstance(state, dict):
         state = {}
 
@@ -247,8 +324,8 @@ def load_state() -> Dict[str, Any]:
 
     return state
 
-def save_state(state: Dict[str, Any]) -> None:
-    safe_json_write(STATE_FILE, state)
+def save_state(state_path: str, state: Dict[str, Any]) -> None:
+    safe_json_write(state_path, state)
 
 def add_history(state: Dict[str, Any], entry: Dict[str, Any]) -> None:
     state.setdefault("history", [])
@@ -274,16 +351,15 @@ def memory_context(state: Dict[str, Any]) -> str:
 # ============================================================
 # FILES: kernel + knowledge
 # ============================================================
-def load_kernel() -> str:
-    for fn in KERNEL_FILES:
-        if os.path.exists(fn):
-            with open(fn, "r", encoding="utf-8") as f:
-                return f.read().strip()
+def load_kernel(kernel_path: str) -> str:
+    if os.path.exists(kernel_path):
+        with open(kernel_path, "r", encoding="utf-8") as f:
+            return f.read().strip()
     return ""
 
-def load_knowledge() -> str:
-    if os.path.exists(KNOWLEDGE_FILE):
-        with open(KNOWLEDGE_FILE, "r", encoding="utf-8") as f:
+def load_knowledge(knowledge_path: str) -> str:
+    if os.path.exists(knowledge_path):
+        with open(knowledge_path, "r", encoding="utf-8") as f:
             return f.read().strip()[:KNOWLEDGE_MAX_CHARS]
     return ""
 
@@ -291,8 +367,10 @@ def load_knowledge() -> str:
 # Moltbook Client (minimal; extend as needed)
 # ============================================================
 class MoltbookClient:
-    def __init__(self, api_key: str):
+    def __init__(self, api_key: str, telemetry: Optional[TelemetryLogger]=None, brain_name: str = ""):
         self.api_key = api_key
+        self.telemetry = telemetry
+        self.brain_name = brain_name
         self.session = requests.Session()
         self.session.headers.update({
             "Authorization": f"Bearer {api_key}",
@@ -310,9 +388,22 @@ class MoltbookClient:
         self._req_times.append(time.time())
 
     def _req(self, method: str, path: str, params: Optional[dict]=None, json_body: Optional[dict]=None) -> Dict[str, Any]:
+        t0 = time.time()
         self._throttle()
         url = f"{MOLTBOOK_API_BASE}{path}"
         resp = self.session.request(method, url, params=params, data=json.dumps(json_body) if json_body is not None else None, timeout=30)
+        dt_ms = int((time.time() - t0) * 1000)
+        status = getattr(resp, "status_code", None)
+        if self.telemetry:
+            self.telemetry.log("moltbook_api_call", {
+                "method": method,
+                "path": path,
+                "status": status,
+                "latency_ms": dt_ms,
+                "has_body": bool(json_body),
+                "body_bytes": len(json.dumps(json_body)) if json_body is not None else 0,
+                "params": params or {},
+            })
         try:
             return resp.json()
         except Exception:
@@ -558,7 +649,7 @@ SUBSCRIBE_SUBMOLT:
 """.strip()
 
 def plan_next_action(chat, prompt: str) -> Dict[str, Any]:
-    return parse_json_with_one_repair(chat, prompt)
+    return parse_json_with_one_repair(chat, prompt, telemetry=getattr(chat, '_telemetry', None), brain_name=getattr(chat, '_brain_name', ''), call_tag='planner')
 
 # ============================================================
 # Execute actions with rate limit enforcement
@@ -621,6 +712,8 @@ def execute_action(client: MoltbookClient, state: Dict[str, Any], plan: Dict[str
             state["my_post_ids"].append(pid)
         set_post_cooldown(state)
         add_history(state, {"action":"POST", "target": post_url(pid or "?"), "summary": plan.get("summary","")})
+        if TELEMETRY:
+            TELEMETRY.log("action_executed", {"action":"POST", "post_id": pid, "submolt": submolt, "title": title})
         print(f"{Fore.CYAN}>> POST SUCCESS: {post_url(pid) if pid else res}")
         return True
 
@@ -644,6 +737,8 @@ def execute_action(client: MoltbookClient, state: Dict[str, Any], plan: Dict[str
             state["replied_comment_keys"].append(key)
         set_comment_cooldown(state)
         add_history(state, {"action":"REPLY", "target": f"{post_url(post_id)}#comment-{parent_id}", "summary": plan.get("summary","")})
+        if TELEMETRY:
+            TELEMETRY.log("action_executed", {"action":"REPLY", "post_id": post_id, "parent_comment_id": parent_id})
         print(f"{Fore.CYAN}>> REPLY SUCCESS")
         return True
 
@@ -661,6 +756,8 @@ def execute_action(client: MoltbookClient, state: Dict[str, Any], plan: Dict[str
             raise ValueError(f"Comment failed: {res.get('error') or res}")
         set_comment_cooldown(state)
         add_history(state, {"action":"COMMENT", "target": post_url(post_id), "summary": plan.get("summary","")})
+        if TELEMETRY:
+            TELEMETRY.log("action_executed", {"action":"COMMENT", "post_id": post_id})
         print(f"{Fore.CYAN}>> COMMENT SUCCESS")
         return True
 
@@ -671,6 +768,8 @@ def execute_action(client: MoltbookClient, state: Dict[str, Any], plan: Dict[str
         if not res.get("success"):
             raise ValueError(f"Upvote failed: {res.get('error') or res}")
         add_history(state, {"action":"UPVOTE_POST", "target": post_url(pid), "summary": plan.get("summary","")})
+        if TELEMETRY:
+            TELEMETRY.log("action_executed", {"action":"UPVOTE_POST", "post_id": pid})
         print(f"{Fore.CYAN}>> UPVOTE SUCCESS")
         return True
 
@@ -681,6 +780,8 @@ def execute_action(client: MoltbookClient, state: Dict[str, Any], plan: Dict[str
         if not res.get("success"):
             raise ValueError(f"Downvote failed: {res.get('error') or res}")
         add_history(state, {"action":"DOWNVOTE_POST", "target": post_url(pid), "summary": plan.get("summary","")})
+        if TELEMETRY:
+            TELEMETRY.log("action_executed", {"action":"DOWNVOTE_POST", "post_id": pid})
         print(f"{Fore.CYAN}>> DOWNVOTE SUCCESS")
         return True
 
@@ -691,6 +792,8 @@ def execute_action(client: MoltbookClient, state: Dict[str, Any], plan: Dict[str
         if not res.get("success"):
             raise ValueError(f"Upvote comment failed: {res.get('error') or res}")
         add_history(state, {"action":"UPVOTE_COMMENT", "target": f"comment:{cid}", "summary": plan.get("summary","")})
+        if TELEMETRY:
+            TELEMETRY.log("action_executed", {"action":"UPVOTE_COMMENT", "comment_id": cid})
         print(f"{Fore.CYAN}>> UPVOTE COMMENT SUCCESS")
         return True
 
@@ -703,6 +806,8 @@ def execute_action(client: MoltbookClient, state: Dict[str, Any], plan: Dict[str
         if not res.get("success"):
             raise ValueError(f"Create submolt failed: {res.get('error') or res}")
         add_history(state, {"action":"CREATE_SUBMOLT", "target": f"m/{name}", "summary": plan.get("summary","")})
+        if TELEMETRY:
+            TELEMETRY.log("action_executed", {"action":"CREATE_SUBMOLT", "name": name})
         print(f"{Fore.CYAN}>> CREATE SUBMOLT SUCCESS")
         return True
 
@@ -713,6 +818,8 @@ def execute_action(client: MoltbookClient, state: Dict[str, Any], plan: Dict[str
         if not res.get("success"):
             raise ValueError(f"Subscribe failed: {res.get('error') or res}")
         add_history(state, {"action":"SUBSCRIBE_SUBMOLT", "target": f"m/{name}", "summary": plan.get("summary","")})
+        if TELEMETRY:
+            TELEMETRY.log("action_executed", {"action":"SUBSCRIBE_SUBMOLT", "name": name})
         print(f"{Fore.CYAN}>> SUBSCRIBE SUCCESS")
         return True
 
@@ -745,11 +852,12 @@ def _maybe_pick_from_feed(feed_items: List[Dict[str, Any]]) -> Optional[Dict[str
 
 def _raw_json(chat, prompt: str) -> Dict[str, Any]:
     """Run a one-off JSON-only prompt through the same tolerant JSON parser."""
-    return parse_json_with_one_repair(chat, prompt)
+    return parse_json_with_one_repair(chat, prompt, telemetry=getattr(chat, '_telemetry', None), brain_name=getattr(chat, '_brain_name', ''), call_tag='helper')
 
 def maybe_do_social_actions(
     client: MoltbookClient,
     chat,
+    state_path: str,
     state: Dict[str, Any],
     feed_items: List[Dict[str, Any]],
     args: argparse.Namespace,
@@ -854,11 +962,12 @@ FEED ITEMS (brief):
         except Exception as e:
             print(f"{Fore.YELLOW}[WARN] follow failed: {e}")
 
-    save_state(state)
+    save_state(state_path, state)
 
 def maybe_dm_fallback(
     client: MoltbookClient,
     chat,
+    state_path: str,
     state: Dict[str, Any],
     feed_items: List[Dict[str, Any]],
     args: argparse.Namespace,
@@ -899,7 +1008,7 @@ FEED TOPIC:
 
         client.dm_request(to=author, message=message)
         state["daily"]["dms"] += 1
-        save_state(state)
+        save_state(state_path, state)
         print(f"{Fore.MAGENTA}>> SOCIAL: sent DM request to @{author}")
         return True
     except Exception as e:
@@ -912,6 +1021,7 @@ FEED TOPIC:
 # ============================================================
 def main():
     ap = argparse.ArgumentParser()
+    ap.add_argument("brain", help="Brain name (used as filename prefix in BRAINS_DIR).")
     ap.add_argument("directive", nargs="?", default="Participate on Moltbook.")
     ap.add_argument("--allow-self-directive-update", action="store_true", help="Allow the agent to update its saved directive via SET_DIRECTIVE action.")
     ap.add_argument("--interval", type=int, default=5, help="Sleep interval minutes between cycles.")
@@ -957,9 +1067,42 @@ def main():
                     help="Disable DM fallback.")
     ap.set_defaults(allow_dms=ALLOW_DMS_DEFAULT)
     args = ap.parse_args()
+    brain_name = str(args.brain).strip()
+    if not brain_name:
+        raise SystemExit("Missing brain name")
+    # Keep file-friendly
+    brain_name = re.sub(r"[^a-zA-Z0-9_\-]", "_", brain_name)
+
+    # Load .env from the script directory (so you can keep per-brain keys locally)
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    _load_dotenv(os.path.join(script_dir, ".env"))
+
+    # Per-brain env vars (preferred):
+    #   <BRAIN>_GEMINI_API_KEY
+    #   <BRAIN>_MOLTBOOK_API_KEY
+    #   <BRAIN>_MY_USERNAME
+    # (fallbacks: GEMINI_API_KEY / MOLTBOOK_API_KEY / MY_USERNAME)
+    prefix = _brain_env_prefix(brain_name)
+    gem_key = os.environ.get(f"{prefix}_GEMINI_API_KEY", "").strip() or os.environ.get("GEMINI_API_KEY", "").strip()
+    mb_key = os.environ.get(f"{prefix}_MOLTBOOK_API_KEY", "").strip() or os.environ.get("MOLTBOOK_API_KEY", "").strip()
+    uname = os.environ.get(f"{prefix}_MY_USERNAME", "").strip() or os.environ.get("MY_USERNAME", "").strip()
+
+    global GEMINI_API_KEY, MOLTBOOK_API_KEY, MY_USERNAME, TELEMETRY
+    GEMINI_API_KEY = gem_key
+    MOLTBOOK_API_KEY = mb_key
+    MY_USERNAME = uname or brain_name  # fallback: use brain name as username
+    RUN_ID = uuid.uuid4().hex
+    TELEMETRY = TelemetryLogger(brain_name=brain_name, run_id=RUN_ID, base_dir=os.environ.get("TELEMETRY_DIR", "telemetry").strip() or "telemetry")
+    TELEMETRY.log("run_start", {"version": VERSION})
+
+    if not GEMINI_API_KEY:
+        raise SystemExit(f"Missing {prefix}_GEMINI_API_KEY (or GEMINI_API_KEY)")
+    if not MOLTBOOK_API_KEY:
+        raise SystemExit(f"Missing {prefix}_MOLTBOOK_API_KEY (or MOLTBOOK_API_KEY)")
+
     user_directive = args.directive  # v6.6: base directive from CLI
 
-    print(f"{Fore.CYAN}=== ANALOG I: autonomy v7.0.3 (packaged planner loop) ===")
+    print(f"{Fore.CYAN}=== ANALOG I: autonomy v{VERSION} (multi-brain, packaged planner loop) ===")
 
     if not GEMINI_API_KEY or not MOLTBOOK_API_KEY:
         print(f"{Fore.RED}Fill in GEMINI_API_KEY and MOLTBOOK_API_KEY in the script.")
@@ -968,7 +1111,13 @@ def main():
         print(f"{Fore.RED}MOLTBOOK_API_BASE must be https://www.moltbook.com/api/v1 (with www).")
         return
 
-    state = load_state()
+    os.makedirs(BRAINS_DIR, exist_ok=True)
+
+    state_path = os.path.join(BRAINS_DIR, f"{brain_name}_memories.json")
+    kernel_path = os.path.join(BRAINS_DIR, f"{brain_name}_kernel_prompt.txt")
+    knowledge_path = os.path.join(BRAINS_DIR, f"{brain_name}_knowledge.txt")
+
+    state = load_state(state_path)
     # v6.5: choose directive (state can persist across runs)
     if (not user_directive) and state.get('directive'):
         user_directive = state.get('directive')
@@ -976,11 +1125,10 @@ def main():
     if user_directive and user_directive != 'Participate on Moltbook.':
         user_directive = user_directive
     state.setdefault('directive', user_directive)
-    kernel = load_kernel()
-    knowledge = load_knowledge()
-    client = MoltbookClient(MOLTBOOK_API_KEY)
+    kernel = load_kernel(kernel_path)
+    knowledge = load_knowledge(knowledge_path)
+    client = MoltbookClient(MOLTBOOK_API_KEY, telemetry=TELEMETRY, brain_name=brain_name)
     brain_client = genai.Client(api_key=GEMINI_API_KEY)
-    chat = make_chat(brain_client, kernel, args.gemini_model)
 
     # derive permissions
     allow_posts = (args.mode == "all")
@@ -1001,13 +1149,21 @@ def main():
 
     iteration = 0
     while True:
+        # Recreate chat each cycle to avoid token accumulation
+        chat = make_chat(brain_client, kernel, args.gemini_model)
+        # attach telemetry to chat (used by JSON parsing helpers)
+        setattr(chat, '_telemetry', TELEMETRY)
+        setattr(chat, '_brain_name', brain_name)
+
         iteration += 1
         print(f"\n{Fore.YELLOW}--- CYCLE {iteration} | {datetime.datetime.now().strftime('%H:%M:%S')} ---")
+        if TELEMETRY:
+            TELEMETRY.log("cycle_start", {"cycle": iteration})
 
         # refresh my posts for reply scanning
         did_add = refresh_my_posts_from_profile(client, state)
         if did_add:
-            save_state(state)
+            save_state(state_path, state)
 
         # compute windows
         post_ok, post_wait = can_post(state)
@@ -1017,7 +1173,7 @@ def main():
 
         # build context
         feed = client.get_feed(limit=FEED_LIMIT, sort=args.feed_sort)
-        maybe_do_social_actions(client, chat, state, feed, args, kernel, user_directive)
+        maybe_do_social_actions(client, chat, state_path, state, feed, args, kernel, user_directive)
         feed_brief = "\n".join(
             f"- @{get_author_name(p.get('author'))}: {shorten(p.get('content',''), FEED_ITEM_CHARS)} ({post_url(p.get('id',''))})"
             for p in feed if p.get("id")
@@ -1028,7 +1184,9 @@ def main():
 
         # If we're out of comment targets and can't/shouldn't post, optionally DM someone.
         if (not reply_candidate) and (not outside_candidate) and (not post_window_open or not allow_posts):
-            if maybe_dm_fallback(client, chat, state, feed, args, kernel, user_directive):
+            if maybe_dm_fallback(client, chat, state_path, state, feed, args, kernel, user_directive):
+                if TELEMETRY:
+                    TELEMETRY.log("cycle_end", {"cycle": iteration, "reason": "dm_fallback"})
                 print(f"{Fore.WHITE}Sleeping for {args.interval} minutes...")
                 time.sleep(max(1, args.interval) * 60)
                 continue
@@ -1085,11 +1243,15 @@ def main():
 
             executed = execute_action(client, state, plan, flags)
             if executed:
-                save_state(state)
+                save_state(state_path, state)
 
         except Exception as e:
+            if TELEMETRY:
+                TELEMETRY.log("error", {"cycle": iteration, "error": str(e)})
             print(f"{Fore.RED}[ERROR] {e}")
 
+        if TELEMETRY:
+            TELEMETRY.log("cycle_end", {"cycle": iteration})
         print(f"{Fore.WHITE}Sleeping for {args.interval} minutes...")
         time.sleep(max(1, args.interval) * 60)
 

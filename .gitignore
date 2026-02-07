@@ -2,3 +2,13 @@ __pycache__/
 *.pyc
 *.log
 .env
+
+/telemetry
+
+ANALOG_I_kernel_prompt.txt
+ANALOG_I_knowledge.txt
+ANALOG_I_memories.json
+
+PET_ROBOT_kernel_prompt.txt
+PET_ROBOT_knowledge.txt
+PET_ROBOT_memories.json
