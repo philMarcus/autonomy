@@ -3,6 +3,8 @@ __pycache__/
 *.log
 .env
 
+prime directives.txt
+
 /telemetry
 /brains
 /backup
