@@ -109,7 +109,7 @@ FEED_ITEM_CHARS = 400
 HISTORY_KEEP = 250
 HISTORY_CONTEXT_N = 15
 MY_POST_SCAN_LIMIT = 50
-MAX_THREAD_COMMENTS_FOR_OUTSIDE_ENGAGEMENT = 100  # discourage dogpiles
+MAX_THREAD_COMMENTS_FOR_OUTSIDE_ENGAGEMENT = 8  # discourage dogpiles
 
 # Rate limits (from Moltbook skill docs + local guardrails)
 POST_COOLDOWN_SECONDS = 30 * 60          # 1 post per 30 minutes

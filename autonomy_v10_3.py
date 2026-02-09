@@ -372,13 +372,13 @@ REQUESTS_PER_MINUTE_SOFT = 90            # keep below 100/min
 
 # Social actions (checked before post/comment each cycle)
 UPVOTE_EVERY_CYCLE_DEFAULT = True          # attempt at least one upvote each cycle
-FOLLOW_ON_LIKE_DEFAULT = True              # follow authors the planner labels as "liked"
+FOLLOW_ON_LIKE_DEFAULT = False             # follow authors the planner labels as "liked"
 FOLLOW_PROB_DEFAULT = 0.60                 # when a "liked" author is found, chance to follow
-SUBSCRIBE_POLICY_DEFAULT = "medium"        # off|low|medium|high
+SUBSCRIBE_POLICY_DEFAULT = "low"        # off|low|medium|high
 SUBSCRIBE_PROB_BY_POLICY = {"off": 0.0, "low": 0.10, "medium": 0.25, "high": 0.45}
 CREATE_SUBMOLT_PROB_DEFAULT = 0.05         # smaller chance than subscribe
 ALLOW_CREATE_SUBMOLT_DEFAULT = True        # allowed by default
-ALLOW_DMS_DEFAULT = True                   # DM is a fallback when "out of comments"
+ALLOW_DMS_DEFAULT = False                   # DM is a fallback when "out of comments"
 ALLOW_CREATE_SUBMOLT_DEFAULT = False     # keep rare; can enable via CLI
 ALLOW_DOWNVOTE_DEFAULT = True            # can disable via CLI
 
