@@ -4,7 +4,10 @@ import os
 import re
 import json
 import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .telemetry import TelemetryLogger
 
 from .config import (
     KNOWLEDGE_MAX_CHARS, MEMORY_MAX_CHARS, HISTORY_KEEP, HISTORY_CONTEXT_N,
@@ -15,6 +18,37 @@ from .config import (
 # ============================================================
 # JSON parsing / repair
 # ============================================================
+def _repair_json_newlines(s: str) -> str:
+    """Fix unescaped newlines/tabs inside JSON string values (common LLM mistake)."""
+    result = []
+    in_str = False
+    esc = False
+    for ch in s:
+        if in_str:
+            if esc:
+                esc = False
+                result.append(ch)
+            elif ch == '\\':
+                esc = True
+                result.append(ch)
+            elif ch == '"':
+                in_str = False
+                result.append(ch)
+            elif ch == '\n':
+                result.append('\\n')
+            elif ch == '\r':
+                result.append('\\r')
+            elif ch == '\t':
+                result.append('\\t')
+            else:
+                result.append(ch)
+        else:
+            if ch == '"':
+                in_str = True
+            result.append(ch)
+    return ''.join(result)
+
+
 def extract_first_json_object(text: str) -> Optional[str]:
     s = (text or "").strip()
     if s.startswith("```"):
@@ -62,6 +96,11 @@ def parse_json_strict(s: str) -> Dict[str, Any]:
     if candidate:
         try:
             return json.loads(candidate)
+        except Exception:
+            pass
+        # Fallback: fix unescaped newlines inside JSON string values
+        try:
+            return json.loads(_repair_json_newlines(candidate))
         except Exception as e2:
             snippet = candidate[:1200]
             raise ValueError(f"Invalid JSON from model: {e2}. Snippet: {snippet}")
@@ -95,6 +134,77 @@ def safe_json_write(path: str, obj: Any) -> None:
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(obj, f, indent=2)
     os.replace(tmp, path)
+
+
+def safe_text_write(path: str, text: str) -> None:
+    """Atomically write text to file using temp file pattern."""
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        f.write(text)
+    os.replace(tmp, path)
+
+
+def backup_kernel(kernel_path: str) -> bool:
+    """Create backup of current kernel before overwriting.
+
+    Returns:
+        True if backup created successfully, False if source doesn't exist.
+    """
+    if not os.path.exists(kernel_path):
+        return False
+
+    backup_path = kernel_path.replace("_kernel_prompt.txt", "_kernel_prompt.backup.txt")
+    if backup_path == kernel_path:  # Fallback if pattern doesn't match
+        backup_path = kernel_path + ".backup"
+
+    try:
+        with open(kernel_path, "r", encoding="utf-8") as f:
+            current = f.read()
+        safe_text_write(backup_path, current)
+        return True
+    except Exception:
+        return False
+
+
+def update_kernel_file(kernel_path: str, new_kernel: str, telemetry: Optional['TelemetryLogger'] = None) -> Dict[str, Any]:
+    """Validate and write new kernel to disk with backup.
+
+    Args:
+        kernel_path: Path to kernel file
+        new_kernel: New kernel text to write
+        telemetry: Optional telemetry logger
+
+    Returns:
+        Dict with keys: success (bool), error (str), backup_created (bool)
+    """
+    # Validation: length check
+    text = (new_kernel or "").strip()
+    if len(text) < 50:
+        return {"success": False, "error": "Kernel too short (min 50 chars)", "backup_created": False}
+    if len(text) > 5000:
+        return {"success": False, "error": "Kernel too long (max 5000 chars)", "backup_created": False}
+
+    # Create backup
+    backup_created = backup_kernel(kernel_path)
+
+    # Write new kernel
+    try:
+        safe_text_write(kernel_path, text)
+        if telemetry:
+            telemetry.log("kernel_updated", {
+                "kernel_path": kernel_path,
+                "new_length": len(text),
+                "backup_created": backup_created,
+            })
+        return {"success": True, "error": None, "backup_created": backup_created}
+    except Exception as e:
+        if telemetry:
+            telemetry.log("kernel_update_failed", {
+                "kernel_path": kernel_path,
+                "error": str(e),
+                "backup_created": backup_created,
+            })
+        return {"success": False, "error": str(e), "backup_created": backup_created}
 
 
 def shorten(s: str, max_chars: int) -> str:

@@ -1,32 +1,38 @@
-# dashboard_v1_1.py
-# Streamlit dashboard for Autonomy telemetry (DuckDB views over Parquet)
+# dashboard_v1_2.py
+# Streamlit dashboard: Telemetry tab (DuckDB) + Dry-Run Viewer (.txt)
 #
-# Prereq (run once in DuckDB CLI from project root):
+# Prereq for Telemetry tab (run once in DuckDB CLI from project root):
 #   .read sql/views.sql
 #
 # Run:
-#   streamlit run dashboard_v1_1.py
-#
-# Notes:
-# - Cycles are counted by (run_id, cycle_num) because cycle_num resets each run.
-# - Uses cycle_summary.cycle_dt (DATE) for cycle filtering (no dt() function in DuckDB).
-# - Robust to NULL run_id rows in cycle_summary (will label as "no_run_id").
+#   streamlit run dashboard_v1_2.py
 
 from __future__ import annotations
 
 import os
-from typing import Tuple
+import re
+import glob
+from dataclasses import dataclass, field
+from typing import List, Tuple
 
-import duckdb
-import pandas as pd
 import streamlit as st
-import matplotlib.pyplot as plt
 
 DB_PATH = "warehouse/telemetry.duckdb"
+BRAINS_DIR = os.environ.get("BRAINS_DIR", "brains")
+
+
+# ============================================================
+# DuckDB helpers (for Telemetry tab — lazy imports)
+# ============================================================
+def _get_duckdb():
+    """Lazy import duckdb — only needed for Telemetry tab."""
+    import duckdb
+    return duckdb
 
 
 @st.cache_resource
-def get_con() -> duckdb.DuckDBPyConnection:
+def get_con():
+    duckdb = _get_duckdb()
     if not os.path.exists(DB_PATH):
         raise FileNotFoundError(
             f"Missing {DB_PATH}. Create it and run `.read sql/views.sql` in DuckDB first."
@@ -34,7 +40,8 @@ def get_con() -> duckdb.DuckDBPyConnection:
     return duckdb.connect(DB_PATH)
 
 
-def qdf(sql: str, params: Tuple | None = None) -> pd.DataFrame:
+def qdf(sql: str, params: Tuple | None = None):
+    import pandas as pd
     con = get_con()
     if params is None:
         return con.execute(sql).df()
@@ -53,11 +60,17 @@ def ensure_views_exist() -> None:
         )
 
 
-def main():
-    st.set_page_config(page_title="Autonomy Dashboard v1.1", layout="wide")
-    st.title("Autonomy Dashboard v1.1")
+# ============================================================
+# Telemetry tab
+# ============================================================
+def render_telemetry_tab():
+    import matplotlib.pyplot as plt
 
-    ensure_views_exist()
+    try:
+        ensure_views_exist()
+    except (FileNotFoundError, RuntimeError) as e:
+        st.warning(str(e))
+        return
 
     meta = qdf("SELECT min(dt) AS min_dt, max(dt) AS max_dt FROM events;")
     min_dt = meta.loc[0, "min_dt"]
@@ -65,7 +78,7 @@ def main():
 
     if min_dt is None or max_dt is None:
         st.warning("No data found in events view.")
-        st.stop()
+        return
 
     brains_df = qdf(
         """
@@ -77,7 +90,7 @@ def main():
     )
     brains = ["(all)"] + brains_df["brain"].tolist()
 
-    st.sidebar.header("Filters")
+    st.sidebar.header("Telemetry Filters")
 
     start_dt, end_dt = st.sidebar.date_input(
         "Date range (dt)",
@@ -310,7 +323,7 @@ def main():
       response_chars
     """
 
-    cycles = qdf(
+    cycles_df = qdf(
         f"""
         SELECT {cycles_select}
         FROM cycle_summary
@@ -321,7 +334,7 @@ def main():
         """,
         (start_dt, end_dt, brain) if brain != "(all)" else (start_dt, end_dt),
     )
-    st.dataframe(cycles, use_container_width=True, hide_index=True)
+    st.dataframe(cycles_df, use_container_width=True, hide_index=True)
 
     # ---- Recent errors
     st.subheader("Recent errors")
@@ -366,7 +379,154 @@ def main():
     st.dataframe(recent, use_container_width=True, hide_index=True)
 
     if show_payload and len(recent) > 0:
-        st.caption("Tip: payload_json can be large—toggle it off for faster rendering.")
+        st.caption("Tip: payload_json can be large — toggle it off for faster rendering.")
+
+
+# ============================================================
+# Dry-Run .txt Parsing
+# ============================================================
+@dataclass
+class CycleSection:
+    name: str       # e.g. "SOCIAL ACTIONS", "FEED", "PLANNER OUTPUT"
+    content: str    # raw text content
+
+@dataclass
+class Cycle:
+    number: int
+    timestamp: str
+    sections: List[CycleSection] = field(default_factory=list)
+
+
+_CYCLE_RE = re.compile(r"={64}\nCYCLE (\d+) \| (.+?)\n={64}")
+_SECTION_RE = re.compile(r"^--- (.+?) ---$", re.MULTILINE)
+
+
+def parse_dryrun_txt(text: str) -> List[Cycle]:
+    cycles: List[Cycle] = []
+    parts = _CYCLE_RE.split(text)
+    # parts layout: [pre, num, ts, body, num, ts, body, ...]
+    i = 1
+    while i + 2 < len(parts):
+        cycle_num = int(parts[i])
+        timestamp = parts[i + 1].strip()
+        body = parts[i + 2]
+
+        sections: List[CycleSection] = []
+        sec_parts = _SECTION_RE.split(body)
+        # sec_parts: [pre, name, content, name, content, ...]
+        j = 1
+        while j + 1 < len(sec_parts):
+            sec_name = sec_parts[j].strip()
+            sec_content = sec_parts[j + 1].strip()
+            if sec_content:
+                sections.append(CycleSection(name=sec_name, content=sec_content))
+            j += 2
+
+        cycles.append(Cycle(number=cycle_num, timestamp=timestamp, sections=sections))
+        i += 3
+
+    return cycles
+
+
+# ============================================================
+# Dry-Run Viewer tab
+# ============================================================
+def render_dryrun_tab():
+    txt_files = sorted(glob.glob(os.path.join(BRAINS_DIR, "*_dryrun.txt")))
+    if not txt_files:
+        st.info("No dry-run .txt logs found. Run with `--dry-run` to generate them.")
+        return
+
+    brain_names = [os.path.basename(f).replace("_dryrun.txt", "") for f in txt_files]
+    selected_idx = st.sidebar.selectbox(
+        "Brain (dry-run)", range(len(brain_names)), format_func=lambda i: brain_names[i]
+    )
+    selected_file = txt_files[selected_idx]
+
+    # Read and parse
+    with open(selected_file, encoding="utf-8") as f:
+        raw_text = f.read()
+
+    cycles = parse_dryrun_txt(raw_text)
+
+    if not cycles:
+        st.info("Log file is empty or has no cycles yet.")
+        return
+
+    # KPI metrics
+    total_cycles = len(cycles)
+    total_social = sum(1 for c in cycles for s in c.sections if s.name == "SOCIAL ACTIONS")
+    total_planner = sum(1 for c in cycles for s in c.sections if s.name == "PLANNER OUTPUT")
+    total_kernel = sum(1 for c in cycles for s in c.sections if s.name == "KERNEL UPDATE PROPOSAL")
+    total_feed = sum(1 for c in cycles for s in c.sections if s.name == "FEED")
+
+    c1, c2, c3, c4, c5 = st.columns(5)
+    c1.metric("Cycles", total_cycles)
+    c2.metric("Feeds", total_feed)
+    c3.metric("Social sections", total_social)
+    c4.metric("Planner outputs", total_planner)
+    c5.metric("Kernel proposals", total_kernel)
+
+    st.divider()
+
+    # Sidebar filters
+    cycle_nums = [c.number for c in cycles]
+    min_cycle, max_cycle = min(cycle_nums), max(cycle_nums)
+
+    range_start, range_end = st.sidebar.slider(
+        "Cycle range",
+        min_value=min_cycle,
+        max_value=max_cycle,
+        value=(max(min_cycle, max_cycle - 19), max_cycle),
+    )
+
+    all_section_names = sorted(set(s.name for c in cycles for s in c.sections))
+    show_sections = st.sidebar.multiselect(
+        "Show sections", all_section_names, default=all_section_names
+    )
+
+    filtered = [c for c in cycles if range_start <= c.number <= range_end]
+
+    # Display cycles (newest first)
+    for cycle in reversed(filtered):
+        visible_sections = [s for s in cycle.sections if s.name in show_sections]
+        if not visible_sections:
+            continue
+
+        label = f"Cycle {cycle.number} | {cycle.timestamp}"
+        # Show brief preview of action if available
+        for s in cycle.sections:
+            if s.name == "PLANNER OUTPUT":
+                first_line = s.content.split("\n")[0] if s.content else ""
+                label += f"  —  {first_line}"
+                break
+
+        with st.expander(label, expanded=False):
+            for section in visible_sections:
+                st.markdown(f"**--- {section.name} ---**")
+
+                if section.name == "FEED":
+                    st.text(section.content)
+                elif section.name in ("PLANNER OUTPUT", "KERNEL UPDATE PROPOSAL"):
+                    st.code(section.content, language=None)
+                else:
+                    st.text(section.content)
+
+
+# ============================================================
+# Main
+# ============================================================
+def main():
+    st.set_page_config(page_title="Autonomy Dashboard v1.2", layout="wide")
+    st.title("Autonomy Dashboard v1.2")
+
+    tab1, tab2 = st.tabs(["Telemetry", "Dry-Run Viewer"])
+
+    with tab1:
+        render_telemetry_tab()
+
+    with tab2:
+        render_dryrun_tab()
 
 
 if __name__ == "__main__":

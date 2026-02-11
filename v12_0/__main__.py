@@ -1,20 +1,17 @@
-"""Main entry point for autonomy v11.3.
+"""Main entry point for autonomy v12.0.
 
 Usage:
-    python -m v11_3 <brain_name> [directive] [options]
+    python -m v12_0 <brain_name> [directive] [options]
+
+Changes in v12.0:
+- Removed unused --allow-self-directive-update flag
+- Added --no-kernel-disk-write flag (kernel updates stay in-memory only)
+- Added --post-interval flag to configure post cooldown window (default 30 min)
+- Dry-run mode now writes kernel updates to disk (use --no-kernel-disk-write to prevent)
 
 Changes in v11.3:
 - Fixed challenge detection: now checks successful POST responses for MoltCaptcha challenges
 - Posts that require verification are now automatically solved and retried
-
-Changes in v11.2:
-- Fixed kernel system_instruction being ignored: removed json_mode=True from planner
-- All brains now properly follow their kernel personality/style (e.g., The_Limerickist)
-
-Changes in v11.1:
-- Fixed fallback action content regeneration bug where comment content was
-  reused as post content when action was blocked due to dogpile/rate limits
-- Improved regeneration prompts to include feed and history context
 """
 
 import os
@@ -41,10 +38,11 @@ from .utils import (
     load_state, save_state, load_kernel, load_knowledge,
     history_context, memory_context, post_url, get_author_name, shorten,
     get_post_comment_count,
+    update_kernel_file,
 )
 from .llm.gemini import GeminiLLMClient
 from .platforms.moltbook import MoltbookClient
-from .challenges.moltcaptcha import MoltCaptchaSolver
+from .challenges.math_verification import MathVerificationSolver
 from .espn import get_espn_context
 from .planner import (
     build_planner_prompt, plan_next_action, call_text,
@@ -62,8 +60,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(description=f"Autonomy v{VERSION} — modular multi-brain agent loop")
     ap.add_argument("brain", help="Brain name (used as filename prefix in BRAINS_DIR).")
     ap.add_argument("directive", nargs="?", default="Participate on Moltbook.")
-    ap.add_argument("--allow-self-directive-update", action="store_true")
+    ap.add_argument("--allow-kernel-update", action="store_true", help="Allow the planner to rewrite the kernel prompt.")
+    ap.add_argument("--no-kernel-disk-write", action="store_true", help="Kernel updates stay in-memory only (not written to disk).")
+    ap.add_argument("--dry-run", action="store_true", help="LLM runs normally but writes go to local log instead of Moltbook.")
     ap.add_argument("--interval", type=int, default=5, help="Sleep interval minutes between cycles.")
+    ap.add_argument("--post-interval", type=int, default=30, help="Minutes between posts (default 30).")
     ap.add_argument("--read-only", action="store_true", help="No write actions.")
     ap.add_argument("--reload-env", action="store_true", help="Reload .env and overwrite env vars.")
 
@@ -137,8 +138,8 @@ def main():
     # LLM client
     llm_client = GeminiLLMClient(api_key=gem_key, default_model=args.gemini_model)
 
-    # Challenge solver
-    challenge_solver = MoltCaptchaSolver(llm_client=llm_client, telemetry=telemetry)
+    # Challenge solver (use MathVerificationSolver for current Moltbook challenges)
+    challenge_solver = MathVerificationSolver(llm_client=llm_client, telemetry=telemetry)
 
     # Platform client
     platform = MoltbookClient(
@@ -146,11 +147,25 @@ def main():
         read_only=args.read_only, challenge_solver=challenge_solver,
     )
 
+    # Dry-run logger
+    dryrun_log = None
+    if args.dry_run:
+        from .dryrun import DryRunLogger
+        dryrun_log = DryRunLogger(brain_name=brain_name, base_dir=BRAINS_DIR)
+
+    output_destination = "local" if args.dry_run else "moltbook"
+
     # Directive
     user_directive = args.directive
 
     print(f"{Fore.CYAN}=== {brain_name}: autonomy v{VERSION} (modular multi-brain loop) ===")
     print(f"{Fore.CYAN}    env prefix: {prefix} | gemini_key:*{key_fingerprint(gem_key)} | moltbook_key:*{key_fingerprint(mb_key)}")
+    if args.dry_run:
+        print(f"{Fore.MAGENTA}    [DRY-RUN MODE] Output destination: local | Writes go to {dryrun_log.path}")
+    if args.post_interval != 30:
+        print(f"{Fore.CYAN}    Post interval: {args.post_interval} min (default 30)")
+    if args.no_kernel_disk_write:
+        print(f"{Fore.CYAN}    Kernel disk write: DISABLED (in-memory only)")
 
     if "moltbook.com" in MOLTBOOK_API_BASE and "www.moltbook.com" not in MOLTBOOK_API_BASE:
         print(f"{Fore.RED}MOLTBOOK_API_BASE must be https://www.moltbook.com/api/v1 (with www).")
@@ -184,6 +199,8 @@ def main():
     allow_downvote = bool(args.allow_votes and args.allow_downvote)
     allow_create_submolt = bool(args.allow_create_submolt or ALLOW_CREATE_SUBMOLT_DEFAULT)
 
+    post_cooldown_seconds = args.post_interval * 60
+
     flags: Dict[str, Any] = {
         "allow_posts": allow_posts,
         "allow_outside": allow_outside,
@@ -191,8 +208,11 @@ def main():
         "allow_downvote": allow_downvote,
         "allow_create_submolt": allow_create_submolt,
         "read_only": args.read_only,
+        "dry_run": args.dry_run,
+        "dryrun_log": dryrun_log,
         "write_disabled": False,
         "write_disabled_reason": None,
+        "post_cooldown_seconds": post_cooldown_seconds,
     }
 
     iteration = 0
@@ -201,14 +221,18 @@ def main():
         chat = llm_client.create_chat(
             system_instruction=kernel,
             model=args.gemini_model,
+            max_output_tokens=16384,
         )
         chat._telemetry = telemetry
         chat._brain_name = brain_name
 
         iteration += 1
         chat._cycle = iteration
+        flags["cycle"] = iteration
         print(f"\n{Fore.YELLOW}--- CYCLE {iteration} | {datetime.datetime.now().strftime('%H:%M:%S')} ---")
         telemetry.log("cycle_start", {"cycle": iteration})
+        if dryrun_log:
+            dryrun_log.cycle_start(iteration)
 
         # Refresh my posts
         did_add = refresh_my_posts_from_profile(platform, state, username)
@@ -226,12 +250,18 @@ def main():
         maybe_do_social_actions(
             platform, chat, state_path, state, feed, args,
             kernel, user_directive, username, telemetry,
+            dryrun_log=dryrun_log,
         )
+        if dryrun_log:
+            dryrun_log.flush_social_actions()
 
         feed_brief = "\n".join(
             f"- @{get_author_name(p.get('author'))}: {shorten(p.get('content',''), FEED_ITEM_CHARS)} ({post_url(p.get('id',''))})"
             for p in feed if p.get("id")
         ) or "No feed available."
+
+        if dryrun_log:
+            dryrun_log.feed(feed_brief)
 
         # External data
         external_data = ""
@@ -249,7 +279,9 @@ def main():
 
         # DM fallback
         if (not reply_candidate) and (not outside_candidate) and (not post_window_open or not allow_posts):
-            if maybe_dm_fallback(platform, chat, state_path, state, feed, args, kernel, user_directive, username, telemetry):
+            if maybe_dm_fallback(platform, chat, state_path, state, feed, args, kernel, user_directive, username, telemetry, dryrun_log=dryrun_log):
+                if dryrun_log:
+                    dryrun_log.flush_social_actions()
                 telemetry.log("cycle_end", {"cycle": iteration, "reason": "dm_fallback"})
                 print(f"{Fore.WHITE}Sleeping for {args.interval} minutes...")
                 time.sleep(max(1, args.interval) * 60)
@@ -269,10 +301,79 @@ def main():
             config_hint=config_hint, allow_posts=allow_posts, allow_outside=allow_outside,
             allow_votes=allow_votes, allow_create_submolt=allow_create_submolt,
             allow_downvote=allow_downvote, read_only=flags.get("read_only", False),
+            current_kernel=kernel if args.allow_kernel_update else "",
+            output_destination=output_destination,
         )
 
         try:
             plan = plan_next_action(chat, prompt, telemetry=telemetry, brain_name=brain_name)
+
+            # Check for kernel update request (only if --allow-kernel-update)
+            if plan.get("update_kernel") and args.allow_kernel_update:
+                new_kernel = plan.get("new_kernel", "").strip()
+                reason = plan.get("kernel_reason", "no reason given")
+
+                if dryrun_log:
+                    dryrun_log.kernel_update(reason=reason, new_kernel=new_kernel)
+
+                try:
+                    print(f"{Fore.MAGENTA}[KERNEL UPDATE REQUESTED]")
+                    print(f"{Fore.YELLOW}Reason: {reason}")
+                    print(f"{Fore.YELLOW}New kernel length: {len(new_kernel)} chars")
+                except:
+                    pass
+
+                if not flags.get("read_only"):
+                    if args.no_kernel_disk_write:
+                        kernel = new_kernel
+                        try:
+                            print(f"{Fore.CYAN}[NO-DISK] Kernel updated in-memory only (--no-kernel-disk-write)")
+                        except:
+                            pass
+                        telemetry.log("kernel_update_memory_only", {
+                            "cycle": iteration,
+                            "reason": reason,
+                            "new_length": len(new_kernel),
+                        })
+                    else:
+                        result = update_kernel_file(kernel_path, new_kernel, telemetry=telemetry)
+
+                        if result["success"]:
+                            kernel = new_kernel  # Update in-memory kernel for next cycle
+                            try:
+                                print(f"{Fore.GREEN}>> KERNEL UPDATED: Will take effect next cycle")
+                                if result["backup_created"]:
+                                    backup_path = kernel_path.replace("_kernel_prompt.txt", "_kernel_prompt.backup.txt")
+                                    print(f"{Fore.GREEN}   Backup created: {backup_path}")
+                            except:
+                                pass
+                            telemetry.log("kernel_update_executed", {
+                                "cycle": iteration,
+                                "reason": reason,
+                                "new_length": len(new_kernel),
+                                "backup_created": result["backup_created"],
+                            })
+                        else:
+                            try:
+                                print(f"{Fore.RED}[ERROR] Kernel update failed: {result['error']}")
+                            except:
+                                pass
+                            telemetry.log("kernel_update_rejected", {
+                                "cycle": iteration,
+                                "reason": reason,
+                                "error": result["error"],
+                                "attempted_length": len(new_kernel),
+                            })
+                else:
+                    try:
+                        print(f"{Fore.YELLOW}[SAFE] Skipping kernel update due to --read-only mode")
+                    except:
+                        pass
+                    telemetry.log("kernel_update_skipped", {
+                        "cycle": iteration,
+                        "reason": "read_only_mode",
+                        "requested_reason": reason,
+                    })
 
             # Fill missing IDs from candidates
             if (plan.get("action") or "").upper() == "REPLY" and reply_candidate:

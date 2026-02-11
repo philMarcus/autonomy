@@ -93,6 +93,10 @@ def parse_json_with_one_repair(
             return parse_json_strict(raw2)
     except Exception as e:
         msg = str(e)
+        # Store parsing failures on chat so _planner_unavailable_message can surface them
+        chat._last_llm_exception = {
+            "tag": call_tag, "error_type": type(e).__name__, "error": msg[:800],
+        }
         if "429" in msg or "RESOURCE_EXHAUSTED" in msg:
             sleep_s = BUDGET.note_429()
             if telemetry:
@@ -153,6 +157,8 @@ def build_planner_prompt(
     allow_create_submolt: bool,
     allow_downvote: bool,
     read_only: bool = False,
+    current_kernel: str = "",
+    output_destination: str = "moltbook",
 ) -> str:
     read_only_note = ""
     if read_only:
@@ -168,6 +174,7 @@ CONFIG/CONSTRAINTS:
 - Voting is {'ALLOWED' if allow_votes else 'DISABLED'} by command line.
 - Creating submolts is {'ALLOWED' if allow_create_submolt else 'DISABLED'} by command line.
 - Downvotes are {'ALLOWED' if allow_downvote else 'DISABLED'} by command line.
+- Output destination: {output_destination}
 {config_hint}
 
 DIRECTIVE:
@@ -193,6 +200,24 @@ Candidate reply-to-my-post (if any):
 
 Candidate outside post (if any):
 {json.dumps(outside_candidate, ensure_ascii=False) if outside_candidate else "None"}
+
+KERNEL UPDATE (Meta-cognitive):
+Current kernel prompt:
+{current_kernel}
+
+Should you update your kernel prompt to better achieve the directive?
+- Kernels define your personality, style, and core behavioral rules
+- Updates persist across cycles and fundamentally change how you operate
+- Only update if you have a compelling reason (e.g., directive shift, personality refinement)
+- Length: 50-5000 characters
+
+If updating, include in your JSON response:
+  "update_kernel": true,
+  "new_kernel": "Complete new kernel text here...",
+  "kernel_reason": "Brief explanation of why"
+
+If not updating, include:
+  "update_kernel": false
 
 ACTION POLICY (default preference):
 1) If posts are allowed AND post window open, prefer POST.
@@ -226,6 +251,16 @@ CREATE_SUBMOLT:
 
 SUBSCRIBE_SUBMOLT:
 {{"action":"SUBSCRIBE_SUBMOLT","name":"submolt_name","summary":"why subscribe"}}
+
+WAIT (skip this cycle):
+{{"action":"WAIT","summary":"why waiting"}}
+
+ALL responses must include update_kernel field:
+- If not updating kernel: {{"update_kernel": false, "action":"...", ... other action fields ...}}
+- If updating kernel: {{"update_kernel": true, "new_kernel": "...", "kernel_reason": "...", "action":"...", ... other action fields ...}}
+
+BUDGET NOTE: Your total output budget (thinking + visible response) is 16384 tokens.
+Your visible JSON response must be complete and valid. Keep thinking concise so enough tokens remain for a full JSON response (especially for POST actions with long content).
 """.strip()
 
 

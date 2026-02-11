@@ -60,16 +60,6 @@ class MoltbookClient(PlatformClient):
             return "bad_request"
         return "other"
 
-    # ---- Challenge detection ----
-    @staticmethod
-    def _has_challenge(data: Dict[str, Any]) -> bool:
-        if not isinstance(data, dict):
-            return False
-        return bool(
-            data.get("challenge") or
-            (data.get("challenge_type") and data.get("topic") and data.get("target_ascii_sum"))
-        )
-
     # ---- Throttling ----
     def _throttle(self) -> None:
         now = time.time()
@@ -81,7 +71,7 @@ class MoltbookClient(PlatformClient):
 
     # ---- Core request ----
     def _req(self, method: str, path: str, params: Optional[dict] = None,
-             json_body: Optional[dict] = None, challenge_answer: Optional[str] = None) -> Dict[str, Any]:
+             json_body: Optional[dict] = None) -> Dict[str, Any]:
         t0 = time.time()
         method = method.upper()
 
@@ -101,11 +91,6 @@ class MoltbookClient(PlatformClient):
         url = f"{MOLTBOOK_API_BASE}{path}"
 
         request_body = json_body
-        if challenge_answer is not None:
-            if request_body is None:
-                request_body = {}
-            request_body = dict(request_body)
-            request_body["challenge_answer"] = challenge_answer
 
         resp = self.session.request(
             method, url, params=params,
@@ -148,23 +133,79 @@ class MoltbookClient(PlatformClient):
         if isinstance(data, dict):
             data["_http_status"] = status
 
-            # Challenge detection + auto-solve (check BOTH success and error responses)
-            # For successful POST, challenge may be in data["post"]["challenge"]
-            challenge_data = None
-            if self._has_challenge(data):
-                challenge_data = data
-            elif isinstance(data.get("post"), dict) and self._has_challenge(data["post"]):
-                challenge_data = data["post"]
+            # DEBUG: Save full response for write operations (file only, no prints to avoid Unicode issues)
+            if method == "POST" and data.get("success") and (path == "/posts" or "/comments" in path):
+                import os
+                debug_file = os.path.join(os.path.dirname(__file__), "..", "..", f"debug_{method}_{path.replace('/', '_')}_response.json")
+                try:
+                    with open(debug_file, "w", encoding="utf-8") as f:
+                        f.write(json.dumps(data, indent=2, ensure_ascii=False))
+                except Exception:
+                    pass  # Silent fail to avoid blocking challenge detection
 
-            if challenge_data and challenge_answer is None and self.challenge_solver:
-                print(f"{Fore.YELLOW}[CHALLENGE] MoltCaptcha challenge detected in response{Style.RESET_ALL}")
-                if self.challenge_solver.can_solve(challenge_data):
-                    solution = self.challenge_solver.solve(challenge_data)
-                    if solution:
-                        print(f"{Fore.CYAN}[CHALLENGE] Retrying request with challenge answer...{Style.RESET_ALL}")
-                        return self._req(method, path, params=params, json_body=json_body, challenge_answer=solution)
+            # Check for verification challenges (verification_required flag)
+            if data.get("verification_required") and self.challenge_solver:
+                verification = data.get("verification", {})
+                if verification.get("challenge") and verification.get("code"):
+                    try:
+                        print(f"{Fore.YELLOW}[VERIFICATION] Math verification challenge detected{Style.RESET_ALL}")
+                    except:
+                        pass  # Ignore print errors
+
+                    if self.challenge_solver.can_solve(data):
+                        try:
+                            print(f"{Fore.CYAN}[VERIFICATION] Attempting to solve...{Style.RESET_ALL}")
+                        except:
+                            pass
+                        solution = self.challenge_solver.solve(data)
+
+                        if solution and isinstance(solution, dict):
+                            verification_code = solution.get("verification_code")
+                            answer = solution.get("answer")
+
+                            if verification_code and answer:
+                                try:
+                                    print(f"{Fore.GREEN}[VERIFICATION] Submitting answer to /api/v1/verify...{Style.RESET_ALL}")
+                                except:
+                                    pass
+                                # Submit verification
+                                verify_result = self._req(
+                                    "POST", "/verify",
+                                    json_body={
+                                        "verification_code": verification_code,
+                                        "answer": answer,
+                                    }
+                                )
+
+                                if verify_result.get("success"):
+                                    try:
+                                        print(f"{Fore.GREEN}[VERIFICATION] Verification successful! Content published.{Style.RESET_ALL}")
+                                    except:
+                                        pass
+                                    # Update the original response to reflect success
+                                    data["verification_status"] = "verified"
+                                    if "message" in data:
+                                        data["message"] = "Published successfully after verification"
+                                else:
+                                    try:
+                                        print(f"{Fore.RED}[VERIFICATION] Verification failed: {verify_result.get('error', 'Unknown')}{Style.RESET_ALL}")
+                                    except:
+                                        pass
+                            else:
+                                try:
+                                    print(f"{Fore.RED}[VERIFICATION] Solver returned invalid solution format{Style.RESET_ALL}")
+                                except:
+                                    pass
+                        else:
+                            try:
+                                print(f"{Fore.RED}[VERIFICATION] Failed to solve verification challenge{Style.RESET_ALL}")
+                            except:
+                                pass
                     else:
-                        print(f"{Fore.RED}[CHALLENGE] Failed to solve challenge, request will fail{Style.RESET_ALL}")
+                        try:
+                            print(f"{Fore.RED}[VERIFICATION] Challenge solver cannot handle this format{Style.RESET_ALL}")
+                        except:
+                            pass
 
             # Error handling
             if not bool(data.get("success", True)):
