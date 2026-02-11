@@ -32,8 +32,9 @@ from .config import (
     ALLOW_CREATE_SUBMOLT_DEFAULT, ALLOW_DMS_DEFAULT,
 )
 from .telemetry import TelemetryLogger
+from .store import LocalFileStore
 from .utils import (
-    load_state, save_state, load_kernel, load_knowledge,
+    load_kernel, load_knowledge,
     history_context, memory_context, post_url, get_author_name, shorten,
     get_post_comment_count,
     update_kernel_file,
@@ -69,6 +70,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
     DEFAULT_GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash").strip()
     ap.add_argument("--gemini-model", default=DEFAULT_GEMINI_MODEL, help="Gemini model name.")
+    ap.add_argument("--temperature", type=float, default=0.7, help="LLM temperature for planner chat (default 0.7).")
     ap.add_argument("--inject-espn", action="store_true")
     ap.add_argument("--espn-cache-seconds", type=int, default=60)
     ap.add_argument("--espn-league", default=os.environ.get("ESPN_LEAGUE", ESPN_DEFAULT_LEAGUE))
@@ -181,12 +183,13 @@ def main():
         if os.path.exists(alt):
             kernel_path = alt
 
-    state = load_state(state_path)
+    store = LocalFileStore(state_path)
+    state = store.load_state()
 
     # Reset post window if requested
     if args.reset_post_window:
         state["next_post_time"] = 0.0
-        save_state(state_path, state)
+        store.save_state(state)
         print(f"{Fore.GREEN}Post window reset — first cycle can post immediately.")
 
     if (not user_directive) and state.get('directive'):
@@ -228,6 +231,7 @@ def main():
             system_instruction=kernel,
             model=args.gemini_model,
             max_output_tokens=16384,
+            temperature=args.temperature,
         )
         chat._telemetry = telemetry
         chat._brain_name = brain_name
@@ -244,7 +248,7 @@ def main():
         # Refresh my posts
         did_add = refresh_my_posts_from_profile(platform, state, username)
         if did_add:
-            save_state(state_path, state)
+            store.save_state(state)
 
         # Compute windows
         post_ok, post_wait = can_post(state)
@@ -255,7 +259,7 @@ def main():
         # Build context
         feed = platform.get_feed(limit=FEED_LIMIT, sort=args.feed_sort)
         maybe_do_social_actions(
-            platform, chat, state_path, state, feed, args,
+            platform, chat, store, state, feed, args,
             kernel, user_directive, username, telemetry,
             dryrun_log=dryrun_log,
         )
@@ -286,7 +290,7 @@ def main():
 
         # DM fallback
         if (not reply_candidate) and (not outside_candidate) and (not post_window_open or not allow_posts):
-            if maybe_dm_fallback(platform, chat, state_path, state, feed, args, kernel, user_directive, username, telemetry, dryrun_log=dryrun_log):
+            if maybe_dm_fallback(platform, chat, store, state, feed, args, kernel, user_directive, username, telemetry, dryrun_log=dryrun_log):
                 if dryrun_log:
                     dryrun_log.flush_social_actions()
                 telemetry.log("cycle_end", {"cycle": iteration, "reason": "dm_fallback"})
@@ -513,7 +517,7 @@ def main():
                         executed = False
 
             if executed:
-                save_state(state_path, state)
+                store.save_state(state)
 
         except Exception as e:
             telemetry.log("error", {"cycle": iteration, "error": str(e)})

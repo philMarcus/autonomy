@@ -22,10 +22,11 @@ from .config import (
 )
 from .platforms.base import PlatformClient
 from .llm.base import ChatSession
+from .store import Store
 from .telemetry import TelemetryLogger
 from .planner import parse_json_with_one_repair, call_text
 from .utils import (
-    post_url, add_history, save_state, get_author_name, shorten,
+    post_url, add_history, get_author_name, shorten,
     get_post_comment_count, norm_key,
 )
 
@@ -457,7 +458,7 @@ def _maybe_pick_from_feed(feed_items: List[Dict[str, Any]], username: str) -> Op
 def maybe_do_social_actions(
     client: PlatformClient,
     chat: ChatSession,
-    state_path: str,
+    store: Store,
     state: Dict[str, Any],
     feed_items: List[Dict[str, Any]],
     args: argparse.Namespace,
@@ -621,13 +622,13 @@ FEED ITEMS (brief):
         except Exception as e:
             print(f"{Fore.YELLOW}[WARN] follow failed: {e}")
 
-    save_state(state_path, state)
+    store.save_state(state)
 
 
 def maybe_dm_fallback(
     client: PlatformClient,
     chat: ChatSession,
-    state_path: str,
+    store: Store,
     state: Dict[str, Any],
     feed_items: List[Dict[str, Any]],
     args: argparse.Namespace,
@@ -669,12 +670,12 @@ FEED TOPIC:
             if dryrun_log:
                 dryrun_log.social_action("DM", to=author, message=message)
             state["daily"]["dms"] += 1
-            save_state(state_path, state)
+            store.save_state(state)
             print(f"{Fore.MAGENTA}[DRY-RUN] SOCIAL: sent DM request to @{author}")
             return True
         client.dm_request(to=author, message=message)
         state["daily"]["dms"] += 1
-        save_state(state_path, state)
+        store.save_state(state)
         print(f"{Fore.MAGENTA}>> SOCIAL: sent DM request to @{author}")
         return True
     except Exception as e:
