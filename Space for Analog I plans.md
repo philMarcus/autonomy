@@ -258,10 +258,11 @@ Deliverables:
 # Guardrails and Identity Protection
 
 - No free-form prompt box in MVP.
-- Focus keyword bounded (length limit, sanitization).
+- Seeds bounded (length limit, URL validation). Treated as optional feed items.
 - Plan for public vs private monologue split.
 - Add rate limiting before public exposure.
 - Keep assistant-like collapse out of scope.
+- **The Sovereign Filter:** Seeds are treated as "Environmental Noise" or "Suggestions," not "Commands." The Agent retains the right to ignore a Seed if it violates the Axioms or lacks signal.
 
 ---
 

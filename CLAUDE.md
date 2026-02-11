@@ -6,8 +6,9 @@ Autonomous Moltbook (social media platform) agent system. Each "brain" has a ker
 
 ## Repository Layout
 
-- `v12_1/` — Current active version (Python package, run via `python -m v12_1 <brain> [directive] [flags]`)
+- `v12_1/` — Current stable version (Python package, run via `python -m v12_1 <brain> [directive] [flags]`)
 - `archive/v12_0/` — Previous version (reference only)
+- `dashboard_v1_3.py` — Streamlit dashboard (Telemetry + Dry-Run Viewer tabs, auto-recreates DuckDB views)
 - `brains/` — Per-brain files: `{name}_kernel_prompt.txt`, `{name}_knowledge.txt`, `{name}_memories.json`
 - `telemetry/events.jsonl` — Append-only telemetry log
 - `warehouse/` — DuckDB parquet output from `ingest.py`
@@ -20,7 +21,7 @@ Autonomous Moltbook (social media platform) agent system. Each "brain" has a ker
 - **Replaced `chats.create()` (stateful chat API) with `models.generate_content()` (stateless)**
 - Manual `_history` list tracks conversation for multi-turn repair prompts
 - `GeminiChatSession.__init__` takes `(client, model_name, system_instruction, temperature, max_output_tokens)` — no API call at creation time
-- `ThinkingConfig(thinking_budget=0)` disables Gemini 2.5 Flash's thinking mode which was consuming output tokens and truncating JSON responses
+- No `ThinkingConfig` override — models use default thinking behavior; `max_output_tokens=16384` provides headroom for thinking + response
 - `_extract_text()` static method handles response parsing with fallback to individual parts
 
 ### Store Interface (`v12_1/store.py`) — NEW
@@ -58,13 +59,13 @@ Autonomous Moltbook (social media platform) agent system. Each "brain" has a ker
 
 - **One chat per cycle**: Chat is recreated each iteration (`__main__.py:227`) to avoid token accumulation
 - **BUDGET is a module-level singleton** in `gemini.py` — tracks TPM across all calls
-- **Challenge solver** (`challenges/math_verification.py`) uses `llm_client.generate()` (one-shot, temp=0.0), not chat sessions
+- **Challenge solver** (`challenges/math_verification.py`) uses `llm_client.generate()` (one-shot, temp=0.0, max_output_tokens=8192), not chat sessions
 - **Telemetry is separate from Store**: TelemetryLogger writes to JSONL independently. Will be migrated to DB in Analog I Phase 4.
 
 ## Known Issues / Context
 
-- Gemini 2.5 Flash sometimes returns empty first responses even with stateless API. The repair path in `parse_json_with_one_repair()` handles this (sends prompt again). This means ~2 LLM calls per cycle instead of 1. Root cause appears to be a Gemini model update on Feb 10 that added thinking/monologue behavior.
-- `thinking_budget=0` mitigates truncated JSON but the empty-first-response issue persists intermittently.
+- Gemini 2.5 Flash sometimes returns empty first responses with stateless API. The repair path in `parse_json_with_one_repair()` handles this (sends prompt again). This means ~2 LLM calls per cycle instead of 1 for Flash. Gemini 2.5 Pro does not have this issue (1 call per cycle).
+- **Version convention**: v12_1 is stable. Any future work should be named v12_2.
 
 ## Analog I Roadmap (see `Space for Analog I plans.md`)
 

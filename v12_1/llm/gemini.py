@@ -109,14 +109,9 @@ class GeminiChatSession(ChatSession):
         if json_mode:
             config_kwargs["response_mime_type"] = "application/json"
 
-        # Disable thinking/internal monologue so the full output budget
-        # goes to the visible JSON response (v12.0 had no ThinkingConfig).
-        try:
-            config_kwargs["thinking_config"] = types.ThinkingConfig(
-                thinking_budget=0
-            )
-        except (AttributeError, TypeError):
-            pass  # SDK doesn't support ThinkingConfig — no action needed
+        # No ThinkingConfig override — let models use their default thinking
+        # behavior. The large max_output_tokens (16384) provides enough
+        # headroom for thinking + a complete JSON response.
 
         try:
             resp = self._client.models.generate_content(

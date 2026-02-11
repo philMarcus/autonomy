@@ -81,7 +81,7 @@ Output ONLY the answer, nothing else. No explanations, no labels, just the answe
             answer = self.llm_client.generate(
                 prompt,
                 temperature=0.0,  # Low temperature for consistent answers
-                max_output_tokens=100,  # Allow for longer answers (not just numbers)
+                max_output_tokens=8192,  # Enough headroom for thinking models
             ).strip()
 
             # Clean up common issues (quotes, whitespace)
