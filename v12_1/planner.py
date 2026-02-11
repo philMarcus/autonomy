@@ -74,8 +74,9 @@ def parse_json_with_one_repair(
                 "tag": call_tag, "cycle": cycle, "model": model_name,
                 "prompt_chars": len(p or ""), "response_chars": len(raw), "latency_ms": dt_ms,
             })
-        BUDGET.record(est_tokens)
-        BUDGET.reset_backoff()
+        # Note: BUDGET.record / reset_backoff are handled inside
+        # GeminiChatSession.send_message — no need to duplicate here.
+        chat._last_raw_response = raw
         return raw
 
     try:
@@ -313,6 +314,24 @@ def _planner_unavailable_message(chat: ChatSession, brain_prefix: str = "") -> s
     return "Planner unavailable (unknown error)."
 
 
+def _extract_preamble(raw: str) -> str:
+    """Extract any non-JSON text that precedes the JSON object in the LLM response."""
+    if not raw:
+        return ""
+    # Find the real JSON start: ```json fence, or {" pattern
+    fence = re.search(r"```json\s*\n?\s*\{", raw)
+    if fence:
+        preamble = raw[:fence.start()].strip()
+    else:
+        m = re.search(r'\{\s*"', raw)
+        if not m or m.start() == 0:
+            return ""
+        preamble = raw[:m.start()].strip()
+    # Strip trailing markdown fences
+    preamble = re.sub(r"```[a-zA-Z0-9]*\s*$", "", preamble).strip()
+    return preamble
+
+
 def plan_next_action(chat: ChatSession, prompt: str,
                      telemetry: Optional[TelemetryLogger] = None,
                      brain_name: str = "") -> Dict[str, Any]:
@@ -328,4 +347,11 @@ def plan_next_action(chat: ChatSession, prompt: str,
         if telemetry:
             telemetry.log("planner_missing_action", {"cycle": getattr(chat, "_cycle", None), "prompt_chars": len(prompt or "")})
         return {"action": "WAIT", "summary": _planner_unavailable_message(chat, brain_prefix=brain_env_prefix(brain_name))}
+
+    # Capture any non-JSON text from the LLM response (reasoning, commentary, etc.)
+    raw = getattr(chat, "_last_raw_response", "") or ""
+    preamble = _extract_preamble(raw)
+    if preamble:
+        plan["_preamble"] = preamble
+
     return plan

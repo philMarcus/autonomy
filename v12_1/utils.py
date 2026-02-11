@@ -54,9 +54,12 @@ def extract_first_json_object(text: str) -> Optional[str]:
     if s.startswith("```"):
         s = re.sub(r"^```[a-zA-Z0-9]*\s*", "", s)
         s = re.sub(r"```\s*$", "", s).strip()
-    start = s.find("{")
-    if start == -1:
+    # Find { followed by " — real JSON objects start with a key, skipping
+    # prose braces like {Layer 1} that appear in reasoning preamble.
+    m = re.search(r'\{\s*"', s)
+    if not m:
         return None
+    start = m.start()
     in_str = False
     esc = False
     depth = 0
@@ -83,28 +86,66 @@ def extract_first_json_object(text: str) -> Optional[str]:
     return None
 
 
-def parse_json_strict(s: str) -> Dict[str, Any]:
+def _strip_to_json(s: str) -> str:
+    """Strip preamble text and markdown fences to isolate the JSON portion."""
     raw = (s or "").strip()
+    # Strategy 1: find ```json fence (most reliable when preamble has curly braces)
+    fence = re.search(r"```json\s*\n?\s*(\{)", raw)
+    if fence:
+        raw = raw[fence.start(1):]
+        raw = re.sub(r"\n?\s*```\s*$", "", raw).strip()
+        return raw
+    # Strategy 2: strip leading ``` fence if the whole response is fenced
     if raw.startswith("```"):
         raw = re.sub(r"^```[a-zA-Z0-9]*\s*", "", raw)
         raw = re.sub(r"```\s*$", "", raw).strip()
+    # Strategy 3: find { followed by " (real JSON object start, not prose braces)
+    m = re.search(r'\{\s*"', raw)
+    if m:
+        raw = raw[m.start():]
+    # Strip trailing text/fences after the last }
+    last_brace = raw.rfind("}")
+    if last_brace >= 0 and last_brace < len(raw) - 1:
+        raw = raw[:last_brace + 1]
+    return raw
+
+
+def parse_json_strict(s: str) -> Dict[str, Any]:
+    stripped = (s or "").strip()
+    if not stripped:
+        raise ValueError("Invalid JSON from model. Snippet: (empty)")
+
+    # 1. Fast path: already clean JSON
     try:
-        return json.loads(raw)
+        return json.loads(stripped)
     except Exception:
         pass
-    candidate = extract_first_json_object(raw)
+
+    # 2. Brace-match extraction on original (handles preamble + trailing text)
+    candidate = extract_first_json_object(stripped)
     if candidate:
         try:
             return json.loads(candidate)
         except Exception:
             pass
-        # Fallback: fix unescaped newlines inside JSON string values
         try:
             return json.loads(_repair_json_newlines(candidate))
-        except Exception as e2:
-            snippet = candidate[:1200]
-            raise ValueError(f"Invalid JSON from model: {e2}. Snippet: {snippet}")
-    snippet = raw[:1200]
+        except Exception:
+            pass
+
+    # 3. _strip_to_json fallback (handles ```json fences, complex preamble)
+    raw = _strip_to_json(stripped)
+    if raw:
+        try:
+            return json.loads(raw)
+        except Exception:
+            pass
+        try:
+            return json.loads(_repair_json_newlines(raw))
+        except Exception:
+            pass
+
+    snippet = (candidate or raw or stripped)[:1200]
     raise ValueError(f"Invalid JSON from model. Snippet: {snippet}")
 
 

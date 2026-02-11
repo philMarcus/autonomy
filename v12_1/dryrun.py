@@ -58,6 +58,11 @@ class DryRunLogger:
         self._append("\n--- FEED ---\n")
         self._append(feed_brief + "\n")
 
+    def reasoning(self, text: str) -> None:
+        """Write the LLM reasoning/preamble section (any non-JSON text from the response)."""
+        self._append(f"\n--- REASONING ---\n")
+        self._append(text + "\n")
+
     def planner_output(self, plan: Dict[str, Any]) -> None:
         """Write the planner output section."""
         action = (plan.get("action") or "?").upper()

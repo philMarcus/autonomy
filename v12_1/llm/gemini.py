@@ -65,12 +65,20 @@ BUDGET = GeminiBudget()
 
 
 # ============================================================
-# Gemini ChatSession wrapper
+# Gemini ChatSession wrapper — uses stateless generate_content
+# with manual history tracking to avoid the chats.create
+# first-message empty-response bug in Gemini 2.5 Flash.
 # ============================================================
 class GeminiChatSession(ChatSession):
-    def __init__(self, chat, model_name: str):
-        self._chat = chat
+    def __init__(self, client: genai.Client, model_name: str,
+                 system_instruction: str, temperature: float,
+                 max_output_tokens: int):
+        self._client = client
         self.model_name = model_name
+        self._system_instruction = system_instruction
+        self._temperature = temperature
+        self._max_output_tokens = max_output_tokens
+        self._history: List[types.Content] = []
 
     def send_message(self, prompt: str, json_mode: bool = False) -> str:
         prompt_chars = len(prompt or "")
@@ -87,22 +95,69 @@ class GeminiChatSession(ChatSession):
             sleep_s = max(1.0, LLM_TPM_WINDOW_SECONDS - 1.0)
             time.sleep(sleep_s)
 
-        t0 = time.time()
-        try:
-            if json_mode:
-                resp = self._chat.send_message(
-                    prompt,
-                    config=types.GenerateContentConfig(response_mime_type="application/json"),
-                )
-            else:
-                resp = self._chat.send_message(prompt)
-        except TypeError:
-            # Fallback if config not supported
-            resp = self._chat.send_message(prompt)
+        # Build contents: history + new user message
+        contents = list(self._history) + [
+            types.Content(role="user", parts=[types.Part(text=prompt)])
+        ]
 
-        raw = getattr(resp, "text", "") or ""
+        config_kwargs: Dict[str, Any] = {
+            "temperature": self._temperature,
+            "max_output_tokens": self._max_output_tokens,
+        }
+        if self._system_instruction:
+            config_kwargs["system_instruction"] = self._system_instruction
+        if json_mode:
+            config_kwargs["response_mime_type"] = "application/json"
+
+        # Disable thinking/internal monologue so the full output budget
+        # goes to the visible JSON response (v12.0 had no ThinkingConfig).
+        try:
+            config_kwargs["thinking_config"] = types.ThinkingConfig(
+                thinking_budget=0
+            )
+        except (AttributeError, TypeError):
+            pass  # SDK doesn't support ThinkingConfig — no action needed
+
+        try:
+            resp = self._client.models.generate_content(
+                model=self.model_name,
+                contents=contents,
+                config=types.GenerateContentConfig(**config_kwargs),
+            )
+        except TypeError:
+            # Fallback without json_mode if config not supported
+            config_kwargs.pop("response_mime_type", None)
+            resp = self._client.models.generate_content(
+                model=self.model_name,
+                contents=contents,
+                config=types.GenerateContentConfig(**config_kwargs),
+            )
+
+        raw = self._extract_text(resp)
+
+        # Append exchange to history for multi-turn support (repair prompts)
+        self._history.append(
+            types.Content(role="user", parts=[types.Part(text=prompt)])
+        )
+        if raw:
+            self._history.append(
+                types.Content(role="model", parts=[types.Part(text=raw)])
+            )
+
         BUDGET.record(est_tokens)
         BUDGET.reset_backoff()
+        return raw
+
+    @staticmethod
+    def _extract_text(resp) -> str:
+        """Get text from a Gemini response, trying .text then individual parts."""
+        raw = getattr(resp, "text", "") or ""
+        if not raw:
+            try:
+                parts = resp.candidates[0].content.parts
+                raw = "\n".join(p.text for p in parts if getattr(p, "text", None))
+            except Exception:
+                raw = ""
         return raw
 
 
@@ -128,15 +183,13 @@ class GeminiLLMClient(LLMClient):
         model: str = "",
     ) -> GeminiChatSession:
         model_name = model or self.default_model
-        chat = self._client.chats.create(
-            model=model_name,
-            config=types.GenerateContentConfig(
-                system_instruction=system_instruction or "",
-                temperature=temperature,
-                max_output_tokens=max_output_tokens,
-            ),
+        return GeminiChatSession(
+            client=self._client,
+            model_name=model_name,
+            system_instruction=system_instruction or "",
+            temperature=temperature,
+            max_output_tokens=max_output_tokens,
         )
-        return GeminiChatSession(chat, model_name)
 
     def generate(
         self,

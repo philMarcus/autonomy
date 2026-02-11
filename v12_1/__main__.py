@@ -315,6 +315,15 @@ def main():
         try:
             plan = plan_next_action(chat, prompt, telemetry=telemetry, brain_name=brain_name)
 
+            # Display any non-JSON LLM output (reasoning, preamble, etc.)
+            preamble = plan.pop("_preamble", "")
+            if preamble:
+                print(f"{Fore.CYAN}--- REASONING ---")
+                print(f"{Fore.WHITE}{preamble}")
+                print(f"{Fore.CYAN}-----------------{Style.RESET_ALL}")
+                if dryrun_log:
+                    dryrun_log.reasoning(preamble)
+
             # Check for kernel update request (only if --allow-kernel-update)
             if plan.get("update_kernel") and args.allow_kernel_update:
                 new_kernel = plan.get("new_kernel", "").strip()

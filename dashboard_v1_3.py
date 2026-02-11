@@ -606,6 +606,9 @@ def render_dryrun_tab():
                 if section.name in ("FEED", "SOCIAL ACTIONS"):
                     with st.expander(f"--- {section.name} ---", expanded=False):
                         st.text(section.content)
+                elif section.name == "REASONING":
+                    with st.expander(f"--- {section.name} ---", expanded=False):
+                        st.markdown(section.content)
                 elif section.name in ("PLANNER OUTPUT", "KERNEL UPDATE PROPOSAL"):
                     st.markdown(f"**--- {section.name} ---**")
                     st.code(section.content, language=None)
