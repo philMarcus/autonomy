@@ -106,6 +106,7 @@ def normalize_event(obj: Dict[str, Any], raw_line: str) -> Dict[str, Any]:
 
     out: Dict[str, Any] = {
         "ts": ts.isoformat(),
+        "seq": safe_int(obj.get("seq")),
         "dt": dt,
         "run_id": obj.get("run_id"),
         "brain": obj.get("brain"),
@@ -131,8 +132,10 @@ def normalize_event(obj: Dict[str, Any], raw_line: str) -> Dict[str, Any]:
         "http_path": obj.get("path"),
         "http_status": safe_int(obj.get("status")),
         "api_latency_ms": safe_int(obj.get("latency_ms")) if event_type and event_type.endswith("_api_call") else None,
-        "has_body": safe_bool(obj.get("has_body")),
-        "body_bytes": safe_int(obj.get("body_bytes")),
+        # has_body/body_bytes: older telemetry uses has_body/body_bytes,
+        # newer uses req_has_body/req_body_bytes (+ resp_ variants)
+        "has_body": safe_bool(obj.get("has_body") or obj.get("req_has_body")),
+        "body_bytes": safe_int(obj.get("body_bytes") or obj.get("req_body_bytes")),
         "rate_limited": True if safe_int(obj.get("status")) == 429 else None,
 
         # Actions
@@ -142,9 +145,9 @@ def normalize_event(obj: Dict[str, Any], raw_line: str) -> Dict[str, Any]:
         "parent_comment_id": obj.get("parent_comment_id"),
         "action_result": obj.get("action_result"),
 
-        # Errors
+        # Errors — telemetry logs "error" not "error_message"
         "error_type": obj.get("error_type"),
-        "error_message": obj.get("error_message"),
+        "error_message": obj.get("error_message") or obj.get("error"),
         "error_stack": obj.get("error_stack"),
 
         # Full fidelity
@@ -181,6 +184,7 @@ def write_parquet_partitioned(rows: List[Dict[str, Any]]) -> None:
               SELECT
                 -- cast to keep a stable schema
                 CAST(ts AS TIMESTAMPTZ) AS ts,
+                CAST(seq AS INTEGER) AS seq,
                 CAST(dt AS DATE) AS dt,
                 CAST(run_id AS VARCHAR) AS run_id,
                 CAST(brain AS VARCHAR) AS brain,
