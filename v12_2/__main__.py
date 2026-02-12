@@ -1,9 +1,9 @@
-"""Main entry point for autonomy v12.1.
+"""Main entry point for autonomy v12.2.
 
 Usage:
-    python -m v12_1 <brain_name> [directive] [options]
+    python -m v12_2 <brain_name> [directive] [options]
 
-Changes in v12.1:
+Changes in v12.2:
 - Fixed telemetry: cycle number now auto-injected into ALL events (was missing from
   action_executed, action_skipped, moltbook_api_call, etc.)
 - Fixed telemetry: social actions (upvote, follow, subscribe) now log action_executed events
