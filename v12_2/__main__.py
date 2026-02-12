@@ -183,7 +183,8 @@ def main():
         if os.path.exists(alt):
             kernel_path = alt
 
-    store = LocalFileStore(state_path)
+    analog_home_url = os.environ.get(f"{prefix}_ANALOG_HOME_API_URL", "").strip() or os.environ.get("ANALOG_HOME_API_URL", "").strip()
+    store = LocalFileStore(state_path, analog_home_url=analog_home_url)
     state = store.load_state()
 
     # Reset post window if requested
@@ -416,6 +417,7 @@ def main():
                     raise ValueError("POST suggested while post window closed; no comment targets available")
 
             executed = False
+            fallback_plan = None
             try:
                 executed = execute_action(platform, state, plan, flags, username, telemetry)
             except ActionBlocked as ab:
@@ -516,8 +518,43 @@ def main():
                         print(f"{Fore.RED}[ERROR] {ab2.reason}")
                         executed = False
 
+            # Use fallback_plan if that's what actually executed
+            executed_plan = fallback_plan if fallback_plan is not None else plan
+
             if executed:
                 store.save_state(state)
+
+                # Archive artifact to Analog_Home (Phase 1: fire-and-forget)
+                act_upper = (executed_plan.get("action") or "").upper()
+                if act_upper in ("POST", "COMMENT", "REPLY"):
+                    source_id = ""
+                    source_parent_id = ""
+                    source_url_str = ""
+                    if act_upper == "POST" and state.get("my_post_ids"):
+                        source_id = state["my_post_ids"][-1]
+                        source_url_str = post_url(source_id)
+                    elif act_upper in ("COMMENT", "REPLY"):
+                        source_id = executed_plan.get("post_id", "")
+                        source_parent_id = executed_plan.get("parent_comment_id", "")
+                        source_url_str = post_url(source_id)
+
+                    store.write_artifact(iteration, {
+                        "brain": brain_name,
+                        "artifact_type": act_upper.lower(),
+                        "title": executed_plan.get("title", ""),
+                        "body_markdown": executed_plan.get("content", ""),
+                        "monologue_public": preamble,
+                        "channel": executed_plan.get("submolt", ""),
+                        "source_platform": "moltbook",
+                        "source_id": source_id,
+                        "source_parent_id": source_parent_id,
+                        "source_url": source_url_str,
+                    })
+                    telemetry.log("artifact_published", {
+                        "cycle": iteration,
+                        "artifact_type": act_upper.lower(),
+                        "source_platform": "moltbook",
+                    })
 
         except Exception as e:
             telemetry.log("error", {"cycle": iteration, "error": str(e)})
