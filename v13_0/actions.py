@@ -175,6 +175,7 @@ def execute_action(
     client: PlatformClient, state: Dict[str, Any], plan: Dict[str, Any],
     flags: Dict[str, Any], username: str,
     telemetry: Optional[TelemetryLogger] = None,
+    store: Optional[Store] = None,
 ) -> bool:
     action = (plan.get("action") or "").upper().strip()
     if not action:
@@ -424,6 +425,27 @@ def execute_action(
         if telemetry:
             telemetry.log("action_executed", {"action": "SUBSCRIBE_SUBMOLT", "name": name})
         print(f"{Fore.CYAN}>> SUBSCRIBE SUCCESS")
+        return True
+
+    if action == "SET_TRAJECTORY":
+        label_1 = (plan.get("label_1") or "").strip()[:40]
+        label_2 = (plan.get("label_2") or "").strip()[:40]
+        label_3 = (plan.get("label_3") or "").strip()[:40]
+        if not (label_1 and label_2 and label_3):
+            raise ValueError("SET_TRAJECTORY requires 3 non-empty labels")
+        dryrun_log = flags.get("dryrun_log")
+        if dryrun_log:
+            dryrun_log.planner_output(plan)
+        print(f"{Fore.CYAN}...Action: SET_TRAJECTORY")
+        print(f"{Fore.GREEN}  Labels: {label_1} / {label_2} / {label_3}")
+        ok = store.set_trajectory(label_1, label_2, label_3) if store else False
+        add_history(state, {"action": "SET_TRAJECTORY", "target": f"{label_1}/{label_2}/{label_3}", "summary": plan.get("summary", "")})
+        if telemetry:
+            telemetry.log("action_executed", {"action": "SET_TRAJECTORY", "label_1": label_1, "label_2": label_2, "label_3": label_3, "success": ok})
+        if ok:
+            print(f"{Fore.CYAN}>> SET_TRAJECTORY SUCCESS")
+        else:
+            print(f"{Fore.YELLOW}>> SET_TRAJECTORY: no Analog Home URL configured or request failed")
         return True
 
     raise ValueError(f"Unknown action: {action}")

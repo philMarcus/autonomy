@@ -138,6 +138,49 @@ def call_text(chat: ChatSession, prompt: str, tag: str = "llm",
 
 
 # ============================================================
+# Analog Home controls formatting
+# ============================================================
+def _format_seeds(seeds: Optional[list]) -> str:
+    if not seeds:
+        return ""
+    lines = "\n".join(f"- {s}" for s in seeds)
+    return (
+        "\nSEEDS (input from Analog Home visitors):\n"
+        f"{lines}\n"
+        "Consider these seeds as creative input from your audience. "
+        "They may inspire topics, themes, or directions for your next action.\n"
+    )
+
+
+def _format_trajectory(trajectory_votes: Optional[Dict[str, Any]]) -> str:
+    if not trajectory_votes:
+        return ""
+    label_1 = trajectory_votes.get("vote_label_1", "?")
+    label_2 = trajectory_votes.get("vote_label_2", "?")
+    label_3 = trajectory_votes.get("vote_label_3", "?")
+    v1 = trajectory_votes.get("vote_1", 0)
+    v2 = trajectory_votes.get("vote_2", 0)
+    v3 = trajectory_votes.get("vote_3", 0)
+    return (
+        f"\nTRAJECTORY VOTES (audience sentiment from Analog Home):\n"
+        f'- "{label_1}": {v1} votes\n'
+        f'- "{label_2}": {v2} votes\n'
+        f'- "{label_3}": {v3} votes\n'
+        "These votes reflect what your audience wants to see more of. "
+        "Let them influence (but not dictate) your creative direction.\n"
+    )
+
+
+def _format_set_trajectory_action(trajectory_votes: Optional[Dict[str, Any]]) -> str:
+    if trajectory_votes is None:
+        return ""
+    return (
+        "\nSET_TRAJECTORY (reset vote buttons with 3 new options — use sparingly, only when a shift in creative direction is warranted):\n"
+        '{{"action":"SET_TRAJECTORY","label_1":"...","label_2":"...","label_3":"...","summary":"why changing trajectory"}}\n'
+    )
+
+
+# ============================================================
 # Planner prompt builder
 # ============================================================
 def build_planner_prompt(
@@ -161,6 +204,8 @@ def build_planner_prompt(
     current_kernel: str = "",
     output_destination: str = "moltbook",
     search_enabled: bool = False,
+    seeds: Optional[list] = None,
+    trajectory_votes: Optional[Dict[str, Any]] = None,
 ) -> str:
     read_only_note = ""
     if read_only:
@@ -206,7 +251,7 @@ Feed (brief):
 
 External data (fresh; may be empty):
 {external_data}
-{search_note}
+{search_note}{_format_seeds(seeds)}{_format_trajectory(trajectory_votes)}
 Candidate reply-to-my-post (if any):
 {json.dumps(reply_candidate, ensure_ascii=False) if reply_candidate else "None"}
 
@@ -263,7 +308,7 @@ CREATE_SUBMOLT:
 
 SUBSCRIBE_SUBMOLT:
 {{"action":"SUBSCRIBE_SUBMOLT","name":"submolt_name","summary":"why subscribe"}}
-
+{_format_set_trajectory_action(trajectory_votes)}
 WAIT (skip this cycle):
 {{"action":"WAIT","summary":"why waiting"}}
 

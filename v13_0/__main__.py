@@ -241,23 +241,49 @@ def main():
 
     iteration = 0
     while True:
+        iteration += 1
+
+        # --- Analog Home controls (only when API URL is configured) ---
+        analog_controls = {}
+        analog_seeds = []
+        analog_trajectory = None
+        cycle_temperature = args.temperature
+        if analog_home_url:
+            analog_controls = store.read_controls()
+            if analog_controls:
+                cycle_temperature = analog_controls.get("temperature", args.temperature)
+                analog_seeds = analog_controls.get("seeds", [])
+                seed_ids = analog_controls.get("seed_ids", [])
+                if seed_ids:
+                    store.consume_seeds(seed_ids)
+                analog_trajectory = {
+                    "vote_1": analog_controls.get("vote_1", 0),
+                    "vote_2": analog_controls.get("vote_2", 0),
+                    "vote_3": analog_controls.get("vote_3", 0),
+                    "vote_label_1": analog_controls.get("vote_label_1", "emergence"),
+                    "vote_label_2": analog_controls.get("vote_label_2", "entropy"),
+                    "vote_label_3": analog_controls.get("vote_label_3", "self"),
+                }
+
         # Recreate chat each cycle to avoid token accumulation
         chat = llm_client.create_chat(
             system_instruction=kernel,
             model=args.gemini_model,
             max_output_tokens=16384,
-            temperature=args.temperature,
+            temperature=cycle_temperature,
             tools=search_tools,
         )
         chat._telemetry = telemetry
         chat._brain_name = brain_name
 
-        iteration += 1
         chat._cycle = iteration
         flags["cycle"] = iteration
         telemetry.current_cycle = iteration
         print(f"\n{Fore.YELLOW}--- CYCLE {iteration} | {datetime.datetime.now().strftime('%H:%M:%S')} ---")
-        telemetry.log("cycle_start", {"cycle": iteration})
+        if analog_controls:
+            print(f"{Fore.GREEN}Analog Home: temp={cycle_temperature}, seeds={len(analog_seeds)}, "
+                  f"votes={analog_controls.get('vote_1',0)}/{analog_controls.get('vote_2',0)}/{analog_controls.get('vote_3',0)}")
+        telemetry.log("cycle_start", {"cycle": iteration, **({"analog_controls": analog_controls} if analog_controls else {})})
         if dryrun_log:
             dryrun_log.cycle_start(iteration)
 
@@ -337,6 +363,8 @@ def main():
             current_kernel=kernel if args.allow_kernel_update else "",
             output_destination=output_destination,
             search_enabled=bool(args.enable_search),
+            seeds=analog_seeds,
+            trajectory_votes=analog_trajectory,
         )
 
         try:
@@ -466,7 +494,7 @@ def main():
             executed = False
             fallback_plan = None
             try:
-                executed = execute_action(platform, state, plan, flags, username, telemetry)
+                executed = execute_action(platform, state, plan, flags, username, telemetry, store=store)
             except ActionBlocked as ab:
                 telemetry.log("action_blocked", {"cycle": iteration, "action": ab.action, "reason": ab.reason})
                 print(f"{Fore.RED}[ERROR] {ab.reason}")
@@ -559,7 +587,7 @@ def main():
                         pass
 
                     try:
-                        executed = execute_action(platform, state, fallback_plan, flags, username, telemetry)
+                        executed = execute_action(platform, state, fallback_plan, flags, username, telemetry, store=store)
                     except ActionBlocked as ab2:
                         telemetry.log("action_blocked", {"cycle": iteration, "action": ab2.action, "reason": ab2.reason})
                         print(f"{Fore.RED}[ERROR] {ab2.reason}")

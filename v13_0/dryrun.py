@@ -96,6 +96,10 @@ class DryRunLogger:
             self._append(f"Description: {plan.get('description', '')}\n")
         elif action == "SUBSCRIBE_SUBMOLT":
             self._append(f"Submolt: {plan.get('name', '')}\n")
+        elif action == "SET_TRAJECTORY":
+            self._append(f"Label 1: {plan.get('label_1', '')}\n")
+            self._append(f"Label 2: {plan.get('label_2', '')}\n")
+            self._append(f"Label 3: {plan.get('label_3', '')}\n")
         elif action == "WAIT":
             pass  # summary below is enough
 
