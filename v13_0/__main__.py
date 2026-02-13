@@ -1,15 +1,15 @@
-"""Main entry point for autonomy v12.2.
+"""Main entry point for autonomy v13.0.
 
 Usage:
-    python -m v12_2 <brain_name> [directive] [options]
+    python -m v13_0 <brain_name> [directive] [options]
 
-Changes in v12.2:
-- Fixed telemetry: cycle number now auto-injected into ALL events (was missing from
-  action_executed, action_skipped, moltbook_api_call, etc.)
-- Fixed telemetry: social actions (upvote, follow, subscribe) now log action_executed events
-- Fixed ingest: error_message and has_body/body_bytes field mapping mismatches
-- Dashboard v1.3: KPI queries work correctly with cycle-aware telemetry
-- Added --reset-post-window flag to clear post cooldown on startup
+Changes in v13.0 (from v12.2):
+- Renamed --dry-run to --disable-moltbook: skips ALL Moltbook API calls (reads & writes),
+  Moltbook API key no longer required when disabled, planner runs with empty feed
+- Google Search grounding via --enable-search flag (Gemini native grounding on planner chat)
+- Grounding metadata (search queries, sources) logged to telemetry and dry-run output
+- Analog Home frontend: expandable card UI showing last 5 artifacts
+- Analog Home API: GET /artifacts?limit=N endpoint
 """
 
 import os
