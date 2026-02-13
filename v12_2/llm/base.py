@@ -20,6 +20,7 @@ class ChatSession(ABC):
     _telemetry: Any = None
     _brain_name: str = ""
     _last_llm_exception: Optional[Dict[str, Any]] = None
+    _last_grounding_metadata: Any = None
     model_name: str = ""
 
 
@@ -33,6 +34,7 @@ class LLMClient(ABC):
         temperature: float = 0.7,
         max_output_tokens: int = 900,
         model: str = "",
+        tools: Optional[list] = None,
     ) -> ChatSession:
         """Create a new chat session with the given system instruction."""
         ...

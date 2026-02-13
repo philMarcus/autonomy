@@ -103,6 +103,16 @@ class DryRunLogger:
         if summary:
             self._append(f"Summary: {summary}\n")
 
+    def grounding_sources(self, queries: List[str], sources: List[Dict[str, str]]) -> None:
+        """Write Google Search grounding sources section."""
+        if not queries and not sources:
+            return
+        self._append("\n--- GROUNDING (Google Search) ---\n")
+        if queries:
+            self._append("Search queries: " + ", ".join(str(q) for q in queries) + "\n")
+        for src in sources[:10]:
+            self._append(f"  - {src.get('title', '?')}: {src.get('uri', '?')}\n")
+
     def kernel_update(self, reason: str, new_kernel: str) -> None:
         """Write the kernel update proposal section."""
         self._append(f"\n--- KERNEL UPDATE PROPOSAL ---\n")

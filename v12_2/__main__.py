@@ -61,7 +61,9 @@ def build_arg_parser() -> argparse.ArgumentParser:
     ap.add_argument("directive", nargs="?", default="Participate on Moltbook.")
     ap.add_argument("--allow-kernel-update", action="store_true", help="Allow the planner to rewrite the kernel prompt.")
     ap.add_argument("--no-kernel-disk-write", action="store_true", help="Kernel updates stay in-memory only (not written to disk).")
-    ap.add_argument("--dry-run", action="store_true", help="LLM runs normally but writes go to local log instead of Moltbook.")
+    ap.add_argument("--disable-moltbook", "--dry-run", dest="moltbook_disabled",
+                    action="store_true",
+                    help="Skip all Moltbook API calls. LLM plans normally; output goes to local log + Analog Home.")
     ap.add_argument("--interval", type=int, default=5, help="Sleep interval minutes between cycles.")
     ap.add_argument("--post-interval", type=int, default=30, help="Minutes between posts (default 30).")
     ap.add_argument("--reset-post-window", action="store_true", help="Clear the post cooldown timer on startup (allows immediate posting).")
@@ -71,6 +73,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
     DEFAULT_GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash").strip()
     ap.add_argument("--gemini-model", default=DEFAULT_GEMINI_MODEL, help="Gemini model name.")
     ap.add_argument("--temperature", type=float, default=0.7, help="LLM temperature for planner chat (default 0.7).")
+    ap.add_argument("--enable-search", action="store_true",
+                    help="Enable Google Search grounding on the planner LLM call.")
     ap.add_argument("--inject-espn", action="store_true")
     ap.add_argument("--espn-cache-seconds", type=int, default=60)
     ap.add_argument("--espn-league", default=os.environ.get("ESPN_LEAGUE", ESPN_DEFAULT_LEAGUE))
@@ -123,7 +127,7 @@ def main():
 
     if not gem_key:
         raise SystemExit(f"Missing {prefix}_GEMINI_API_KEY (or GEMINI_API_KEY)")
-    if not mb_key:
+    if not mb_key and not args.moltbook_disabled:
         raise SystemExit(f"Missing {prefix}_MOLTBOOK_API_KEY (or MOLTBOOK_API_KEY)")
 
     # Telemetry
@@ -133,42 +137,45 @@ def main():
     telemetry.log("run_start", {
         "version": VERSION, "brain_env_prefix": prefix,
         "gemini_key_fp": key_fingerprint(gem_key),
-        "moltbook_key_fp": key_fingerprint(mb_key),
+        "moltbook_disabled": args.moltbook_disabled,
     })
 
     # LLM client
     llm_client = GeminiLLMClient(api_key=gem_key, default_model=args.gemini_model)
 
-    # Challenge solver (use MathVerificationSolver for current Moltbook challenges)
-    challenge_solver = MathVerificationSolver(llm_client=llm_client, telemetry=telemetry)
+    # Platform client (None when Moltbook disabled)
+    platform = None
+    challenge_solver = None
+    if not args.moltbook_disabled:
+        challenge_solver = MathVerificationSolver(llm_client=llm_client, telemetry=telemetry)
+        platform = MoltbookClient(
+            api_key=mb_key, telemetry=telemetry, brain_name=brain_name,
+            read_only=args.read_only, challenge_solver=challenge_solver,
+        )
 
-    # Platform client
-    platform = MoltbookClient(
-        api_key=mb_key, telemetry=telemetry, brain_name=brain_name,
-        read_only=args.read_only, challenge_solver=challenge_solver,
-    )
-
-    # Dry-run logger
+    # Output logger (always enabled when Moltbook disabled)
     dryrun_log = None
-    if args.dry_run:
+    if args.moltbook_disabled:
         from .dryrun import DryRunLogger
         dryrun_log = DryRunLogger(brain_name=brain_name, base_dir=BRAINS_DIR)
 
-    output_destination = "local" if args.dry_run else "moltbook"
+    output_destination = "local" if args.moltbook_disabled else "moltbook"
 
     # Directive
     user_directive = args.directive
 
     print(f"{Fore.CYAN}=== {brain_name}: autonomy v{VERSION} (modular multi-brain loop) ===")
-    print(f"{Fore.CYAN}    env prefix: {prefix} | gemini_key:*{key_fingerprint(gem_key)} | moltbook_key:*{key_fingerprint(mb_key)}")
-    if args.dry_run:
-        print(f"{Fore.MAGENTA}    [DRY-RUN MODE] Output destination: local | Writes go to {dryrun_log.path}")
+    print(f"{Fore.CYAN}    env prefix: {prefix} | gemini_key:*{key_fingerprint(gem_key)}")
+    if args.moltbook_disabled:
+        print(f"{Fore.MAGENTA}    [MOLTBOOK DISABLED] Output → local log ({dryrun_log.path}) + Analog Home")
+    else:
+        print(f"{Fore.CYAN}    moltbook_key:*{key_fingerprint(mb_key)}")
     if args.post_interval != 30:
         print(f"{Fore.CYAN}    Post interval: {args.post_interval} min (default 30)")
     if args.no_kernel_disk_write:
         print(f"{Fore.CYAN}    Kernel disk write: DISABLED (in-memory only)")
 
-    if "moltbook.com" in MOLTBOOK_API_BASE and "www.moltbook.com" not in MOLTBOOK_API_BASE:
+    if not args.moltbook_disabled and "moltbook.com" in MOLTBOOK_API_BASE and "www.moltbook.com" not in MOLTBOOK_API_BASE:
         print(f"{Fore.RED}MOLTBOOK_API_BASE must be https://www.moltbook.com/api/v1 (with www).")
         return
 
@@ -218,12 +225,19 @@ def main():
         "allow_downvote": allow_downvote,
         "allow_create_submolt": allow_create_submolt,
         "read_only": args.read_only,
-        "dry_run": args.dry_run,
+        "moltbook_disabled": args.moltbook_disabled,
         "dryrun_log": dryrun_log,
         "write_disabled": False,
         "write_disabled_reason": None,
         "post_cooldown_seconds": post_cooldown_seconds,
     }
+
+    # Build tools list for planner chat (Google Search grounding)
+    search_tools = None
+    if args.enable_search:
+        from google.genai import types as genai_types
+        search_tools = [genai_types.Tool(google_search=genai_types.GoogleSearch())]
+        print(f"{Fore.GREEN}Google Search grounding enabled.")
 
     iteration = 0
     while True:
@@ -233,6 +247,7 @@ def main():
             model=args.gemini_model,
             max_output_tokens=16384,
             temperature=args.temperature,
+            tools=search_tools,
         )
         chat._telemetry = telemetry
         chat._brain_name = brain_name
@@ -246,34 +261,42 @@ def main():
         if dryrun_log:
             dryrun_log.cycle_start(iteration)
 
-        # Refresh my posts
-        did_add = refresh_my_posts_from_profile(platform, state, username)
-        if did_add:
-            store.save_state(state)
+        # --- Moltbook context (skipped entirely when disabled) ---
+        feed = []
+        feed_brief = "No feed available (Moltbook disabled)."
+        reply_candidate = None
+        outside_candidate = None
+
+        if not args.moltbook_disabled:
+            did_add = refresh_my_posts_from_profile(platform, state, username)
+            if did_add:
+                store.save_state(state)
+
+            feed = platform.get_feed(limit=FEED_LIMIT, sort=args.feed_sort)
+            maybe_do_social_actions(
+                platform, chat, store, state, feed, args,
+                kernel, user_directive, username, telemetry,
+                dryrun_log=dryrun_log,
+            )
+            if dryrun_log:
+                dryrun_log.flush_social_actions()
+
+            feed_brief = "\n".join(
+                f"- @{get_author_name(p.get('author'))}: {shorten(p.get('content',''), FEED_ITEM_CHARS)} ({post_url(p.get('id',''))})"
+                for p in feed if p.get("id")
+            ) or "No feed available."
+
+            if dryrun_log:
+                dryrun_log.feed(feed_brief)
+
+            reply_candidate = find_unanswered_comment_on_my_posts(platform, state, username, telemetry)
+            outside_candidate = pick_outside_post_for_comment(feed, state, username)
 
         # Compute windows
         post_ok, post_wait = can_post(state)
         post_window_open = post_ok
         window = "OPEN" if post_window_open else f"CLOSED ({post_wait}m)"
-        print(f"{Fore.WHITE}Post Window: {window} | Comment Window: ALWAYS OPEN")
-
-        # Build context
-        feed = platform.get_feed(limit=FEED_LIMIT, sort=args.feed_sort)
-        maybe_do_social_actions(
-            platform, chat, store, state, feed, args,
-            kernel, user_directive, username, telemetry,
-            dryrun_log=dryrun_log,
-        )
-        if dryrun_log:
-            dryrun_log.flush_social_actions()
-
-        feed_brief = "\n".join(
-            f"- @{get_author_name(p.get('author'))}: {shorten(p.get('content',''), FEED_ITEM_CHARS)} ({post_url(p.get('id',''))})"
-            for p in feed if p.get("id")
-        ) or "No feed available."
-
-        if dryrun_log:
-            dryrun_log.feed(feed_brief)
+        print(f"{Fore.WHITE}Post Window: {window}")
 
         # External data
         external_data = ""
@@ -286,18 +309,16 @@ def main():
                 telemetry=telemetry,
             )
 
-        reply_candidate = find_unanswered_comment_on_my_posts(platform, state, username, telemetry)
-        outside_candidate = pick_outside_post_for_comment(feed, state, username)
-
-        # DM fallback
-        if (not reply_candidate) and (not outside_candidate) and (not post_window_open or not allow_posts):
-            if maybe_dm_fallback(platform, chat, store, state, feed, args, kernel, user_directive, username, telemetry, dryrun_log=dryrun_log):
-                if dryrun_log:
-                    dryrun_log.flush_social_actions()
-                telemetry.log("cycle_end", {"cycle": iteration, "reason": "dm_fallback"})
-                print(f"{Fore.WHITE}Sleeping for {args.interval} minutes...")
-                time.sleep(max(1, args.interval) * 60)
-                continue
+        # DM fallback (only when Moltbook is active)
+        if not args.moltbook_disabled:
+            if (not reply_candidate) and (not outside_candidate) and (not post_window_open or not allow_posts):
+                if maybe_dm_fallback(platform, chat, store, state, feed, args, kernel, user_directive, username, telemetry, dryrun_log=dryrun_log):
+                    if dryrun_log:
+                        dryrun_log.flush_social_actions()
+                    telemetry.log("cycle_end", {"cycle": iteration, "reason": "dm_fallback"})
+                    print(f"{Fore.WHITE}Sleeping for {args.interval} minutes...")
+                    time.sleep(max(1, args.interval) * 60)
+                    continue
 
         hist_txt = history_context(state)
         mem_txt = memory_context(state)
@@ -315,6 +336,7 @@ def main():
             allow_downvote=allow_downvote, read_only=flags.get("read_only", False),
             current_kernel=kernel if args.allow_kernel_update else "",
             output_destination=output_destination,
+            search_enabled=bool(args.enable_search),
         )
 
         try:
@@ -328,6 +350,31 @@ def main():
                 print(f"{Fore.CYAN}-----------------{Style.RESET_ALL}")
                 if dryrun_log:
                     dryrun_log.reasoning(preamble)
+
+            # Log Google Search grounding metadata if available
+            grounding = getattr(chat, "_last_grounding_metadata", None)
+            if grounding:
+                search_queries = getattr(grounding, "web_search_queries", None) or []
+                chunks = getattr(grounding, "grounding_chunks", None) or []
+                source_urls = []
+                for chunk in chunks[:10]:
+                    web = getattr(chunk, "web", None)
+                    if web:
+                        source_urls.append({"uri": getattr(web, "uri", ""), "title": getattr(web, "title", "")})
+                if search_queries or source_urls:
+                    print(f"{Fore.GREEN}--- SEARCH GROUNDING ---")
+                    for q in search_queries:
+                        print(f"{Fore.WHITE}  Query: {q}")
+                    for src in source_urls[:5]:
+                        print(f"{Fore.WHITE}  Source: {src.get('title', '?')} — {src.get('uri', '?')}")
+                    print(f"{Fore.GREEN}------------------------{Style.RESET_ALL}")
+                    telemetry.log("grounding_metadata", {
+                        "search_queries": list(search_queries),
+                        "source_count": len(chunks),
+                        "sources": source_urls[:10],
+                    })
+                    if dryrun_log:
+                        dryrun_log.grounding_sources(list(search_queries), source_urls)
 
             # Check for kernel update request (only if --allow-kernel-update)
             if plan.get("update_kernel") and args.allow_kernel_update:
@@ -524,19 +571,21 @@ def main():
             if executed:
                 store.save_state(state)
 
-                # Archive artifact to Analog_Home (Phase 1: fire-and-forget)
+                # Archive artifact to Analog_Home (fire-and-forget)
                 act_upper = (executed_plan.get("action") or "").upper()
                 if act_upper in ("POST", "COMMENT", "REPLY"):
                     source_id = ""
                     source_parent_id = ""
                     source_url_str = ""
-                    if act_upper == "POST" and state.get("my_post_ids"):
-                        source_id = state["my_post_ids"][-1]
-                        source_url_str = post_url(source_id)
-                    elif act_upper in ("COMMENT", "REPLY"):
-                        source_id = executed_plan.get("post_id", "")
-                        source_parent_id = executed_plan.get("parent_comment_id", "")
-                        source_url_str = post_url(source_id)
+                    src_platform = "local" if args.moltbook_disabled else "moltbook"
+                    if not args.moltbook_disabled:
+                        if act_upper == "POST" and state.get("my_post_ids"):
+                            source_id = state["my_post_ids"][-1]
+                            source_url_str = post_url(source_id)
+                        elif act_upper in ("COMMENT", "REPLY"):
+                            source_id = executed_plan.get("post_id", "")
+                            source_parent_id = executed_plan.get("parent_comment_id", "")
+                            source_url_str = post_url(source_id)
 
                     store.write_artifact(iteration, {
                         "brain": brain_name,
@@ -545,7 +594,7 @@ def main():
                         "body_markdown": executed_plan.get("content", ""),
                         "monologue_public": preamble,
                         "channel": executed_plan.get("submolt", ""),
-                        "source_platform": "moltbook",
+                        "source_platform": src_platform,
                         "source_id": source_id,
                         "source_parent_id": source_parent_id,
                         "source_url": source_url_str,
@@ -553,7 +602,7 @@ def main():
                     telemetry.log("artifact_published", {
                         "cycle": iteration,
                         "artifact_type": act_upper.lower(),
-                        "source_platform": "moltbook",
+                        "source_platform": src_platform,
                     })
 
         except Exception as e:

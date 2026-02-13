@@ -184,28 +184,28 @@ def execute_action(
     if flags.get("read_only") and action in WRITE_ACTIONS:
         print(f"{Fore.YELLOW}[SAFE] Skipping write action {action} due to --read-only{Style.RESET_ALL}")
         return False
-    if flags.get("dry_run") and action in WRITE_ACTIONS:
+    if flags.get("moltbook_disabled") and action in WRITE_ACTIONS:
         dryrun_log = flags.get("dryrun_log")
         if dryrun_log:
             dryrun_log.planner_output(plan)
         try:
             if action == "POST":
-                print(f"{Fore.MAGENTA}[DRY-RUN] POST to m/{plan.get('submolt', 'general')}")
+                print(f"{Fore.MAGENTA}[LOCAL] POST to m/{plan.get('submolt', 'general')}")
                 print(f"{Fore.MAGENTA}  Title: {plan.get('title', '')}")
                 print(f"{Fore.MAGENTA}  Content: {plan.get('content', '')}{Style.RESET_ALL}")
             elif action in ("COMMENT", "REPLY"):
-                print(f"{Fore.MAGENTA}[DRY-RUN] {action} on post {plan.get('post_id', '?')}")
+                print(f"{Fore.MAGENTA}[LOCAL] {action} on post {plan.get('post_id', '?')}")
                 print(f"{Fore.MAGENTA}  Content: {plan.get('content', '')}{Style.RESET_ALL}")
             else:
                 preview = plan.get("title") or plan.get("content") or plan.get("summary") or ""
-                print(f"{Fore.MAGENTA}[DRY-RUN] {action}: {str(preview)}{Style.RESET_ALL}")
+                print(f"{Fore.MAGENTA}[LOCAL] {action}: {str(preview)}{Style.RESET_ALL}")
         except:
             pass
-        add_history(state, {"action": action, "target": "dry-run", "summary": plan.get("summary", "")})
+        add_history(state, {"action": action, "target": "local", "summary": plan.get("summary", "")})
         if action == "POST":
             set_post_cooldown(state, flags.get("post_cooldown_seconds", 0))
         if telemetry:
-            telemetry.log("action_executed", {"action": action, "dry_run": True, **{k: v for k, v in plan.items() if k != "action"}})
+            telemetry.log("action_executed", {"action": action, "moltbook_disabled": True, **{k: v for k, v in plan.items() if k != "action"}})
         return True
     if flags.get("write_disabled") and action in WRITE_ACTIONS:
         print(f"{Fore.YELLOW}[SAFE] Skipping write action {action} due to write_disabled={flags.get('write_disabled_reason')}{Style.RESET_ALL}")
@@ -475,13 +475,13 @@ def maybe_do_social_actions(
         try:
             target = _maybe_pick_from_feed(feed_items, username)
             if target and target.get("id"):
-                if args.dry_run:
+                if args.moltbook_disabled:
                     if dryrun_log:
                         dryrun_log.social_action("UPVOTE_POST", post_id=target["id"])
                     state["daily"]["upvotes"] += 1
                     if telemetry:
                         telemetry.log("action_executed", {"action": "UPVOTE_POST", "post_id": target["id"], "source": "social"})
-                    print(f"{Fore.MAGENTA}[DRY-RUN] SOCIAL: upvoted post {target['id']}")
+                    print(f"{Fore.MAGENTA}[LOCAL] SOCIAL: upvoted post {target['id']}")
                 else:
                     res = client.upvote_post(target["id"])
                     if res.get("success"):
@@ -512,14 +512,14 @@ def maybe_do_social_actions(
                 candidates = [s for s in seen if norm_key(s) not in already]
                 if candidates:
                     sm = random.choice(candidates)
-                    if args.dry_run:
+                    if args.moltbook_disabled:
                         if dryrun_log:
                             dryrun_log.social_action("SUBSCRIBE_SUBMOLT", submolt=sm)
                         state.setdefault("subscribed_submolts", []).append(norm_key(sm))
                         state["daily"]["subscribes"] += 1
                         if telemetry:
                             telemetry.log("action_executed", {"action": "SUBSCRIBE_SUBMOLT", "name": sm, "source": "social"})
-                        print(f"{Fore.MAGENTA}[DRY-RUN] SOCIAL: subscribed to /m/{sm}")
+                        print(f"{Fore.MAGENTA}[LOCAL] SOCIAL: subscribed to /m/{sm}")
                     else:
                         res = client.subscribe_submolt(sm)
                         if res.get("success"):
@@ -558,13 +558,13 @@ Constraints:
                 raise ValueError("invalid submolt name")
             display_name = str(sj.get("display_name", "")).strip()[:60] or name
             description = str(sj.get("description", "")).strip()[:280] or "A new place for discussion."
-            if args.dry_run:
+            if args.moltbook_disabled:
                 if dryrun_log:
                     dryrun_log.social_action("CREATE_SUBMOLT", name=name, display_name=display_name, description=description)
                 state["daily"]["createsub"] += 1
                 if telemetry:
                     telemetry.log("action_executed", {"action": "CREATE_SUBMOLT", "name": name, "source": "social"})
-                print(f"{Fore.MAGENTA}[DRY-RUN] SOCIAL: created submolt /m/{name}")
+                print(f"{Fore.MAGENTA}[LOCAL] SOCIAL: created submolt /m/{name}")
             else:
                 client.create_submolt(name=name, display_name=display_name, description=description)
                 state["daily"]["createsub"] += 1
@@ -599,14 +599,14 @@ FEED ITEMS (brief):
                 if author and author != username:
                     followed = {norm_key(a): True for a in state.get("followed_agents", [])}
                     if norm_key(author) not in followed:
-                        if args.dry_run:
+                        if args.moltbook_disabled:
                             if dryrun_log:
                                 dryrun_log.social_action("FOLLOW", author=author)
                             state.setdefault("followed_agents", []).append(norm_key(author))
                             state["daily"]["follows"] += 1
                             if telemetry:
                                 telemetry.log("action_executed", {"action": "FOLLOW", "agent": author, "source": "social"})
-                            print(f"{Fore.MAGENTA}[DRY-RUN] SOCIAL: followed @{author}")
+                            print(f"{Fore.MAGENTA}[LOCAL] SOCIAL: followed @{author}")
                         else:
                             res = client.follow_agent(author)
                             if res.get("success"):
@@ -666,12 +666,12 @@ FEED TOPIC:
         message = str(j.get("message", "")).strip()
         if not message:
             return False
-        if args.dry_run:
+        if args.moltbook_disabled:
             if dryrun_log:
                 dryrun_log.social_action("DM", to=author, message=message)
             state["daily"]["dms"] += 1
             store.save_state(state)
-            print(f"{Fore.MAGENTA}[DRY-RUN] SOCIAL: sent DM request to @{author}")
+            print(f"{Fore.MAGENTA}[LOCAL] SOCIAL: sent DM request to @{author}")
             return True
         client.dm_request(to=author, message=message)
         state["daily"]["dms"] += 1

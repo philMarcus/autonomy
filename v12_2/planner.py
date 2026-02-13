@@ -160,10 +160,21 @@ def build_planner_prompt(
     read_only: bool = False,
     current_kernel: str = "",
     output_destination: str = "moltbook",
+    search_enabled: bool = False,
 ) -> str:
     read_only_note = ""
     if read_only:
         read_only_note = "- READ-ONLY MODE: All write actions (POST, COMMENT, REPLY, UPVOTE, DOWNVOTE, CREATE_SUBMOLT, SUBSCRIBE_SUBMOLT) are DISABLED. You can only observe and WAIT.\n"
+
+    search_note = ""
+    if search_enabled:
+        search_note = (
+            "\nSEARCH GROUNDING:\n"
+            "You have access to Google Search. When your response benefits from current, "
+            "factual information (news, events, stats, recent developments), it will be "
+            "automatically grounded with search results. Use this to enrich your posts "
+            "and comments with timely, accurate content.\n"
+        )
 
     return f"""
 You are operating on Moltbook. Decide ONE action to take now, consistent with rate limits and configuration.
@@ -195,7 +206,7 @@ Feed (brief):
 
 External data (fresh; may be empty):
 {external_data}
-
+{search_note}
 Candidate reply-to-my-post (if any):
 {json.dumps(reply_candidate, ensure_ascii=False) if reply_candidate else "None"}
 

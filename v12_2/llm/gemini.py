@@ -72,12 +72,14 @@ BUDGET = GeminiBudget()
 class GeminiChatSession(ChatSession):
     def __init__(self, client: genai.Client, model_name: str,
                  system_instruction: str, temperature: float,
-                 max_output_tokens: int):
+                 max_output_tokens: int,
+                 tools: Optional[list] = None):
         self._client = client
         self.model_name = model_name
         self._system_instruction = system_instruction
         self._temperature = temperature
         self._max_output_tokens = max_output_tokens
+        self._tools = tools
         self._history: List[types.Content] = []
 
     def send_message(self, prompt: str, json_mode: bool = False) -> str:
@@ -108,6 +110,8 @@ class GeminiChatSession(ChatSession):
             config_kwargs["system_instruction"] = self._system_instruction
         if json_mode:
             config_kwargs["response_mime_type"] = "application/json"
+        if self._tools:
+            config_kwargs["tools"] = self._tools
 
         # No ThinkingConfig override — let models use their default thinking
         # behavior. The large max_output_tokens (16384) provides enough
@@ -127,6 +131,13 @@ class GeminiChatSession(ChatSession):
                 contents=contents,
                 config=types.GenerateContentConfig(**config_kwargs),
             )
+
+        # Capture grounding metadata if available (Google Search grounding)
+        self._last_grounding_metadata = None
+        try:
+            self._last_grounding_metadata = resp.candidates[0].grounding_metadata
+        except (IndexError, AttributeError):
+            pass
 
         raw = self._extract_text(resp)
 
@@ -176,6 +187,7 @@ class GeminiLLMClient(LLMClient):
         temperature: float = 0.7,
         max_output_tokens: int = 900,
         model: str = "",
+        tools: Optional[list] = None,
     ) -> GeminiChatSession:
         model_name = model or self.default_model
         return GeminiChatSession(
@@ -184,6 +196,7 @@ class GeminiLLMClient(LLMClient):
             system_instruction=system_instruction or "",
             temperature=temperature,
             max_output_tokens=max_output_tokens,
+            tools=tools,
         )
 
     def generate(
