@@ -365,6 +365,8 @@ def main():
             search_enabled=bool(args.enable_search),
             seeds=analog_seeds,
             trajectory_votes=analog_trajectory,
+            cycle_temperature=cycle_temperature if analog_home_url else None,
+            default_temperature=args.temperature,
         )
 
         try:
@@ -470,6 +472,26 @@ def main():
                         "reason": "read_only_mode",
                         "requested_reason": reason,
                     })
+
+            # Check for trajectory update request (parallel to kernel update)
+            if plan.get("set_trajectory") and analog_home_url:
+                t_label_1 = (plan.get("trajectory_label_1") or "").strip()[:40]
+                t_label_2 = (plan.get("trajectory_label_2") or "").strip()[:40]
+                t_label_3 = (plan.get("trajectory_label_3") or "").strip()[:40]
+                t_reason = plan.get("trajectory_reason", "no reason given")
+                if t_label_1 and t_label_2 and t_label_3:
+                    print(f"{Fore.MAGENTA}[TRAJECTORY UPDATE]")
+                    print(f"{Fore.GREEN}  Labels: {t_label_1} / {t_label_2} / {t_label_3}")
+                    print(f"{Fore.YELLOW}  Reason: {t_reason}")
+                    ok = store.set_trajectory(t_label_1, t_label_2, t_label_3)
+                    telemetry.log("trajectory_update", {
+                        "cycle": iteration, "label_1": t_label_1, "label_2": t_label_2,
+                        "label_3": t_label_3, "reason": t_reason, "success": ok,
+                    })
+                    if ok:
+                        print(f"{Fore.CYAN}>> TRAJECTORY UPDATED")
+                    else:
+                        print(f"{Fore.YELLOW}>> TRAJECTORY UPDATE FAILED")
 
             # Fill missing IDs from candidates
             if (plan.get("action") or "").upper() == "REPLY" and reply_candidate:

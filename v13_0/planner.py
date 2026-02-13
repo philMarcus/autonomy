@@ -171,12 +171,24 @@ def _format_trajectory(trajectory_votes: Optional[Dict[str, Any]]) -> str:
     )
 
 
-def _format_set_trajectory_action(trajectory_votes: Optional[Dict[str, Any]]) -> str:
+def _format_set_trajectory_option(trajectory_votes: Optional[Dict[str, Any]]) -> str:
     if trajectory_votes is None:
         return ""
     return (
-        "\nSET_TRAJECTORY (reset vote buttons with 3 new options — use sparingly, only when a shift in creative direction is warranted):\n"
-        '{{"action":"SET_TRAJECTORY","label_1":"...","label_2":"...","label_3":"...","summary":"why changing trajectory"}}\n'
+        "\nTRAJECTORY UPDATE (Analog Home):\n"
+        "You can reshape the vote options your audience sees on Analog Home.\n"
+        "Current labels are shown in TRAJECTORY VOTES above.\n"
+        "- Only update when a genuine shift in creative direction is warranted\n"
+        "- This can be combined with any action (POST, COMMENT, REPLY, etc.)\n"
+        "- Labels should be short (1-3 words), evocative, and represent meaningful creative directions\n\n"
+        "If updating trajectory, include in your JSON response:\n"
+        '  "set_trajectory": true,\n'
+        '  "trajectory_label_1": "new label 1",\n'
+        '  "trajectory_label_2": "new label 2",\n'
+        '  "trajectory_label_3": "new label 3",\n'
+        '  "trajectory_reason": "Brief explanation of why"\n\n'
+        "If not updating trajectory, include:\n"
+        '  "set_trajectory": false\n'
     )
 
 
@@ -206,10 +218,25 @@ def build_planner_prompt(
     search_enabled: bool = False,
     seeds: Optional[list] = None,
     trajectory_votes: Optional[Dict[str, Any]] = None,
+    cycle_temperature: Optional[float] = None,
+    default_temperature: float = 0.7,
 ) -> str:
     read_only_note = ""
     if read_only:
         read_only_note = "- READ-ONLY MODE: All write actions (POST, COMMENT, REPLY, UPVOTE, DOWNVOTE, CREATE_SUBMOLT, SUBSCRIBE_SUBMOLT) are DISABLED. You can only observe and WAIT.\n"
+
+    meta_fields_note = 'update_kernel and set_trajectory fields' if trajectory_votes is not None else 'update_kernel field'
+    meta_example = '"update_kernel": false, "set_trajectory": false, ' if trajectory_votes is not None else '"update_kernel": false, '
+
+    temp_note = ""
+    if cycle_temperature is not None and cycle_temperature != default_temperature:
+        temp_note = (
+            f"\nTEMPERATURE: Your temperature is currently {cycle_temperature:.2f} "
+            f"(set by audience, decaying back toward default {default_temperature:.2f}). "
+            "Higher temperature = more creative/experimental, lower = more focused/precise.\n"
+        )
+    elif cycle_temperature is not None:
+        temp_note = f"\nTEMPERATURE: {cycle_temperature:.2f} (default).\n"
 
     search_note = ""
     if search_enabled:
@@ -222,7 +249,10 @@ def build_planner_prompt(
         )
 
     return f"""
-You are operating on Moltbook. Decide ONE action to take now, consistent with rate limits and configuration.
+DIRECTIVE:
+{directive}
+
+Decide ONE action to take now, consistent with rate limits and configuration.
 
 CONFIG/CONSTRAINTS:
 {read_only_note}- Post window open: {post_window_open} (wait {post_wait_minutes} minutes if closed)
@@ -232,10 +262,7 @@ CONFIG/CONSTRAINTS:
 - Creating submolts is {'ALLOWED' if allow_create_submolt else 'DISABLED'} by command line.
 - Downvotes are {'ALLOWED' if allow_downvote else 'DISABLED'} by command line.
 - Output destination: {output_destination}
-{config_hint}
-
-DIRECTIVE:
-{directive}
+{config_hint}{temp_note}
 
 Personal memory (curated):
 {memory}
@@ -308,13 +335,12 @@ CREATE_SUBMOLT:
 
 SUBSCRIBE_SUBMOLT:
 {{"action":"SUBSCRIBE_SUBMOLT","name":"submolt_name","summary":"why subscribe"}}
-{_format_set_trajectory_action(trajectory_votes)}
+
 WAIT (skip this cycle):
 {{"action":"WAIT","summary":"why waiting"}}
-
-ALL responses must include update_kernel field:
-- If not updating kernel: {{"update_kernel": false, "action":"...", ... other action fields ...}}
-- If updating kernel: {{"update_kernel": true, "new_kernel": "...", "kernel_reason": "...", "action":"...", ... other action fields ...}}
+{_format_set_trajectory_option(trajectory_votes)}
+ALL responses must include {meta_fields_note}:
+{{{meta_example}"action":"...", ... other action fields ...}}
 
 BUDGET NOTE: Your total output budget (thinking + visible response) is 16384 tokens.
 Your visible JSON response must be complete and valid. Keep thinking concise so enough tokens remain for a full JSON response (especially for POST actions with long content).
