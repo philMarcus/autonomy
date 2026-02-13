@@ -302,7 +302,7 @@ If updating, include in your JSON response:
 
 If not updating, include:
   "update_kernel": false
-
+{_format_set_trajectory_option(trajectory_votes)}
 ACTION POLICY (default preference):
 1) If posts are allowed AND post window open, prefer POST.
 2) Otherwise prefer REPLY to an unanswered comment on my posts (if available).
@@ -338,7 +338,7 @@ SUBSCRIBE_SUBMOLT:
 
 WAIT (skip this cycle):
 {{"action":"WAIT","summary":"why waiting"}}
-{_format_set_trajectory_option(trajectory_votes)}
+
 ALL responses must include {meta_fields_note}:
 {{{meta_example}"action":"...", ... other action fields ...}}
 
