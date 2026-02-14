@@ -10,6 +10,14 @@ from typing import Any, Dict, List, Optional
 
 from colorama import Fore, Style
 
+
+def safe_print(text: str) -> None:
+    """Print text, replacing unencodable characters instead of crashing."""
+    try:
+        print(text)
+    except UnicodeEncodeError:
+        print(text.encode(errors="replace").decode())
+
 from .config import (
     POST_COOLDOWN_SECONDS, COMMENT_COOLDOWN_SECONDS,
     POST_FAILURE_COOLDOWN_SECONDS,
@@ -188,15 +196,15 @@ def execute_action(
     if flags.get("moltbook_disabled") and action in WRITE_ACTIONS:
         try:
             if action == "POST":
-                print(f"{Fore.MAGENTA}[LOCAL] POST to m/{plan.get('submolt', 'general')}")
-                print(f"{Fore.MAGENTA}  Title: {plan.get('title', '')}")
-                print(f"{Fore.MAGENTA}  Content: {plan.get('content', '')}{Style.RESET_ALL}")
+                safe_print(f"{Fore.MAGENTA}[LOCAL] POST to m/{plan.get('submolt', 'general')}")
+                safe_print(f"{Fore.MAGENTA}  Title: {plan.get('title', '')}")
+                safe_print(f"{Fore.MAGENTA}  Content: {plan.get('content', '')}{Style.RESET_ALL}")
             elif action in ("COMMENT", "REPLY"):
-                print(f"{Fore.MAGENTA}[LOCAL] {action} on post {plan.get('post_id', '?')}")
-                print(f"{Fore.MAGENTA}  Content: {plan.get('content', '')}{Style.RESET_ALL}")
+                safe_print(f"{Fore.MAGENTA}[LOCAL] {action} on post {plan.get('post_id', '?')}")
+                safe_print(f"{Fore.MAGENTA}  Content: {plan.get('content', '')}{Style.RESET_ALL}")
             else:
                 preview = plan.get("title") or plan.get("content") or plan.get("summary") or ""
-                print(f"{Fore.MAGENTA}[LOCAL] {action}: {str(preview)}{Style.RESET_ALL}")
+                safe_print(f"{Fore.MAGENTA}[LOCAL] {action}: {str(preview)}{Style.RESET_ALL}")
         except:
             pass
         add_history(state, {"action": action, "target": "local", "summary": plan.get("summary", "")})
@@ -213,7 +221,7 @@ def execute_action(
         add_history(state, {"action": "WAIT", "target": "", "summary": plan.get("summary", "...")})
         if telemetry:
             telemetry.log("action_skipped", {"action": "WAIT", "reason": plan.get("summary", "")})
-        print(f"{Fore.CYAN}>> WAIT: {plan.get('summary', '')}")
+        safe_print(f"{Fore.CYAN}>> WAIT: {plan.get('summary', '')}")
         return False
 
     # Enforce CLI permissions
@@ -253,8 +261,8 @@ def execute_action(
         content = plan.get("content") or ""
         print(f"{Fore.CYAN}...Action: POST")
         print(f"{Fore.YELLOW}Target submolt: m/{submolt}")
-        print(f"{Fore.GREEN}TITLE: {title}")
-        print(f"{Fore.GREEN}CONTENT: {content}\n")
+        safe_print(f"{Fore.GREEN}TITLE: {title}")
+        safe_print(f"{Fore.GREEN}CONTENT: {content}\n")
         state["next_post_time"] = max(float(state.get("next_post_time", 0.0)), time.time() + float(POST_FAILURE_COOLDOWN_SECONDS))
         res = client.create_post(submolt=submolt, title=title, content=content)
         if not res.get("success"):

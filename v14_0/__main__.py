@@ -53,6 +53,14 @@ from .actions import (
 colorama_init(autoreset=True)
 
 
+def safe_print(text: str) -> None:
+    """Print text, replacing unencodable characters instead of crashing."""
+    try:
+        print(text)
+    except UnicodeEncodeError:
+        print(text.encode(errors="replace").decode())
+
+
 def build_arg_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(description=f"Autonomy v{VERSION} — modular multi-brain agent loop")
     ap.add_argument("brain", help="Brain name (used as filename prefix in BRAINS_DIR).")
@@ -369,9 +377,9 @@ def main():
             # Display any non-JSON LLM output (reasoning, preamble, etc.)
             preamble = plan.pop("_preamble", "")
             if preamble:
-                print(f"{Fore.CYAN}--- REASONING ---")
-                print(f"{Fore.WHITE}{preamble}")
-                print(f"{Fore.CYAN}-----------------{Style.RESET_ALL}")
+                safe_print(f"{Fore.CYAN}--- REASONING ---")
+                safe_print(f"{Fore.WHITE}{preamble}")
+                safe_print(f"{Fore.CYAN}-----------------{Style.RESET_ALL}")
 
             # Log Google Search grounding metadata if available
             grounding = getattr(chat, "_last_grounding_metadata", None)
@@ -384,12 +392,12 @@ def main():
                     if web:
                         source_urls.append({"uri": getattr(web, "uri", ""), "title": getattr(web, "title", "")})
                 if search_queries or source_urls:
-                    print(f"{Fore.GREEN}--- SEARCH GROUNDING ---")
+                    safe_print(f"{Fore.GREEN}--- SEARCH GROUNDING ---")
                     for q in search_queries:
-                        print(f"{Fore.WHITE}  Query: {q}")
+                        safe_print(f"{Fore.WHITE}  Query: {q}")
                     for src in source_urls[:5]:
-                        print(f"{Fore.WHITE}  Source: {src.get('title', '?')} — {src.get('uri', '?')}")
-                    print(f"{Fore.GREEN}------------------------{Style.RESET_ALL}")
+                        safe_print(f"{Fore.WHITE}  Source: {src.get('title', '?')} -- {src.get('uri', '?')}")
+                    safe_print(f"{Fore.GREEN}------------------------{Style.RESET_ALL}")
                     telemetry.log("grounding_metadata", {
                         "search_queries": list(search_queries),
                         "source_count": len(chunks),
@@ -408,10 +416,10 @@ def main():
                 reason = plan.get("kernel_reason", "no reason given")
 
                 try:
-                    print(f"{Fore.MAGENTA}[KERNEL UPDATE REQUESTED]")
-                    print(f"{Fore.YELLOW}Reason: {reason}")
-                    print(f"{Fore.YELLOW}New kernel length: {len(new_kernel)} chars")
-                except:
+                    safe_print(f"{Fore.MAGENTA}[KERNEL UPDATE REQUESTED]")
+                    safe_print(f"{Fore.YELLOW}Reason: {reason}")
+                    safe_print(f"{Fore.YELLOW}New kernel length: {len(new_kernel)} chars")
+                except Exception:
                     pass
 
                 if not flags.get("read_only"):
@@ -480,11 +488,11 @@ def main():
                     except (ValueError, TypeError):
                         t_default_temp = None
                 if t_label_1 and t_label_2 and t_label_3:
-                    print(f"{Fore.MAGENTA}[TRAJECTORY UPDATE]")
-                    print(f"{Fore.GREEN}  Labels: {t_label_1} / {t_label_2} / {t_label_3}")
+                    safe_print(f"{Fore.MAGENTA}[TRAJECTORY UPDATE]")
+                    safe_print(f"{Fore.GREEN}  Labels: {t_label_1} / {t_label_2} / {t_label_3}")
                     if t_default_temp is not None:
-                        print(f"{Fore.GREEN}  Default temp: {t_default_temp}")
-                    print(f"{Fore.YELLOW}  Reason: {t_reason}")
+                        safe_print(f"{Fore.GREEN}  Default temp: {t_default_temp}")
+                    safe_print(f"{Fore.YELLOW}  Reason: {t_reason}")
                     ok = store.set_trajectory(t_label_1, t_label_2, t_label_3, reason=t_reason, default_temperature=t_default_temp)
                     telemetry.log("trajectory_update", {
                         "cycle": iteration, "label_1": t_label_1, "label_2": t_label_2,
@@ -521,7 +529,7 @@ def main():
                 executed = execute_action(platform, state, plan, flags, username, telemetry, store=store)
             except ActionBlocked as ab:
                 telemetry.log("action_blocked", {"cycle": iteration, "action": ab.action, "reason": ab.reason})
-                print(f"{Fore.RED}[ERROR] {ab.reason}")
+                safe_print(f"{Fore.RED}[ERROR] {ab.reason}")
 
                 # Fallback logic
                 fallback_plan = None
@@ -614,7 +622,7 @@ def main():
                         executed = execute_action(platform, state, fallback_plan, flags, username, telemetry, store=store)
                     except ActionBlocked as ab2:
                         telemetry.log("action_blocked", {"cycle": iteration, "action": ab2.action, "reason": ab2.reason})
-                        print(f"{Fore.RED}[ERROR] {ab2.reason}")
+                        safe_print(f"{Fore.RED}[ERROR] {ab2.reason}")
                         executed = False
 
             # Use fallback_plan if that's what actually executed
@@ -671,7 +679,7 @@ def main():
 
         except Exception as e:
             telemetry.log("error", {"cycle": iteration, "error": str(e)})
-            print(f"{Fore.RED}[ERROR] {e}")
+            safe_print(f"{Fore.RED}[ERROR] {e}")
 
         telemetry.log("cycle_end", {"cycle": iteration})
         print(f"{Fore.WHITE}Sleeping for {args.interval} minutes...")
