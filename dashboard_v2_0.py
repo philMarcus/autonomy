@@ -1,0 +1,791 @@
+# dashboard_v2_0.py
+# Streamlit dashboard: Overview (compact) + Cycle Replay (JSONL) + Input/Controls
+#
+# Run:
+#   streamlit run dashboard_v2_0.py
+
+from __future__ import annotations
+
+import json
+import os
+import glob
+import subprocess
+import sys
+from pathlib import Path
+from typing import Tuple
+
+import streamlit as st
+
+DB_PATH = "warehouse/telemetry.duckdb"
+BRAINS_DIR = os.environ.get("BRAINS_DIR", "brains")
+TELEMETRY_DIR = os.environ.get("TELEMETRY_DIR", "telemetry")
+
+
+# ============================================================
+# Auto-ingest on startup + manual refresh
+# ============================================================
+def run_ingest() -> str:
+    """Run ingest.py and return its output."""
+    try:
+        from ingest import ingest_once
+        lines, events = ingest_once()
+        return f"Ingested {lines} lines, {events} events."
+    except Exception as e:
+        return f"Ingest error: {e}"
+
+
+def auto_ingest_on_startup():
+    """Run ingest once per Streamlit session (on first load)."""
+    if "ingest_done" not in st.session_state:
+        result = run_ingest()
+        st.session_state["ingest_done"] = True
+        st.session_state["last_ingest"] = result
+
+
+# ============================================================
+# Brain discovery
+# ============================================================
+def discover_brains() -> list[str]:
+    """Find brain names from kernel prompt files in brains/ dir."""
+    pattern = os.path.join(BRAINS_DIR, "*_kernel_prompt.txt")
+    files = glob.glob(pattern)
+    names = sorted(
+        os.path.basename(f).replace("_kernel_prompt.txt", "") for f in files
+    )
+    if not names:
+        # fallback: check for *_kernel.txt (backward compat)
+        alt = glob.glob(os.path.join(BRAINS_DIR, "*_kernel.txt"))
+        names = sorted(
+            os.path.basename(f).replace("_kernel.txt", "") for f in alt
+        )
+    return names
+
+
+# ============================================================
+# DuckDB helpers (for Overview tab)
+# ============================================================
+def _get_duckdb():
+    import duckdb
+    return duckdb
+
+
+@st.cache_resource
+def get_con():
+    duckdb = _get_duckdb()
+    if not os.path.exists(DB_PATH):
+        raise FileNotFoundError(
+            f"Missing {DB_PATH}. Run `python ingest.py` first."
+        )
+    return duckdb.connect(DB_PATH)
+
+
+def qdf(sql: str, params: Tuple | None = None):
+    import pandas as pd
+    con = get_con()
+    if params is None:
+        return con.execute(sql).df()
+    return con.execute(sql, params).df()
+
+
+def ensure_views_exist() -> None:
+    con = get_con()
+    con.execute("""
+        CREATE OR REPLACE VIEW events AS
+        SELECT * FROM read_parquet('warehouse/events/dt=*/events_*.parquet');
+    """)
+    con.execute("""
+        CREATE OR REPLACE VIEW llm_calls AS
+        SELECT * FROM events WHERE event_type IN ('llm_call', 'llm_request');
+    """)
+    con.execute("""
+        CREATE OR REPLACE VIEW api_calls AS
+        SELECT * FROM events WHERE event_type LIKE '%_api_call';
+    """)
+    con.execute("""
+        CREATE OR REPLACE VIEW actions AS
+        SELECT * FROM events WHERE event_type IN ('action_executed', 'action_blocked', 'action_skipped');
+    """)
+    con.execute("""
+        CREATE OR REPLACE VIEW errors AS
+        SELECT * FROM events WHERE event_type IN ('error', 'llm_exception', 'external_api_error');
+    """)
+    con.execute("""
+        CREATE OR REPLACE VIEW cycle_summary AS
+        SELECT
+          run_id, brain, cycle_num,
+          min(ts) AS cycle_start, max(ts) AS cycle_end,
+          CAST(min(ts) AS DATE) AS cycle_dt,
+          count(*) AS events_in_cycle,
+          sum(CASE WHEN event_type = 'llm_call' THEN coalesce(prompt_chars,0) ELSE 0 END) AS prompt_chars,
+          sum(CASE WHEN event_type = 'llm_call' THEN coalesce(response_chars,0) ELSE 0 END) AS response_chars,
+          sum(CASE WHEN event_type = 'llm_call' THEN 1 ELSE 0 END) AS llm_calls,
+          sum(CASE WHEN event_type LIKE '%_api_call' THEN 1 ELSE 0 END) AS api_calls,
+          sum(CASE WHEN http_status = 429 THEN 1 ELSE 0 END) AS rate_limited_429,
+          sum(CASE WHEN event_type = 'action_executed' THEN 1 ELSE 0 END) AS actions_executed
+        FROM events
+        WHERE cycle_num IS NOT NULL
+        GROUP BY 1,2,3;
+    """)
+
+
+# ============================================================
+# JSONL reader (for Cycle Replay tab)
+# ============================================================
+def read_brain_events(brain_name: str) -> list[dict]:
+    """Read all events from per-brain JSONL file. Also checks legacy events.jsonl."""
+    events = []
+
+    # Per-brain file (new format)
+    per_brain = os.path.join(TELEMETRY_DIR, f"{brain_name}_events.jsonl")
+    if os.path.exists(per_brain):
+        with open(per_brain, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    try:
+                        events.append(json.loads(line))
+                    except json.JSONDecodeError:
+                        pass
+
+    # Legacy shared file
+    legacy = os.path.join(TELEMETRY_DIR, "events.jsonl")
+    if os.path.exists(legacy):
+        with open(legacy, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    try:
+                        evt = json.loads(line)
+                        if evt.get("brain") == brain_name:
+                            events.append(evt)
+                    except json.JSONDecodeError:
+                        pass
+
+    # Sort by seq (or ts as fallback)
+    events.sort(key=lambda e: (e.get("ts", ""), e.get("seq", 0)))
+    return events
+
+
+# ============================================================
+# Tab 1: Overview
+# ============================================================
+def render_overview_tab(brain_filter: str):
+    import pandas as pd
+
+    try:
+        ensure_views_exist()
+    except (FileNotFoundError, RuntimeError) as e:
+        st.warning(str(e))
+        return
+
+    meta = qdf("SELECT min(dt) AS min_dt, max(dt) AS max_dt FROM events;")
+    min_dt = meta.loc[0, "min_dt"]
+    max_dt = meta.loc[0, "max_dt"]
+
+    if min_dt is None or max_dt is None:
+        st.warning("No data found. Run `python ingest.py` to populate warehouse.")
+        return
+
+    st.sidebar.header("Filters")
+
+    start_dt, end_dt = st.sidebar.date_input(
+        "Date range",
+        value=(min_dt, max_dt),
+        min_value=min_dt,
+        max_value=max_dt,
+    )
+    if isinstance(start_dt, (list, tuple)):
+        start_dt, end_dt = start_dt[0], start_dt[1]
+
+    show_payload = st.sidebar.checkbox("Show payload_json", value=False)
+
+    # Build WHERE clause
+    def build_where() -> tuple[str, tuple]:
+        clauses = ["dt >= ?", "dt <= ?"]
+        params: list = [start_dt, end_dt]
+        if brain_filter != "(all)":
+            clauses.append("brain = ?")
+            params.append(brain_filter)
+        return " AND ".join(clauses), tuple(params)
+
+    where_sql, where_params = build_where()
+
+    # ---- KPIs
+    kpi = qdf(
+        f"""
+        SELECT
+          count(*) AS events,
+          sum(CASE WHEN event_type = 'cycle_start' THEN 1 ELSE 0 END) AS cycles,
+          sum(CASE WHEN event_type IN ('llm_call','llm_request') THEN 1 ELSE 0 END) AS llm_events,
+          sum(CASE WHEN event_type LIKE '%_api_call' THEN 1 ELSE 0 END) AS api_events,
+          sum(CASE WHEN event_type = 'action_executed' THEN 1 ELSE 0 END) AS actions_executed,
+          sum(CASE WHEN event_type IN ('action_blocked','action_skipped') THEN 1 ELSE 0 END) AS actions_blocked,
+          sum(CASE WHEN event_type IN ('error','llm_exception','external_api_error') THEN 1 ELSE 0 END) AS error_events,
+          sum(CASE WHEN http_status = 429 THEN 1 ELSE 0 END) AS rate_limited_429
+        FROM events
+        WHERE {where_sql}
+        """,
+        where_params,
+    )
+
+    c1, c2, c3, c4, c5, c6, c7, c8 = st.columns(8)
+    c1.metric("Events", int(kpi.loc[0, "events"] or 0))
+    c2.metric("Cycles", int(kpi.loc[0, "cycles"] or 0))
+    c3.metric("LLM", int(kpi.loc[0, "llm_events"] or 0))
+    c4.metric("API", int(kpi.loc[0, "api_events"] or 0))
+    c5.metric("Actions", int(kpi.loc[0, "actions_executed"] or 0))
+    c6.metric("Blocked", int(kpi.loc[0, "actions_blocked"] or 0))
+    c7.metric("Errors", int(kpi.loc[0, "error_events"] or 0))
+    c8.metric("429s", int(kpi.loc[0, "rate_limited_429"] or 0))
+
+    st.divider()
+
+    # ---- Charts (compact, native Streamlit)
+    left, right = st.columns(2)
+
+    # LLM volume (hourly)
+    llm_ts = qdf(
+        f"""
+        SELECT
+          date_trunc('hour', ts) AS hour,
+          sum(coalesce(prompt_chars,0)) AS prompt_chars,
+          sum(coalesce(response_chars,0)) AS response_chars
+        FROM events
+        WHERE {where_sql} AND event_type = 'llm_call'
+        GROUP BY 1 ORDER BY 1
+        """,
+        where_params,
+    )
+    with left:
+        st.caption("LLM volume (hourly)")
+        if len(llm_ts) == 0:
+            st.info("No LLM calls in range.")
+        else:
+            chart_df = llm_ts.set_index("hour")[["prompt_chars", "response_chars"]]
+            st.line_chart(chart_df, height=200)
+
+    # API status codes
+    api_status = qdf(
+        f"""
+        SELECT http_status::VARCHAR AS status, count(*) AS n
+        FROM api_calls
+        WHERE {where_sql} AND http_status IS NOT NULL
+        GROUP BY 1 ORDER BY 2 DESC
+        """,
+        where_params,
+    )
+    with right:
+        st.caption("API status codes")
+        if len(api_status) == 0:
+            st.info("No API calls in range.")
+        else:
+            chart_df = api_status.set_index("status")
+            st.bar_chart(chart_df, height=200)
+
+    left2, right2 = st.columns(2)
+
+    # Actions by type
+    actions_by_type = qdf(
+        f"""
+        SELECT coalesce(action_type, '(unknown)') AS action_type, count(*) AS n
+        FROM events
+        WHERE {where_sql} AND event_type = 'action_executed'
+        GROUP BY 1 ORDER BY 2 DESC
+        """,
+        where_params,
+    )
+    with left2:
+        st.caption("Actions by type")
+        if len(actions_by_type) == 0:
+            st.info("No actions in range.")
+        else:
+            chart_df = actions_by_type.set_index("action_type")
+            st.bar_chart(chart_df, height=200)
+
+    # Actions over time (hourly)
+    actions_ts = qdf(
+        f"""
+        SELECT date_trunc('hour', ts) AS hour, count(*) AS actions
+        FROM events
+        WHERE {where_sql} AND event_type = 'action_executed'
+        GROUP BY 1 ORDER BY 1
+        """,
+        where_params,
+    )
+    with right2:
+        st.caption("Actions over time (hourly)")
+        if len(actions_ts) == 0:
+            st.info("No actions in range.")
+        else:
+            chart_df = actions_ts.set_index("hour")
+            st.line_chart(chart_df, height=200)
+
+    # Events per cycle
+    brain_clause = "" if brain_filter == "(all)" else "AND brain = ?"
+    epc_params = [start_dt, end_dt] + ([brain_filter] if brain_filter != "(all)" else [])
+    e_per_cycle = qdf(
+        f"""
+        SELECT cycle_num, events_in_cycle, cycle_start
+        FROM cycle_summary
+        WHERE cycle_dt >= ? AND cycle_dt <= ? {brain_clause}
+        ORDER BY cycle_start DESC
+        LIMIT 50
+        """,
+        tuple(epc_params),
+    )
+    st.caption("Events per cycle (recent 50)")
+    if len(e_per_cycle) == 0:
+        st.info("No cycles in range.")
+    else:
+        e_plot = e_per_cycle.sort_values("cycle_start", ascending=True)
+        chart_df = e_plot.set_index("cycle_num")[["events_in_cycle"]]
+        st.line_chart(chart_df, height=200)
+
+    st.divider()
+
+    # ---- Data tables (collapsed)
+    with st.expander("Recent cycles (summary)", expanded=False):
+        cycles_df = qdf(
+            f"""
+            SELECT run_id, brain, cycle_num, cycle_start, cycle_end,
+                   events_in_cycle, llm_calls, api_calls, actions_executed,
+                   rate_limited_429, prompt_chars, response_chars
+            FROM cycle_summary
+            WHERE cycle_dt >= ? AND cycle_dt <= ? {brain_clause}
+            ORDER BY cycle_start DESC LIMIT 30
+            """,
+            tuple(epc_params),
+        )
+        st.dataframe(cycles_df, use_container_width=True, hide_index=True)
+
+    with st.expander("Recent errors", expanded=False):
+        err_select = "ts, dt, brain, run_id, cycle_num, event_type, error_type, error_message, http_status, http_path"
+        if show_payload:
+            err_select += ", payload_json"
+        errors_df = qdf(
+            f"""
+            SELECT {err_select} FROM errors
+            WHERE {where_sql}
+            ORDER BY ts DESC, seq DESC LIMIT 50
+            """,
+            where_params,
+        )
+        st.dataframe(errors_df, use_container_width=True, hide_index=True)
+
+    with st.expander("Recent events (all)", expanded=False):
+        evt_select = "ts, seq, brain, run_id, cycle_num, event_type, tag, model, latency_ms, http_method, http_path, http_status, action_type"
+        if show_payload:
+            evt_select += ", payload_json"
+        recent = qdf(
+            f"""
+            SELECT {evt_select} FROM events
+            WHERE {where_sql}
+            ORDER BY ts DESC, seq DESC LIMIT 200
+            """,
+            where_params,
+        )
+        st.dataframe(recent, use_container_width=True, hide_index=True)
+
+
+# ============================================================
+# Tab 2: Cycle Replay
+# ============================================================
+_EVENT_STYLES = {
+    "run_start": ("RUN START", "#00ffd5"),
+    "cycle_start": ("CYCLE START", "#00ffd5"),
+    "cycle_end": ("CYCLE END", "#666"),
+    "feed_context": ("FEED", "#39ff14"),
+    "planner_decision": ("PLANNER", "#ff00ff"),
+    "grounding_metadata": ("GROUNDING", "#00997f"),
+    "kernel_update_executed": ("KERNEL UPDATE", "#ff4444"),
+    "kernel_snapshot": ("KERNEL SNAPSHOT", "#ff8800"),
+    "action_executed": ("ACTION", "#39ff14"),
+    "action_blocked": ("BLOCKED", "#ff4444"),
+    "artifact_published": ("PUBLISHED", "#00ffd5"),
+    "llm_call": ("LLM CALL", "#888"),
+    "moltbook_api_call": ("API", "#555"),
+    "analog_home_api_call": ("API", "#555"),
+    "error": ("ERROR", "#ff4444"),
+    "llm_exception": ("LLM ERROR", "#ff4444"),
+}
+
+
+def _render_event(evt: dict):
+    """Render a single telemetry event as styled markdown."""
+    etype = evt.get("event_type", "unknown")
+    label, color = _EVENT_STYLES.get(etype, (etype.upper(), "#888"))
+    ts = evt.get("ts", "")
+    seq = evt.get("seq", "")
+
+    st.markdown(
+        f'<span style="color:{color};font-weight:bold;font-size:13px">[{label}]</span>'
+        f' <span style="color:#666;font-size:11px">{ts} seq={seq}</span>',
+        unsafe_allow_html=True,
+    )
+
+    if etype == "cycle_start":
+        temp = evt.get("temperature", "?")
+        model = evt.get("model", "?")
+        st.markdown(f"Temperature: `{temp}` | Model: `{model}`")
+
+    elif etype == "feed_context":
+        brief = evt.get("brief", evt.get("text", ""))
+        text_len = evt.get("text_length", len(brief))
+        with st.expander(f"Feed context ({text_len} chars)", expanded=False):
+            st.text(brief[:3000])
+
+    elif etype == "planner_decision":
+        preamble = evt.get("preamble", "")
+        action = evt.get("action", "")
+        plan = evt.get("plan", {})
+        if preamble:
+            with st.expander("Reasoning / Preamble", expanded=True):
+                st.markdown(preamble)
+        st.markdown(f"**Action:** `{action}`")
+        if plan:
+            with st.expander("Full plan JSON", expanded=False):
+                st.json(plan)
+
+    elif etype == "grounding_metadata":
+        sources = evt.get("sources", [])
+        if sources:
+            for src in sources:
+                title = src.get("title", "?")
+                uri = src.get("uri", "")
+                st.markdown(f"- [{title}]({uri})" if uri else f"- {title}")
+        queries = evt.get("search_queries", [])
+        if queries:
+            st.markdown("Search queries: " + ", ".join(f"`{q}`" for q in queries))
+
+    elif etype == "kernel_update_executed":
+        reason = evt.get("reason", "")
+        st.warning(f"Kernel update: {reason}")
+
+    elif etype in ("action_executed", "action_blocked"):
+        action_type = evt.get("action_type", evt.get("type", "?"))
+        result = evt.get("action_result", evt.get("result", ""))
+        st.markdown(f"Type: `{action_type}` | Result: {result}")
+
+    elif etype == "artifact_published":
+        title = evt.get("title", "?")
+        art_type = evt.get("artifact_type", "?")
+        st.markdown(f"Title: **{title}** | Type: `{art_type}`")
+
+    elif etype == "llm_call":
+        model = evt.get("model", "?")
+        prompt_c = evt.get("prompt_chars", "?")
+        resp_c = evt.get("response_chars", "?")
+        latency = evt.get("latency_ms", "?")
+        st.markdown(f"`{model}` | prompt: {prompt_c}c | response: {resp_c}c | {latency}ms")
+
+    elif etype in ("moltbook_api_call", "analog_home_api_call"):
+        method = evt.get("method", "?")
+        path = evt.get("path", "?")
+        status = evt.get("status", "?")
+        latency = evt.get("latency_ms", "?")
+        st.markdown(f"`{method} {path}` -> {status} ({latency}ms)")
+
+    elif etype in ("error", "llm_exception", "external_api_error"):
+        msg = evt.get("error_message", evt.get("error", evt.get("message", "")))
+        st.error(msg[:500] if msg else "Unknown error")
+
+    elif etype == "cycle_end":
+        duration = evt.get("duration_seconds", "?")
+        st.markdown(f"Duration: {duration}s")
+
+    elif etype == "run_start":
+        version = evt.get("version", "?")
+        model = evt.get("model", "?")
+        temp = evt.get("temperature", "?")
+        st.markdown(f"Version: `{version}` | Model: `{model}` | Temperature: `{temp}`")
+
+    else:
+        # Generic: show all non-meta keys
+        skip = {"ts", "seq", "brain", "run_id", "event_type", "cycle"}
+        extra = {k: v for k, v in evt.items() if k not in skip and v}
+        if extra:
+            with st.expander("Details", expanded=False):
+                st.json(extra)
+
+
+def render_cycle_replay_tab(brain_filter: str):
+    if brain_filter == "(all)":
+        st.info("Select a specific brain in the sidebar to use Cycle Replay.")
+        return
+
+    events = read_brain_events(brain_filter)
+    if not events:
+        st.warning(f"No JSONL events found for brain '{brain_filter}'.")
+        return
+
+    # Group by run_id
+    runs: dict[str, list[dict]] = {}
+    for evt in events:
+        rid = evt.get("run_id", "unknown")
+        runs.setdefault(rid, []).append(evt)
+
+    # Build run list with timestamps
+    run_options = []
+    for rid, evts in runs.items():
+        first_ts = evts[0].get("ts", "?")
+        run_options.append((rid, first_ts))
+    run_options.sort(key=lambda x: x[1], reverse=True)
+
+    if not run_options:
+        st.warning("No runs found.")
+        return
+
+    run_labels = [f"{ts[:19]} ({rid[:8]}...)" for rid, ts in run_options]
+    selected_run_idx = st.selectbox("Run", range(len(run_labels)), format_func=lambda i: run_labels[i])
+    selected_run_id = run_options[selected_run_idx][0]
+
+    run_events = runs[selected_run_id]
+
+    # Find cycles in this run
+    cycle_nums = sorted(set(
+        evt.get("cycle", evt.get("cycle_num"))
+        for evt in run_events
+        if evt.get("cycle") is not None or evt.get("cycle_num") is not None
+    ))
+
+    # Show run-level events (cycle=None) and per-cycle events
+    run_level = [e for e in run_events if e.get("cycle") is None and e.get("cycle_num") is None]
+
+    if run_level:
+        with st.expander(f"Run-level events ({len(run_level)})", expanded=False):
+            for evt in run_level:
+                _render_event(evt)
+                st.markdown("---")
+
+    if not cycle_nums:
+        st.info("No cycles in this run.")
+        return
+
+    # Cycle selector
+    if len(cycle_nums) > 1:
+        selected_cycle = st.select_slider(
+            "Cycle",
+            options=cycle_nums,
+            value=cycle_nums[-1],
+        )
+    else:
+        selected_cycle = cycle_nums[0]
+        st.markdown(f"**Cycle {selected_cycle}**")
+
+    # Filter events for selected cycle
+    cycle_events = [
+        e for e in run_events
+        if (e.get("cycle") == selected_cycle or e.get("cycle_num") == selected_cycle)
+    ]
+
+    if not cycle_events:
+        st.info(f"No events for cycle {selected_cycle}.")
+        return
+
+    st.markdown(f"**{len(cycle_events)} events in cycle {selected_cycle}**")
+    st.divider()
+
+    for evt in cycle_events:
+        _render_event(evt)
+        st.markdown("---")
+
+
+# ============================================================
+# Tab 3: Input / Controls
+# ============================================================
+def render_input_controls_tab(brain_filter: str):
+    if brain_filter == "(all)":
+        st.info("Select a specific brain in the sidebar.")
+        return
+
+    st.subheader(f"Controls for {brain_filter}")
+
+    # File paths
+    state_path = os.path.join(BRAINS_DIR, f"{brain_filter}_memories.json")
+    kernel_path = os.path.join(BRAINS_DIR, f"{brain_filter}_kernel_prompt.txt")
+    knowledge_path = os.path.join(BRAINS_DIR, f"{brain_filter}_knowledge.txt")
+
+    # Also check alternate kernel path
+    if not os.path.exists(kernel_path):
+        alt = os.path.join(BRAINS_DIR, f"{brain_filter}_kernel.txt")
+        if os.path.exists(alt):
+            kernel_path = alt
+
+    # ---- A. Directive Editor ----
+    st.markdown("### Directive")
+    st.caption("The directive guides the agent's behavior. Changes take effect on the next cycle.")
+
+    current_state = {}
+    if os.path.exists(state_path):
+        try:
+            with open(state_path, encoding="utf-8") as f:
+                current_state = json.load(f)
+        except (json.JSONDecodeError, OSError):
+            st.warning(f"Could not read {state_path}")
+
+    current_directive = current_state.get("directive", "Participate on Moltbook.")
+    new_directive = st.text_area("Directive", value=current_directive, height=80, key="directive_editor")
+
+    if st.button("Save directive", key="save_directive"):
+        current_state["directive"] = new_directive
+        with open(state_path, "w", encoding="utf-8") as f:
+            json.dump(current_state, f, indent=2, ensure_ascii=False)
+        st.success("Directive saved. Takes effect next cycle.")
+
+    st.divider()
+
+    # ---- B. Kernel & Knowledge Editor ----
+    st.markdown("### Kernel Prompt")
+    st.caption("The core identity prompt. Changes take effect on next run restart.")
+
+    current_kernel = ""
+    if os.path.exists(kernel_path):
+        with open(kernel_path, encoding="utf-8") as f:
+            current_kernel = f.read()
+
+    new_kernel = st.text_area("Kernel prompt", value=current_kernel, height=300, key="kernel_editor")
+
+    if st.button("Save kernel", key="save_kernel"):
+        with open(kernel_path, "w", encoding="utf-8") as f:
+            f.write(new_kernel)
+        st.success(f"Kernel saved to {kernel_path}")
+
+    st.divider()
+
+    st.markdown("### Knowledge File")
+    st.caption("Reference knowledge injected into the planner context. Changes take effect on next run restart.")
+
+    current_knowledge = ""
+    if os.path.exists(knowledge_path):
+        with open(knowledge_path, encoding="utf-8") as f:
+            current_knowledge = f.read()
+
+    new_knowledge = st.text_area("Knowledge", value=current_knowledge, height=200, key="knowledge_editor")
+
+    if st.button("Save knowledge", key="save_knowledge"):
+        with open(knowledge_path, "w", encoding="utf-8") as f:
+            f.write(new_knowledge)
+        st.success(f"Knowledge saved to {knowledge_path}")
+
+    st.divider()
+
+    # ---- C. CLI Command Builder ----
+    st.markdown("### CLI Command Builder")
+    st.caption("Configure flags and copy the generated command.")
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        cli_brain = st.text_input("Brain name", value=brain_filter, key="cli_brain")
+        cli_model = st.selectbox("Model", [
+            "gemini-2.5-flash",
+            "gemini-2.5-pro",
+            "gemini-2.0-flash",
+            "gemini-2.0-pro",
+        ], key="cli_model")
+        cli_temp = st.slider("Temperature", 0.0, 2.0, 0.7, 0.05, key="cli_temp")
+        cli_interval = st.number_input("Interval (min)", min_value=1, max_value=120, value=5, key="cli_interval")
+        cli_post_interval = st.number_input("Post interval (min)", min_value=1, max_value=360, value=30, key="cli_post_interval")
+        cli_mode = st.selectbox("Mode", ["all", "comment_only", "no_post"], key="cli_mode")
+        cli_priority = st.selectbox("Priority", ["replies_first", "outside_first"], key="cli_priority")
+        cli_feed_sort = st.selectbox("Feed sort", ["hot", "new", "top", "rising"], key="cli_feed_sort")
+
+    with col2:
+        cli_moltbook = st.checkbox("Enable Moltbook", value=False, key="cli_moltbook")
+        cli_search = st.checkbox("Enable search", value=False, key="cli_search")
+        cli_read_only = st.checkbox("Read-only", value=False, key="cli_read_only")
+        cli_kernel_update = st.checkbox("Allow kernel update", value=False, key="cli_kernel_update")
+        cli_no_disk_write = st.checkbox("No kernel disk write", value=False, key="cli_no_disk")
+        cli_votes = st.checkbox("Allow votes", value=False, key="cli_votes")
+        cli_downvote = st.checkbox("Allow downvote", value=False, key="cli_downvote")
+        cli_reset_post = st.checkbox("Reset post window", value=False, key="cli_reset_post")
+        cli_default_temp = st.checkbox("Enable default temp", value=False, key="cli_default_temp")
+        cli_espn = st.checkbox("Inject ESPN", value=False, key="cli_espn")
+
+    cli_directive = st.text_input("Directive override (optional)", value="", key="cli_directive")
+
+    # Build command
+    parts = ["python -m v14_0", cli_brain]
+
+    if cli_directive.strip():
+        parts.append(f'"{cli_directive.strip()}"')
+
+    if cli_model != "gemini-2.5-flash":
+        parts.append(f"--gemini-model {cli_model}")
+    if cli_temp != 0.7:
+        parts.append(f"--temperature {cli_temp}")
+    if cli_interval != 5:
+        parts.append(f"--interval {cli_interval}")
+    if cli_post_interval != 30:
+        parts.append(f"--post-interval {cli_post_interval}")
+    if cli_mode != "all":
+        parts.append(f"--mode {cli_mode}")
+    if cli_priority != "replies_first":
+        parts.append(f"--priority {cli_priority}")
+    if cli_feed_sort != "hot":
+        parts.append(f"--feed-sort {cli_feed_sort}")
+    if cli_moltbook:
+        parts.append("--enable-moltbook")
+    if cli_search:
+        parts.append("--enable-search")
+    if cli_read_only:
+        parts.append("--read-only")
+    if cli_kernel_update:
+        parts.append("--allow-kernel-update")
+    if cli_no_disk_write:
+        parts.append("--no-kernel-disk-write")
+    if cli_votes:
+        parts.append("--allow-votes")
+    if cli_downvote:
+        parts.append("--allow-downvote")
+    if cli_reset_post:
+        parts.append("--reset-post-window")
+    if cli_default_temp:
+        parts.append("--enable-default-temp")
+    if cli_espn:
+        parts.append("--inject-espn")
+
+    cmd = " ".join(parts)
+    st.code(cmd, language="bash")
+
+
+# ============================================================
+# Main
+# ============================================================
+def main():
+    st.set_page_config(page_title="Autonomy Dashboard v2.0", layout="wide")
+    st.title("Autonomy Dashboard v2.0")
+
+    # Auto-ingest telemetry on first load
+    auto_ingest_on_startup()
+
+    # Brain selector in sidebar (shared across tabs)
+    brains = discover_brains()
+    brain_options = ["(all)"] + brains
+    brain_filter = st.sidebar.selectbox("Brain", brain_options, index=0)
+
+    # Ingest refresh button in sidebar
+    st.sidebar.divider()
+    if st.sidebar.button("Refresh telemetry data"):
+        result = run_ingest()
+        st.session_state["last_ingest"] = result
+        # Clear DuckDB cached connection so views are recreated with fresh data
+        get_con.clear()
+        st.rerun()
+    if st.session_state.get("last_ingest"):
+        st.sidebar.caption(st.session_state["last_ingest"])
+
+    tab1, tab2, tab3 = st.tabs(["Overview", "Cycle Replay", "Input / Controls"])
+
+    with tab1:
+        render_overview_tab(brain_filter)
+
+    with tab2:
+        render_cycle_replay_tab(brain_filter)
+
+    with tab3:
+        render_input_controls_tab(brain_filter)
+
+
+if __name__ == "__main__":
+    main()

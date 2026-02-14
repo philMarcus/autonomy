@@ -10,6 +10,7 @@ Changes in v14.0 (from v13.0):
 - Fly.io: increased VM memory (512MB), disabled auto-suspend, faster health checks
 """
 
+import hashlib
 import os
 import re
 import time
@@ -59,6 +60,16 @@ def safe_print(text: str) -> None:
         print(text)
     except UnicodeEncodeError:
         print(text.encode(errors="replace").decode())
+
+
+def _compute_run_metadata(kernel: str, knowledge: str, version: str, state: dict) -> dict:
+    return {
+        "kernel_hash": hashlib.sha256(kernel.encode()).hexdigest()[:16],
+        "knowledge_hash": hashlib.sha256(knowledge.encode()).hexdigest()[:16],
+        "version": version,
+        "history_count": len(state.get("history", [])),
+        "memory_length": len(state.get("memory", "")),
+    }
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
@@ -215,6 +226,38 @@ def main():
     kernel = load_kernel(kernel_path)
     telemetry.log_kernel_snapshot(kernel, reason="startup", source="startup")
     knowledge = load_knowledge(knowledge_path)
+
+    # --- Run-start change detection ---
+    current_meta = _compute_run_metadata(kernel, knowledge, VERSION, state)
+    previous_meta = state.get("_last_run", {})
+    changes = []
+    if previous_meta:
+        if previous_meta.get("version") != current_meta["version"]:
+            changes.append(f"Autonomy upgraded: {previous_meta.get('version')} -> {current_meta['version']}")
+        if previous_meta.get("kernel_hash") != current_meta["kernel_hash"]:
+            changes.append("Kernel prompt was modified")
+        if previous_meta.get("knowledge_hash") != current_meta["knowledge_hash"]:
+            changes.append("Knowledge file was updated")
+        if current_meta["history_count"] == 0 and previous_meta.get("history_count", 0) > 0:
+            changes.append(f"History was wiped (was {previous_meta['history_count']} entries)")
+        if current_meta["memory_length"] == 0 and previous_meta.get("memory_length", 0) > 0:
+            changes.append("Memory was wiped")
+    state["_last_run"] = current_meta
+    store.save_state(state)
+
+    if analog_home_url:
+        run_body = f"Version: {VERSION}\nModel: {args.gemini_model}\nTemperature: {args.temperature}"
+        if changes:
+            run_body += "\n\nChanges detected:\n" + "\n".join(f"- {c}" for c in changes)
+        else:
+            run_body += "\n\nNo configuration changes since last run."
+        store.write_artifact(0, {
+            "brain": brain_name,
+            "artifact_type": "system_run_start",
+            "title": f"Run Started -- {brain_name}",
+            "body_markdown": run_body,
+            "temperature": args.temperature,
+        })
 
     # Derive permissions
     allow_posts = (args.mode == "all")
