@@ -249,7 +249,7 @@ def main():
     store.save_state(state)
 
     if analog_home_url:
-        run_body = f"Version: {VERSION}\nModel: {args.gemini_model}\nTemperature: {args.temperature}"
+        run_body = f"Version: {VERSION}\nModel: {args.gemini_model}"
         if changes:
             run_body += "\n\nChanges detected:\n" + "\n".join(f"- {c}" for c in changes)
         else:
@@ -560,16 +560,6 @@ def main():
                     })
                     if ok:
                         print(f"{Fore.CYAN}>> TRAJECTORY UPDATED")
-                        body_parts = [t_reason]
-                        if t_default_temp is not None:
-                            body_parts.append(f"Default temperature set to {t_default_temp}")
-                        store.write_artifact(iteration, {
-                            "brain": brain_name,
-                            "artifact_type": "system_trajectory_update",
-                            "title": f"Trajectory: {t_label_1} / {t_label_2} / {t_label_3}",
-                            "body_markdown": "\n\n".join(body_parts),
-                            "temperature": cycle_temperature,
-                        })
                     else:
                         print(f"{Fore.YELLOW}>> TRAJECTORY UPDATE FAILED")
 
