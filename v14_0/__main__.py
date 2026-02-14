@@ -165,7 +165,7 @@ def main():
     print(f"{Fore.CYAN}=== {brain_name}: autonomy v{VERSION} (modular multi-brain loop) ===")
     print(f"{Fore.CYAN}    env prefix: {prefix} | gemini_key:*{key_fingerprint(gem_key)}")
     if not args.moltbook_enabled:
-        print(f"{Fore.MAGENTA}    [MOLTBOOK DISABLED] Output → local log + Analog Home")
+        print(f"{Fore.MAGENTA}    [MOLTBOOK DISABLED] Output -> local log + Analog Home")
     else:
         print(f"{Fore.CYAN}    moltbook_key:*{key_fingerprint(mb_key)}")
     if args.post_interval != 30:
@@ -571,7 +571,7 @@ def main():
 
                         # Regenerate whenever action type changes
                         if src and act2 != src:
-                            print(f"{Fore.YELLOW}...Regenerating content for fallback {src} → {act2}")
+                            print(f"{Fore.YELLOW}...Regenerating content for fallback {src} -> {act2}")
 
                             if act2 == "REPLY":
                                 regen_prompt = (
