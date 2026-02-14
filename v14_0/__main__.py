@@ -217,11 +217,14 @@ def main():
         store.save_state(state)
         print(f"{Fore.GREEN}Post window reset — first cycle can post immediately.")
 
-    if (not user_directive) and state.get('directive'):
-        user_directive = state.get('directive')
-    if user_directive and user_directive != 'Participate on Moltbook.':
-        user_directive = user_directive
-    state.setdefault('directive', user_directive)
+    # CLI directive wins if explicitly provided (not the default placeholder).
+    # Otherwise fall back to whatever is already saved in state.
+    if user_directive and user_directive != "Participate on Moltbook.":
+        state["directive"] = user_directive
+    elif state.get("directive"):
+        user_directive = state["directive"]
+    else:
+        state["directive"] = user_directive
 
     kernel = load_kernel(kernel_path)
     telemetry.log_kernel_snapshot(kernel, reason="startup", source="startup")
