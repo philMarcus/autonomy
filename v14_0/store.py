@@ -40,7 +40,7 @@ class Store(ABC):
         """Delete seeds by ID after the agent has read them. Returns True on success."""
         return False
 
-    def set_trajectory(self, label_1: str, label_2: str, label_3: str, reason: str = "") -> bool:
+    def set_trajectory(self, label_1: str, label_2: str, label_3: str, reason: str = "", default_temperature: float | None = None) -> bool:
         """Reset vote buttons with 3 new labels. Returns True on success."""
         return False
 
@@ -108,19 +108,22 @@ class LocalFileStore(Store):
             log.warning("analog_home consume_seeds error: %s", e)
             return False
 
-    def set_trajectory(self, label_1: str, label_2: str, label_3: str, reason: str = "") -> bool:
+    def set_trajectory(self, label_1: str, label_2: str, label_3: str, reason: str = "", default_temperature: float | None = None) -> bool:
         """POST new trajectory labels to Analog Home API."""
         if not self._analog_home_url:
             return False
         try:
             import requests
             url = urljoin(self._analog_home_url.rstrip("/") + "/", "set-trajectory")
-            resp = requests.post(url, json={
+            payload = {
                 "label_1": label_1,
                 "label_2": label_2,
                 "label_3": label_3,
                 "reason": reason,
-            }, timeout=10)
+            }
+            if default_temperature is not None:
+                payload["default_temperature"] = default_temperature
+            resp = requests.post(url, json=payload, timeout=10)
             if resp.status_code >= 400:
                 log.warning("analog_home set_trajectory failed (%s): %s", resp.status_code, resp.text[:200])
                 return False
@@ -191,6 +194,7 @@ class LocalFileStore(Store):
             "source_parent_id": artifact.get("source_parent_id", ""),
             "source_url": artifact.get("source_url", ""),
             "search_queries": artifact.get("search_queries", ""),
+            "temperature": artifact.get("temperature"),
         }
         try:
             import requests

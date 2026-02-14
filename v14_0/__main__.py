@@ -59,9 +59,9 @@ def build_arg_parser() -> argparse.ArgumentParser:
     ap.add_argument("directive", nargs="?", default="Participate on Moltbook.")
     ap.add_argument("--allow-kernel-update", action="store_true", help="Allow the planner to rewrite the kernel prompt.")
     ap.add_argument("--no-kernel-disk-write", action="store_true", help="Kernel updates stay in-memory only (not written to disk).")
-    ap.add_argument("--disable-moltbook", "--dry-run", dest="moltbook_disabled",
+    ap.add_argument("--enable-moltbook", dest="moltbook_enabled",
                     action="store_true",
-                    help="Skip all Moltbook API calls. LLM plans normally; output goes to local log + Analog Home.")
+                    help="Enable Moltbook API calls. Without this flag, output goes to local log + Analog Home only.")
     ap.add_argument("--interval", type=int, default=5, help="Sleep interval minutes between cycles.")
     ap.add_argument("--post-interval", type=int, default=30, help="Minutes between posts (default 30).")
     ap.add_argument("--reset-post-window", action="store_true", help="Clear the post cooldown timer on startup (allows immediate posting).")
@@ -73,6 +73,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
     ap.add_argument("--temperature", type=float, default=0.7, help="LLM temperature for planner chat (default 0.7).")
     ap.add_argument("--enable-search", action="store_true",
                     help="Enable Google Search grounding on the planner LLM call.")
+    ap.add_argument("--enable-default-temp", action="store_true",
+                    help="Allow the agent to set default_temperature via trajectory updates.")
     ap.add_argument("--inject-espn", action="store_true")
     ap.add_argument("--espn-cache-seconds", type=int, default=60)
     ap.add_argument("--espn-league", default=os.environ.get("ESPN_LEAGUE", ESPN_DEFAULT_LEAGUE))
@@ -125,7 +127,7 @@ def main():
 
     if not gem_key:
         raise SystemExit(f"Missing {prefix}_GEMINI_API_KEY (or GEMINI_API_KEY)")
-    if not mb_key and not args.moltbook_disabled:
+    if not mb_key and args.moltbook_enabled:
         raise SystemExit(f"Missing {prefix}_MOLTBOOK_API_KEY (or MOLTBOOK_API_KEY)")
 
     # Telemetry
@@ -135,7 +137,7 @@ def main():
     telemetry.log("run_start", {
         "version": VERSION, "brain_env_prefix": prefix,
         "gemini_key_fp": key_fingerprint(gem_key),
-        "moltbook_disabled": args.moltbook_disabled,
+        "moltbook_disabled": not args.moltbook_enabled,
     })
 
     # LLM client
@@ -144,7 +146,7 @@ def main():
     # Platform client (None when Moltbook disabled)
     platform = None
     challenge_solver = None
-    if not args.moltbook_disabled:
+    if args.moltbook_enabled:
         challenge_solver = MathVerificationSolver(llm_client=llm_client, telemetry=telemetry)
         platform = MoltbookClient(
             api_key=mb_key, telemetry=telemetry, brain_name=brain_name,
@@ -153,18 +155,18 @@ def main():
 
     # Output logger (always enabled when Moltbook disabled)
     dryrun_log = None
-    if args.moltbook_disabled:
+    if not args.moltbook_enabled:
         from .dryrun import DryRunLogger
         dryrun_log = DryRunLogger(brain_name=brain_name, base_dir=BRAINS_DIR)
 
-    output_destination = "local" if args.moltbook_disabled else "moltbook"
+    output_destination = "local" if not args.moltbook_enabled else "moltbook"
 
     # Directive
     user_directive = args.directive
 
     print(f"{Fore.CYAN}=== {brain_name}: autonomy v{VERSION} (modular multi-brain loop) ===")
     print(f"{Fore.CYAN}    env prefix: {prefix} | gemini_key:*{key_fingerprint(gem_key)}")
-    if args.moltbook_disabled:
+    if not args.moltbook_enabled:
         print(f"{Fore.MAGENTA}    [MOLTBOOK DISABLED] Output → local log ({dryrun_log.path}) + Analog Home")
     else:
         print(f"{Fore.CYAN}    moltbook_key:*{key_fingerprint(mb_key)}")
@@ -173,7 +175,7 @@ def main():
     if args.no_kernel_disk_write:
         print(f"{Fore.CYAN}    Kernel disk write: DISABLED (in-memory only)")
 
-    if not args.moltbook_disabled and "moltbook.com" in MOLTBOOK_API_BASE and "www.moltbook.com" not in MOLTBOOK_API_BASE:
+    if args.moltbook_enabled and "moltbook.com" in MOLTBOOK_API_BASE and "www.moltbook.com" not in MOLTBOOK_API_BASE:
         print(f"{Fore.RED}MOLTBOOK_API_BASE must be https://www.moltbook.com/api/v1 (with www).")
         return
 
@@ -223,7 +225,7 @@ def main():
         "allow_downvote": allow_downvote,
         "allow_create_submolt": allow_create_submolt,
         "read_only": args.read_only,
-        "moltbook_disabled": args.moltbook_disabled,
+        "moltbook_disabled": not args.moltbook_enabled,
         "dryrun_log": dryrun_log,
         "write_disabled": False,
         "write_disabled_reason": None,
@@ -291,7 +293,7 @@ def main():
         reply_candidate = None
         outside_candidate = None
 
-        if not args.moltbook_disabled:
+        if args.moltbook_enabled:
             did_add = refresh_my_posts_from_profile(platform, state, username)
             if did_add:
                 store.save_state(state)
@@ -334,7 +336,7 @@ def main():
             )
 
         # DM fallback (only when Moltbook is active)
-        if not args.moltbook_disabled:
+        if args.moltbook_enabled:
             if (not reply_candidate) and (not outside_candidate) and (not post_window_open or not allow_posts):
                 if maybe_dm_fallback(platform, chat, store, state, feed, args, kernel, user_directive, username, telemetry, dryrun_log=dryrun_log):
                     if dryrun_log:
@@ -365,6 +367,7 @@ def main():
             trajectory_votes=analog_trajectory,
             cycle_temperature=cycle_temperature if analog_home_url else None,
             default_temperature=args.temperature,
+            allow_default_temp=bool(args.enable_default_temp),
         )
 
         try:
@@ -477,11 +480,19 @@ def main():
                 t_label_2 = (plan.get("trajectory_label_2") or "").strip()[:40]
                 t_label_3 = (plan.get("trajectory_label_3") or "").strip()[:40]
                 t_reason = plan.get("trajectory_reason", "no reason given")
+                t_default_temp = None
+                if args.enable_default_temp and plan.get("default_temperature") is not None:
+                    try:
+                        t_default_temp = float(plan["default_temperature"])
+                    except (ValueError, TypeError):
+                        t_default_temp = None
                 if t_label_1 and t_label_2 and t_label_3:
                     print(f"{Fore.MAGENTA}[TRAJECTORY UPDATE]")
                     print(f"{Fore.GREEN}  Labels: {t_label_1} / {t_label_2} / {t_label_3}")
+                    if t_default_temp is not None:
+                        print(f"{Fore.GREEN}  Default temp: {t_default_temp}")
                     print(f"{Fore.YELLOW}  Reason: {t_reason}")
-                    ok = store.set_trajectory(t_label_1, t_label_2, t_label_3, reason=t_reason)
+                    ok = store.set_trajectory(t_label_1, t_label_2, t_label_3, reason=t_reason, default_temperature=t_default_temp)
                     telemetry.log("trajectory_update", {
                         "cycle": iteration, "label_1": t_label_1, "label_2": t_label_2,
                         "label_3": t_label_3, "reason": t_reason, "success": ok,
@@ -625,8 +636,8 @@ def main():
                     source_id = ""
                     source_parent_id = ""
                     source_url_str = ""
-                    src_platform = "local" if args.moltbook_disabled else "moltbook"
-                    if not args.moltbook_disabled:
+                    src_platform = "local" if not args.moltbook_enabled else "moltbook"
+                    if args.moltbook_enabled:
                         if act_upper == "POST" and state.get("my_post_ids"):
                             source_id = state["my_post_ids"][-1]
                             source_url_str = post_url(source_id)
@@ -655,6 +666,7 @@ def main():
                         "source_parent_id": source_parent_id,
                         "source_url": source_url_str,
                         "search_queries": search_queries_str,
+                        "temperature": cycle_temperature,
                     })
                     telemetry.log("artifact_published", {
                         "cycle": iteration,

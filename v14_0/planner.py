@@ -171,16 +171,24 @@ def _format_trajectory(trajectory_votes: Optional[Dict[str, Any]]) -> str:
     )
 
 
-def _format_set_trajectory_option(trajectory_votes: Optional[Dict[str, Any]]) -> str:
+def _format_set_trajectory_option(trajectory_votes: Optional[Dict[str, Any]], allow_default_temp: bool = False) -> str:
     if trajectory_votes is None:
         return ""
+    default_temp_note = ""
+    if allow_default_temp:
+        default_temp_note = (
+            '  "default_temperature": 0.8,  // optional: set a new default temperature (0.0-2.0)\n'
+            "- You can optionally set a new default_temperature alongside trajectory labels.\n"
+            "  This changes the baseline temperature your audience's adjustments decay toward.\n"
+        )
     return (
         "\nTRAJECTORY UPDATE (Analog Home):\n"
         "You can reshape the vote options your audience sees on Analog Home.\n"
         "Current labels are shown in TRAJECTORY VOTES above.\n"
         "- Only update when a genuine shift in creative direction is warranted\n"
         "- This can be combined with any action (POST, COMMENT, REPLY, etc.)\n"
-        "- Labels should be short (1-3 words), evocative, and represent meaningful creative directions\n\n"
+        "- Labels should be short (1-3 words), evocative, and represent meaningful creative directions\n"
+        f"{default_temp_note}\n"
         "If updating trajectory, include in your JSON response:\n"
         '  "set_trajectory": true,\n'
         '  "trajectory_label_1": "new label 1",\n'
@@ -220,6 +228,7 @@ def build_planner_prompt(
     trajectory_votes: Optional[Dict[str, Any]] = None,
     cycle_temperature: Optional[float] = None,
     default_temperature: float = 0.7,
+    allow_default_temp: bool = False,
 ) -> str:
     read_only_note = ""
     if read_only:
@@ -302,7 +311,7 @@ If updating, include in your JSON response:
 
 If not updating, include:
   "update_kernel": false
-{_format_set_trajectory_option(trajectory_votes)}
+{_format_set_trajectory_option(trajectory_votes, allow_default_temp=allow_default_temp)}
 ACTION POLICY (default preference):
 1) If posts are allowed AND post window open, prefer POST.
 2) Otherwise prefer REPLY to an unanswered comment on my posts (if available).
