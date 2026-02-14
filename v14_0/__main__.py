@@ -435,6 +435,13 @@ def main():
                             "reason": reason,
                             "new_length": len(new_kernel),
                         })
+                        store.write_artifact(iteration, {
+                            "brain": brain_name,
+                            "artifact_type": "system_kernel_update",
+                            "title": "Kernel Self-Update",
+                            "body_markdown": reason,
+                            "temperature": cycle_temperature,
+                        })
                     else:
                         result = update_kernel_file(kernel_path, new_kernel, telemetry=telemetry, reason=reason)
 
@@ -452,6 +459,13 @@ def main():
                                 "reason": reason,
                                 "new_length": len(new_kernel),
                                 "backup_created": result["backup_created"],
+                            })
+                            store.write_artifact(iteration, {
+                                "brain": brain_name,
+                                "artifact_type": "system_kernel_update",
+                                "title": "Kernel Self-Update",
+                                "body_markdown": reason,
+                                "temperature": cycle_temperature,
                             })
                         else:
                             try:
@@ -500,6 +514,16 @@ def main():
                     })
                     if ok:
                         print(f"{Fore.CYAN}>> TRAJECTORY UPDATED")
+                        body_parts = [t_reason]
+                        if t_default_temp is not None:
+                            body_parts.append(f"Default temperature set to {t_default_temp}")
+                        store.write_artifact(iteration, {
+                            "brain": brain_name,
+                            "artifact_type": "system_trajectory_update",
+                            "title": f"Trajectory: {t_label_1} / {t_label_2} / {t_label_3}",
+                            "body_markdown": "\n\n".join(body_parts),
+                            "temperature": cycle_temperature,
+                        })
                     else:
                         print(f"{Fore.YELLOW}>> TRAJECTORY UPDATE FAILED")
 
