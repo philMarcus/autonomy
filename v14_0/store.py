@@ -6,6 +6,7 @@ change the backend without touching the agent loop or action logic.
 
 import json
 import os
+import random
 import time
 import logging
 from abc import ABC, abstractmethod
@@ -181,7 +182,7 @@ class LocalFileStore(Store):
         self._flush_pending()
 
         payload = {
-            "id": artifact.get("id", int(time.time())),
+            "id": artifact.get("id", int(time.time() * 1000) + random.randint(0, 999)),
             "brain": artifact.get("brain", ""),
             "cycle": cycle,
             "artifact_type": artifact.get("artifact_type", "post"),
