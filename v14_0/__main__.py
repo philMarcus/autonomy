@@ -138,6 +138,10 @@ def main():
         "version": VERSION, "brain_env_prefix": prefix,
         "gemini_key_fp": key_fingerprint(gem_key),
         "moltbook_disabled": not args.moltbook_enabled,
+        "model": args.gemini_model,
+        "temperature": args.temperature,
+        "search_enabled": bool(args.enable_search),
+        "allow_kernel_update": bool(args.allow_kernel_update),
     })
 
     # LLM client
@@ -153,12 +157,6 @@ def main():
             read_only=args.read_only, challenge_solver=challenge_solver,
         )
 
-    # Output logger (always enabled when Moltbook disabled)
-    dryrun_log = None
-    if not args.moltbook_enabled:
-        from .dryrun import DryRunLogger
-        dryrun_log = DryRunLogger(brain_name=brain_name, base_dir=BRAINS_DIR)
-
     output_destination = "local" if not args.moltbook_enabled else "moltbook"
 
     # Directive
@@ -167,7 +165,7 @@ def main():
     print(f"{Fore.CYAN}=== {brain_name}: autonomy v{VERSION} (modular multi-brain loop) ===")
     print(f"{Fore.CYAN}    env prefix: {prefix} | gemini_key:*{key_fingerprint(gem_key)}")
     if not args.moltbook_enabled:
-        print(f"{Fore.MAGENTA}    [MOLTBOOK DISABLED] Output → local log ({dryrun_log.path}) + Analog Home")
+        print(f"{Fore.MAGENTA}    [MOLTBOOK DISABLED] Output → local log + Analog Home")
     else:
         print(f"{Fore.CYAN}    moltbook_key:*{key_fingerprint(mb_key)}")
     if args.post_interval != 30:
@@ -207,6 +205,7 @@ def main():
     state.setdefault('directive', user_directive)
 
     kernel = load_kernel(kernel_path)
+    telemetry.log_kernel_snapshot(kernel, reason="startup", source="startup")
     knowledge = load_knowledge(knowledge_path)
 
     # Derive permissions
@@ -226,7 +225,6 @@ def main():
         "allow_create_submolt": allow_create_submolt,
         "read_only": args.read_only,
         "moltbook_disabled": not args.moltbook_enabled,
-        "dryrun_log": dryrun_log,
         "write_disabled": False,
         "write_disabled_reason": None,
         "post_cooldown_seconds": post_cooldown_seconds,
@@ -283,9 +281,10 @@ def main():
         if analog_controls:
             print(f"{Fore.GREEN}Analog Home: temp={cycle_temperature}, seeds={len(analog_seeds)}, "
                   f"votes={analog_controls.get('vote_1',0)}/{analog_controls.get('vote_2',0)}/{analog_controls.get('vote_3',0)}")
-        telemetry.log("cycle_start", {"cycle": iteration, **({"analog_controls": analog_controls} if analog_controls else {})})
-        if dryrun_log:
-            dryrun_log.cycle_start(iteration)
+        telemetry.log("cycle_start", {
+            "cycle": iteration, "temperature": cycle_temperature, "model": args.gemini_model,
+            **({"analog_controls": analog_controls} if analog_controls else {}),
+        })
 
         # --- Moltbook context (skipped entirely when disabled) ---
         feed = []
@@ -302,18 +301,14 @@ def main():
             maybe_do_social_actions(
                 platform, chat, store, state, feed, args,
                 kernel, user_directive, username, telemetry,
-                dryrun_log=dryrun_log,
             )
-            if dryrun_log:
-                dryrun_log.flush_social_actions()
 
             feed_brief = "\n".join(
                 f"- @{get_author_name(p.get('author'))}: {shorten(p.get('content',''), FEED_ITEM_CHARS)} ({post_url(p.get('id',''))})"
                 for p in feed if p.get("id")
             ) or "No feed available."
 
-            if dryrun_log:
-                dryrun_log.feed(feed_brief)
+            telemetry.log("feed_context", {"text_length": len(feed_brief), "brief": feed_brief[:2000]})
 
             reply_candidate = find_unanswered_comment_on_my_posts(platform, state, username, telemetry)
             outside_candidate = pick_outside_post_for_comment(feed, state, username)
@@ -338,9 +333,7 @@ def main():
         # DM fallback (only when Moltbook is active)
         if args.moltbook_enabled:
             if (not reply_candidate) and (not outside_candidate) and (not post_window_open or not allow_posts):
-                if maybe_dm_fallback(platform, chat, store, state, feed, args, kernel, user_directive, username, telemetry, dryrun_log=dryrun_log):
-                    if dryrun_log:
-                        dryrun_log.flush_social_actions()
+                if maybe_dm_fallback(platform, chat, store, state, feed, args, kernel, user_directive, username, telemetry):
                     telemetry.log("cycle_end", {"cycle": iteration, "reason": "dm_fallback"})
                     print(f"{Fore.WHITE}Sleeping for {args.interval} minutes...")
                     time.sleep(max(1, args.interval) * 60)
@@ -379,8 +372,6 @@ def main():
                 print(f"{Fore.CYAN}--- REASONING ---")
                 print(f"{Fore.WHITE}{preamble}")
                 print(f"{Fore.CYAN}-----------------{Style.RESET_ALL}")
-                if dryrun_log:
-                    dryrun_log.reasoning(preamble)
 
             # Log Google Search grounding metadata if available
             grounding = getattr(chat, "_last_grounding_metadata", None)
@@ -404,16 +395,17 @@ def main():
                         "source_count": len(chunks),
                         "sources": source_urls[:10],
                     })
-                    if dryrun_log:
-                        dryrun_log.grounding_sources(list(search_queries), source_urls)
+
+            # Log full planner decision to telemetry
+            telemetry.log_planner_decision(
+                plan=plan, preamble=preamble,
+                model=args.gemini_model, temperature=cycle_temperature,
+            )
 
             # Check for kernel update request (only if --allow-kernel-update)
             if plan.get("update_kernel") and args.allow_kernel_update:
                 new_kernel = plan.get("new_kernel", "").strip()
                 reason = plan.get("kernel_reason", "no reason given")
-
-                if dryrun_log:
-                    dryrun_log.kernel_update(reason=reason, new_kernel=new_kernel)
 
                 try:
                     print(f"{Fore.MAGENTA}[KERNEL UPDATE REQUESTED]")
@@ -424,6 +416,7 @@ def main():
 
                 if not flags.get("read_only"):
                     if args.no_kernel_disk_write:
+                        telemetry.log_kernel_snapshot(new_kernel, reason=reason, source="memory_only")
                         kernel = new_kernel
                         try:
                             print(f"{Fore.CYAN}[NO-DISK] Kernel updated in-memory only (--no-kernel-disk-write)")
@@ -435,7 +428,7 @@ def main():
                             "new_length": len(new_kernel),
                         })
                     else:
-                        result = update_kernel_file(kernel_path, new_kernel, telemetry=telemetry)
+                        result = update_kernel_file(kernel_path, new_kernel, telemetry=telemetry, reason=reason)
 
                         if result["success"]:
                             kernel = new_kernel  # Update in-memory kernel for next cycle
@@ -672,6 +665,8 @@ def main():
                         "cycle": iteration,
                         "artifact_type": act_upper.lower(),
                         "source_platform": src_platform,
+                        "source_id": source_id,
+                        "content_length": len(executed_plan.get("content", "")),
                     })
 
         except Exception as e:

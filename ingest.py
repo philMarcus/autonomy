@@ -1,15 +1,17 @@
 #!/usr/bin/env python3
 """
-autonomy_duckdb_ingest_v1
+autonomy_duckdb_ingest_v2
 JSONL telemetry -> partitioned Parquet (DuckDB)
 
-- Source of truth: telemetry/events.jsonl (append-only)
+- Source of truth: telemetry/{brain}_events.jsonl (per-brain, append-only)
+- Legacy support: also reads telemetry/events.jsonl if present
 - Warehouse: warehouse/events/dt=YYYY-MM-DD/*.parquet
 - Full fidelity: payload_json stores the original JSON line exactly
 """
 
 from __future__ import annotations
 
+import glob as glob_mod
 import json
 import os
 from dataclasses import dataclass
@@ -24,7 +26,7 @@ import pandas as pd
 # ----------------------------
 # Config
 # ----------------------------
-SOURCE_JSONL = Path("telemetry/events.jsonl")
+SOURCE_DIR = Path("telemetry")
 WAREHOUSE_DIR = Path("warehouse")
 EVENTS_DIR = WAREHOUSE_DIR / "events"
 STATE_PATH = WAREHOUSE_DIR / "ingest_state.json"
@@ -39,8 +41,12 @@ def ensure_dirs() -> None:
 
 def load_state() -> Dict[str, Any]:
     if STATE_PATH.exists():
-        return json.loads(STATE_PATH.read_text(encoding="utf-8"))
-    return {"byte_offset": 0}
+        state = json.loads(STATE_PATH.read_text(encoding="utf-8"))
+        # Migrate legacy single-file format to per-file offsets
+        if "byte_offset" in state and "file_offsets" not in state:
+            state["file_offsets"] = {"events.jsonl": state.pop("byte_offset")}
+        return state
+    return {"file_offsets": {}}
 
 
 def save_state(state: Dict[str, Any]) -> None:
@@ -234,19 +240,29 @@ def write_parquet_partitioned(rows: List[Dict[str, Any]]) -> None:
     con.close()
 
 
-def ingest_once() -> Tuple[int, int]:
-    ensure_dirs()
-    state = load_state()
-    offset = int(state.get("byte_offset", 0))
+def _find_event_files() -> List[Path]:
+    """Return all *_events.jsonl files plus legacy events.jsonl if present."""
+    files = []
+    if SOURCE_DIR.exists():
+        for p in sorted(SOURCE_DIR.glob("*_events.jsonl")):
+            files.append(p)
+        # Legacy single file (if not already matched by the glob)
+        legacy = SOURCE_DIR / "events.jsonl"
+        if legacy.exists() and legacy not in files:
+            files.append(legacy)
+    return files
 
-    if not SOURCE_JSONL.exists():
-        raise FileNotFoundError(f"Source JSONL not found: {SOURCE_JSONL.resolve()}")
 
-    new_rows: List[Dict[str, Any]] = []
+def _ingest_file(path: Path, offset: int) -> Tuple[int, int, int, List[Dict[str, Any]]]:
+    """Read new lines from a single JSONL file starting at byte offset.
+
+    Returns (lines_read, events_parsed, new_offset, rows).
+    """
+    rows: List[Dict[str, Any]] = []
     new_offset = offset
     lines_read = 0
 
-    with SOURCE_JSONL.open("rb") as f:
+    with path.open("rb") as f:
         f.seek(offset)
         while True:
             line = f.readline()
@@ -262,19 +278,44 @@ def ingest_once() -> Tuple[int, int]:
                 obj = json.loads(s)
                 if "ts" not in obj or "event_type" not in obj:
                     continue
-                new_rows.append(normalize_event(obj, s))
+                rows.append(normalize_event(obj, s))
             except json.JSONDecodeError:
-                # keep going; raw log stays source of truth
                 continue
 
+    return lines_read, len(rows), new_offset, rows
+
+
+def ingest_once() -> Tuple[int, int]:
+    ensure_dirs()
+    state = load_state()
+    file_offsets: Dict[str, int] = state.get("file_offsets", {})
+
+    event_files = _find_event_files()
+    if not event_files:
+        print(f"No *_events.jsonl files found in {SOURCE_DIR.resolve()}")
+        return 0, 0
+
+    all_rows: List[Dict[str, Any]] = []
+    total_lines = 0
+
+    for path in event_files:
+        fname = path.name
+        offset = int(file_offsets.get(fname, 0))
+        lines_read, events_parsed, new_offset, rows = _ingest_file(path, offset)
+        total_lines += lines_read
+        all_rows.extend(rows)
+        file_offsets[fname] = new_offset
+        if lines_read:
+            print(f"  {fname}: +{lines_read} lines, +{events_parsed} events")
+
     # Write parquet
-    write_parquet_partitioned(new_rows)
+    write_parquet_partitioned(all_rows)
 
     # Update state
-    state["byte_offset"] = new_offset
+    state["file_offsets"] = file_offsets
     save_state(state)
 
-    return lines_read, len(new_rows)
+    return total_lines, len(all_rows)
 
 
 if __name__ == "__main__":

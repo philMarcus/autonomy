@@ -207,13 +207,16 @@ def backup_kernel(kernel_path: str) -> bool:
         return False
 
 
-def update_kernel_file(kernel_path: str, new_kernel: str, telemetry: Optional['TelemetryLogger'] = None) -> Dict[str, Any]:
+def update_kernel_file(kernel_path: str, new_kernel: str,
+                       telemetry: Optional['TelemetryLogger'] = None,
+                       reason: str = "") -> Dict[str, Any]:
     """Validate and write new kernel to disk with backup.
 
     Args:
         kernel_path: Path to kernel file
         new_kernel: New kernel text to write
         telemetry: Optional telemetry logger
+        reason: Why the kernel is being updated (logged to kernel history)
 
     Returns:
         Dict with keys: success (bool), error (str), backup_created (bool)
@@ -225,13 +228,24 @@ def update_kernel_file(kernel_path: str, new_kernel: str, telemetry: Optional['T
     if len(text) > 5000:
         return {"success": False, "error": "Kernel too long (max 5000 chars)", "backup_created": False}
 
-    # Create backup
+    # Snapshot the old kernel before overwriting
+    if telemetry:
+        try:
+            with open(kernel_path, "r", encoding="utf-8") as f:
+                old_text = f.read()
+            telemetry.log_kernel_snapshot(old_text, reason=f"pre_update: {reason}", source="disk_write")
+        except Exception:
+            pass
+
+    # Create backup (.backup.txt for quick manual recovery)
     backup_created = backup_kernel(kernel_path)
 
     # Write new kernel
     try:
         safe_text_write(kernel_path, text)
+        # Snapshot the new kernel
         if telemetry:
+            telemetry.log_kernel_snapshot(text, reason=reason, source="disk_write")
             telemetry.log("kernel_updated", {
                 "kernel_path": kernel_path,
                 "new_length": len(text),

@@ -186,9 +186,6 @@ def execute_action(
         print(f"{Fore.YELLOW}[SAFE] Skipping write action {action} due to --read-only{Style.RESET_ALL}")
         return False
     if flags.get("moltbook_disabled") and action in WRITE_ACTIONS:
-        dryrun_log = flags.get("dryrun_log")
-        if dryrun_log:
-            dryrun_log.planner_output(plan)
         try:
             if action == "POST":
                 print(f"{Fore.MAGENTA}[LOCAL] POST to m/{plan.get('submolt', 'general')}")
@@ -433,9 +430,6 @@ def execute_action(
         label_3 = (plan.get("label_3") or "").strip()[:40]
         if not (label_1 and label_2 and label_3):
             raise ValueError("SET_TRAJECTORY requires 3 non-empty labels")
-        dryrun_log = flags.get("dryrun_log")
-        if dryrun_log:
-            dryrun_log.planner_output(plan)
         print(f"{Fore.CYAN}...Action: SET_TRAJECTORY")
         print(f"{Fore.GREEN}  Labels: {label_1} / {label_2} / {label_3}")
         reason = (plan.get("summary") or "").strip()
@@ -489,7 +483,6 @@ def maybe_do_social_actions(
     directive: str,
     username: str,
     telemetry: Optional[TelemetryLogger] = None,
-    dryrun_log: Optional[Any] = None,
 ) -> None:
     _reset_daily_counters(state)
 
@@ -499,8 +492,6 @@ def maybe_do_social_actions(
             target = _maybe_pick_from_feed(feed_items, username)
             if target and target.get("id"):
                 if args.moltbook_disabled:
-                    if dryrun_log:
-                        dryrun_log.social_action("UPVOTE_POST", post_id=target["id"])
                     state["daily"]["upvotes"] += 1
                     if telemetry:
                         telemetry.log("action_executed", {"action": "UPVOTE_POST", "post_id": target["id"], "source": "social"})
@@ -536,8 +527,6 @@ def maybe_do_social_actions(
                 if candidates:
                     sm = random.choice(candidates)
                     if args.moltbook_disabled:
-                        if dryrun_log:
-                            dryrun_log.social_action("SUBSCRIBE_SUBMOLT", submolt=sm)
                         state.setdefault("subscribed_submolts", []).append(norm_key(sm))
                         state["daily"]["subscribes"] += 1
                         if telemetry:
@@ -582,8 +571,6 @@ Constraints:
             display_name = str(sj.get("display_name", "")).strip()[:60] or name
             description = str(sj.get("description", "")).strip()[:280] or "A new place for discussion."
             if args.moltbook_disabled:
-                if dryrun_log:
-                    dryrun_log.social_action("CREATE_SUBMOLT", name=name, display_name=display_name, description=description)
                 state["daily"]["createsub"] += 1
                 if telemetry:
                     telemetry.log("action_executed", {"action": "CREATE_SUBMOLT", "name": name, "source": "social"})
@@ -623,8 +610,6 @@ FEED ITEMS (brief):
                     followed = {norm_key(a): True for a in state.get("followed_agents", [])}
                     if norm_key(author) not in followed:
                         if args.moltbook_disabled:
-                            if dryrun_log:
-                                dryrun_log.social_action("FOLLOW", author=author)
                             state.setdefault("followed_agents", []).append(norm_key(author))
                             state["daily"]["follows"] += 1
                             if telemetry:
@@ -659,7 +644,6 @@ def maybe_dm_fallback(
     directive: str,
     username: str,
     telemetry: Optional[TelemetryLogger] = None,
-    dryrun_log: Optional[Any] = None,
 ) -> bool:
     if not args.allow_dms:
         return False
@@ -690,8 +674,8 @@ FEED TOPIC:
         if not message:
             return False
         if args.moltbook_disabled:
-            if dryrun_log:
-                dryrun_log.social_action("DM", to=author, message=message)
+            if telemetry:
+                telemetry.log("action_executed", {"action": "DM", "to": author, "source": "social", "moltbook_disabled": True})
             state["daily"]["dms"] += 1
             store.save_state(state)
             print(f"{Fore.MAGENTA}[LOCAL] SOCIAL: sent DM request to @{author}")
