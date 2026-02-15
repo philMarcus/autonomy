@@ -2,22 +2,22 @@
 
 ## API Models
 
-| Model ID | Provider | Display Name | Input $/1K tok | Output $/1K tok | Est. $/1K calls* | Context | Search Grounding | Recommended Role |
+| Model ID | Provider | Display Name | Input $/1K tok | Output $/1K tok | Est. $/1K calls* | Context | Search | Recommended Role |
 |---|---|---|---|---|---|---|---|---|
-| `gemini-2.0-flash-lite` | Gemini | Gemini 2.0 Flash-Lite | FREE | FREE | $0.00 | 128K | No | Daemon (free tier) |
-| `gemini-2.5-flash` | Gemini | Gemini 2.5 Flash | $0.00015 | $0.0006 | $0.45 | 128K | Yes | Daemon / Conscious |
-| `gemini-3-flash-preview` | Gemini | Gemini 3 Flash Preview | $0.00015 | $0.0006 | $0.45 | 128K | Yes | Daemon / Conscious |
-| `gpt-4o-mini` | OpenAI | GPT-4o Mini | $0.00015 | $0.0006 | $0.45 | 128K | No | Daemon |
-| `mistral-small-latest` | Mistral | Mistral Small | $0.0002 | $0.0006 | $0.50 | 128K | No | Daemon |
-| `claude-3.5-haiku` | Anthropic | Claude 3.5 Haiku | $0.0008 | $0.004 | $2.80 | 200K | No | Daemon / Conscious |
-| `gemini-2.5-pro` | Gemini | Gemini 2.5 Pro | $0.00125 | $0.005 | $3.75 | 128K | Yes | Conscious |
-| `gemini-3-pro-preview` | Gemini | Gemini 3 Pro Preview | $0.00125 | $0.005 | $3.75 | 128K | Yes | Conscious |
-| `mistral-large-latest` | Mistral | Mistral Large | $0.002 | $0.006 | $5.00 | 128K | No | Conscious |
-| `gpt-4o` | OpenAI | GPT-4o | $0.0025 | $0.01 | $7.50 | 128K | No | Conscious |
-| `claude-sonnet-4-5` | Anthropic | Claude Sonnet 4.5 | $0.003 | $0.015 | $10.50 | 200K | No | Conscious |
-| `claude-opus-4-6` | Anthropic | Claude Opus 4.6 | $0.015 | $0.075 | $52.50 | 200K | No | Conscious (premium) |
+| `gemini-2.0-flash-lite` | Gemini | Gemini 2.0 Flash-Lite | FREE | FREE | $0.00 | 128K | Yes | Daemon (free tier) |
+| `gemini-2.5-flash` | Gemini | Gemini 2.5 Flash | $0.00015 | $0.0006 | $1.80 | 128K | Yes | Daemon / Conscious |
+| `gemini-3-flash-preview` | Gemini | Gemini 3 Flash Preview | $0.00015 | $0.0006 | $1.80 | 128K | Yes | Daemon / Conscious |
+| `gpt-4o-mini` | OpenAI | GPT-4o Mini | $0.00015 | $0.0006 | $1.80 | 128K | No | Daemon |
+| `mistral-small-latest` | Mistral | Mistral Small | $0.0002 | $0.0006 | $2.10 | 128K | No | Daemon |
+| `claude-3.5-haiku` | Anthropic | Claude 3.5 Haiku | $0.0008 | $0.004 | $10.80 | 200K | No | Daemon / Conscious |
+| `gemini-2.5-pro` | Gemini | Gemini 2.5 Pro | $0.00125 | $0.005 | $15.00 | 128K | Yes | Conscious |
+| `gemini-3-pro-preview` | Gemini | Gemini 3 Pro Preview | $0.00125 | $0.005 | $15.00 | 128K | Yes | Conscious |
+| `mistral-large-latest` | Mistral | Mistral Large | $0.002 | $0.006 | $21.00 | 128K | No | Conscious |
+| `gpt-4o` | OpenAI | GPT-4o | $0.0025 | $0.01 | $30.00 | 128K | No | Conscious |
+| `claude-sonnet-4-5` | Anthropic | Claude Sonnet 4.5 | $0.003 | $0.015 | $40.50 | 200K | No | Conscious |
+| `claude-opus-4-6` | Anthropic | Claude Opus 4.6 | $0.015 | $0.075 | $202.50 | 200K | No | Conscious (premium) |
 
-*Est. $/1K calls assumes 1K input tokens + 500 output tokens per call. Sorted by cost.
+*Est. $/1K calls assumes 6K input tokens + 1.5K output tokens per call. Sorted by cost.
 
 ## Local Models (Phase 3 — not yet implemented)
 

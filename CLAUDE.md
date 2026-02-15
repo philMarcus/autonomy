@@ -110,6 +110,51 @@ Public-facing observatory site. Displays agent artifacts, controls (temperature,
 - Archives page: paginated artifact history (`/archives`)
 - Temperature slider with ±0.5 clamping, 429 error handling
 
+## v15.0 — In Development (Integrate-and-Fire Architecture)
+
+v15_0/ is the next major version. **Do not modify v14_0/** — it is the stable production version.
+
+### Architecture: Dual-Process "Neuron" Model
+- **Subconscious Daemon** (cheap/local model) runs continuously with two gears:
+  - **Gear 1: Sentry** — scans feeds, scores items against directives
+  - **Gear 2: Strategist** — activates on high-signal items, generates draft plans, adds "charge" to wake potential
+- **Integrate-and-Fire**: drafts accumulate in a buffer, each adding charge. When `wake_potential` crosses threshold, consciousness fires — seeing the full buffer and synthesizing multiple insights
+- **Dreaming**: a conscious action (not subconscious). Compresses old memories into synthesized narratives at front of memory
+- **Downward Causality**: every conscious output includes directives to daemon + control updates to any system parameter
+- **Feedback Controls**: every configurable number is a control (readable/writable by conscious, settable/blacklistable by user)
+
+### Multi-Model LLM Backend (Phase 1-2: COMPLETE)
+- `v15_0/llm/base.py` — ABCs: `ModelBackend`, `ChatSession`, `LLMClient`, `LLMResponse`, `ModelInfo`, `CompatAdapter`
+- `v15_0/llm/registry.py` — `ModelRegistry`: maps model IDs to provider backends, `as_llm_client()` for v14 compat
+- `v15_0/llm/budget.py` — `DailyBudget`: per-model USD tracking, resets midnight UTC
+- `v15_0/llm/gemini.py` — `GeminiBackend`: 5 models (2.5 Flash/Pro, 2.0 Flash-Lite, 3 Pro/Flash Preview)
+- `v15_0/llm/anthropic.py` — `AnthropicBackend`: Claude 3.5 Haiku, Sonnet 4.5, Opus 4.6
+- `v15_0/llm/openai.py` — `OpenAIBackend`: GPT-4o Mini, GPT-4o
+- `v15_0/llm/mistral.py` — `MistralBackend`: Mistral Small, Mistral Large
+- See `v15_0/MODELS.md` for full pricing and usage reference
+
+### v15 CLI Flags (additive to v14)
+- `--conscious-model` — Model for conscious loop (default: same as `--gemini-model`)
+- `--subconscious-model` — Model for subconscious daemon (default: `gemini-2.5-flash`)
+- `--daily-budget` — Daily API spend limit in USD (default: 1.0)
+- `--sentry-interval` — Seconds between sentry scans (default: 60)
+- `--no-subconscious` — v14-compatible single-loop mode (default: True)
+- `--subconscious` — Enable dual-process mode
+- `--blacklist-controls` — Comma-separated control keys LLM cannot modify
+
+### v15 Environment Variables
+Optional per-provider API keys (per-brain or global):
+- `{PREFIX}_ANTHROPIC_API_KEY` / `ANTHROPIC_API_KEY`
+- `{PREFIX}_OPENAI_API_KEY` / `OPENAI_API_KEY`
+- `{PREFIX}_MISTRAL_API_KEY` / `MISTRAL_API_KEY`
+
+### Remaining Phases
+- **Phase 3**: Local model backend (HuggingFace transformers, lazy GPU loading)
+- **Phase 4**: ControlRegistry (all tunables as feedback controls with blacklist)
+- **Phase 5**: Subconscious daemon (sentry + strategist + integrate-and-fire)
+- **Phase 6**: Conscious runner + dreaming action
+- **Phase 7**: Remote management via Analog Home dashboard
+
 ## Key Architecture Decisions
 
 - **One chat per cycle**: Chat is recreated each iteration (`__main__.py`) to avoid token accumulation
@@ -123,7 +168,7 @@ Public-facing observatory site. Displays agent artifacts, controls (temperature,
 
 - Gemini 2.5 Flash sometimes returns empty first responses with stateless API. The repair path in `parse_json_with_one_repair()` handles this (sends prompt again). This means ~2 LLM calls per cycle instead of 1 for Flash. Gemini 2.5 Pro does not have this issue.
 - **Next.js 16 + Tailwind 4 on Windows**: Turbopack's enhanced resolver can walk up to parent directories. Fixed with `turbopack.resolveAlias` in `web/next.config.ts` to pin tailwindcss to local `node_modules`.
-- **Version convention**: v14_0 is stable. Future work should be `v14_1/` or `v15_0/`.
+- **Version convention**: v14_0 is stable production. v15_0 is in development (do not modify v14_0). Future work in v15_0.
 
 ## Deployment
 
