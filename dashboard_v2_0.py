@@ -755,7 +755,9 @@ def render_input_controls_tab(brain_filter: str):
 _DAEMON_EVENT_TYPES = {
     "daemon_start", "daemon_stop", "daemon_tick", "daemon_error",
     "daemon_wake", "daemon_directives",
-    "sentry_signal", "strategist_draft",
+    "sentry_signal", "sentry_score_error",
+    "strategist_draft", "strategist_error", "strategist_parse_fail",
+    "strategist_budget_skip",
 }
 
 
@@ -860,9 +862,10 @@ def render_daemon_tab(brain_filter: str):
             st.dataframe(sig_display, use_container_width=True, hide_index=True, height=200)
         with right2:
             if "score" in signals.columns:
-                score_df = signals[["score"]].dropna().reset_index(drop=True)
+                scores = signals["score"].dropna()
                 st.caption("Score distribution")
-                st.bar_chart(score_df.value_counts(bins=10).sort_index(), height=180)
+                hist = scores.value_counts(bins=10).sort_index()
+                st.bar_chart(hist, height=180)
     else:
         st.info("No sentry signals yet.")
 
@@ -882,6 +885,18 @@ def render_daemon_tab(brain_filter: str):
         st.dataframe(draft_display, use_container_width=True, hide_index=True, height=200)
     else:
         st.info("No strategist drafts yet.")
+
+    # --- Strategist Failures ---
+    strat_errors = df[df["event_type"].isin(["strategist_error", "strategist_parse_fail", "strategist_budget_skip"])]
+    if len(strat_errors) > 0:
+        st.caption(f"Strategist failures ({len(strat_errors)})")
+        fail_cols = ["ts", "event_type", "item_id", "error", "error_type", "raw_text", "model"]
+        available_fail = [c for c in fail_cols if c in strat_errors.columns]
+        fail_display = strat_errors[available_fail].copy()
+        if "ts" in fail_display.columns:
+            fail_display["ts"] = fail_display["ts"].dt.strftime("%H:%M:%S")
+        fail_display = fail_display.sort_values("ts", ascending=False)
+        st.dataframe(fail_display, use_container_width=True, hide_index=True, height=200)
 
     # --- Errors ---
     if len(errors) > 0:

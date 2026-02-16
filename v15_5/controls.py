@@ -294,8 +294,8 @@ def build_default_registry(args, model_registry) -> ControlRegistry:
                 "Max drafts in buffer before pruning oldest", "daemon", min_val=1, max_val=50),
         Control("sentry_max_tokens", "int", 256,
                 "Max output tokens for sentry scoring", "daemon", min_val=64, max_val=1024),
-        Control("strategist_max_tokens", "int", 512,
-                "Max output tokens for strategist drafts", "daemon", min_val=128, max_val=2048),
+        Control("strategist_max_tokens", "int", 2048,
+                "Max output tokens for strategist drafts", "daemon", min_val=128, max_val=4096),
 
         # --- Context ---
         Control("feed_batch_size", "int", 12,

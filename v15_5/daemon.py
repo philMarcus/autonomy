@@ -377,7 +377,14 @@ class SubconsciousDaemon:
             est_out = len(text) // 4
             self._budget.record_usage(model_id, _make_response(text, est_in, est_out, model_id))
             return _parse_score(text)
-        except Exception:
+        except Exception as e:
+            self._telemetry.log("sentry_score_error", {
+                "brain": self._brain_name,
+                "tick": self._tick_count,
+                "item_id": item.get("id", ""),
+                "error": str(e),
+                "error_type": type(e).__name__,
+            })
             return 0.0
 
     # ------------------------------------------------------------------
@@ -395,6 +402,12 @@ class SubconsciousDaemon:
 
         # Budget check (strategist uses more tokens)
         if not self._budget.can_afford(model_id, est_input_tokens=1200, est_output_tokens=max_tokens):
+            self._telemetry.log("strategist_budget_skip", {
+                "brain": self._brain_name,
+                "tick": self._tick_count,
+                "item_id": item.get("id", ""),
+                "model": model_id,
+            })
             return None
 
         author_name = _get_author(item)
@@ -415,7 +428,8 @@ class SubconsciousDaemon:
             f"Directive: {self._directive}\n"
             f"{directive_section}\n\n"
             f"High-signal feed item (relevance score: {score:.2f}):\n{item_text}\n\n"
-            f"Suggest an action. Respond with JSON:\n"
+            f"Suggest an action. IMPORTANT: Do NOT output internal monologue, narrative, "
+            f"or preamble. Respond with ONLY this JSON object:\n"
             f'{{"action": "COMMENT or REPLY or POST or UPVOTE", '
             f'"reasoning": "why this matters", '
             f'"draft_content": "suggested text for the action"}}'
@@ -439,6 +453,12 @@ class SubconsciousDaemon:
 
             plan = _parse_json_safe(text)
             if not plan:
+                self._telemetry.log("strategist_parse_fail", {
+                    "brain": self._brain_name,
+                    "tick": self._tick_count,
+                    "item_id": item_id,
+                    "raw_text": shorten(text, 500),
+                })
                 return None
 
             # Charge is proportional to signal score, boosted by urgency
@@ -456,7 +476,14 @@ class SubconsciousDaemon:
                 draft_content=plan.get("draft_content", ""),
                 charge=charge,
             )
-        except Exception:
+        except Exception as e:
+            self._telemetry.log("strategist_error", {
+                "brain": self._brain_name,
+                "tick": self._tick_count,
+                "item_id": item_id,
+                "error": str(e),
+                "error_type": type(e).__name__,
+            })
             return None
 
 

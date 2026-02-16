@@ -454,6 +454,7 @@ def compress_memories(
             "success": True,
             "entries_compressed": len(to_compress),
             "narrative_length": len(narrative),
+            "narrative": narrative,
             "error": None,
         }
         if telemetry:

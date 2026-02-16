@@ -13,6 +13,7 @@ import hashlib
 import json
 import os
 import re
+import sys
 import time
 import uuid
 import argparse
@@ -27,9 +28,6 @@ from .config import (
     BRAINS_DIR, MOLTBOOK_API_BASE, ESPN_DEFAULT_LEAGUE,
     FEED_LIMIT, FEED_ITEM_CHARS,
     HISTORY_KEEP, MEMORY_MAX_CHARS,
-    UPVOTE_EVERY_CYCLE_DEFAULT, FOLLOW_ON_LIKE_DEFAULT, FOLLOW_PROB_DEFAULT,
-    SUBSCRIBE_POLICY_DEFAULT, CREATE_SUBMOLT_PROB_DEFAULT,
-    ALLOW_CREATE_SUBMOLT_DEFAULT, ALLOW_DMS_DEFAULT,
 )
 from .telemetry import TelemetryLogger
 from .store import LocalFileStore
@@ -50,7 +48,7 @@ from .planner import (
 from .actions import (
     ActionBlocked, can_post, execute_action,
     refresh_my_posts_from_profile, find_unanswered_comment_on_my_posts,
-    pick_outside_post_for_comment, maybe_do_social_actions, maybe_dm_fallback,
+    pick_outside_post_for_comment,
 )
 
 colorama_init(autoreset=True)
@@ -118,26 +116,6 @@ def build_arg_parser() -> argparse.ArgumentParser:
     ap.add_argument("--allow-votes", action="store_true")
     ap.add_argument("--allow-downvote", action="store_true")
     ap.add_argument("--feed-sort", choices=["hot", "new", "top", "rising"], default="hot")
-
-    ap.add_argument("--upvote-every-cycle", dest="upvote_every_cycle", action="store_true")
-    ap.add_argument("--no-upvote-every-cycle", dest="upvote_every_cycle", action="store_false")
-    ap.set_defaults(upvote_every_cycle=UPVOTE_EVERY_CYCLE_DEFAULT)
-
-    ap.add_argument("--follow-on-like", dest="follow_on_like", action="store_true")
-    ap.add_argument("--no-follow-on-like", dest="follow_on_like", action="store_false")
-    ap.set_defaults(follow_on_like=FOLLOW_ON_LIKE_DEFAULT)
-
-    ap.add_argument("--follow-prob", type=float, default=FOLLOW_PROB_DEFAULT)
-    ap.add_argument("--subscribe-policy", choices=["off", "low", "medium", "high"], default=SUBSCRIBE_POLICY_DEFAULT)
-    ap.add_argument("--create-submolt-prob", type=float, default=CREATE_SUBMOLT_PROB_DEFAULT)
-
-    ap.add_argument("--allow-create-submolt", dest="allow_create_submolt", action="store_true")
-    ap.add_argument("--no-allow-create-submolt", dest="allow_create_submolt", action="store_false")
-    ap.set_defaults(allow_create_submolt=ALLOW_CREATE_SUBMOLT_DEFAULT)
-
-    ap.add_argument("--allow-dms", dest="allow_dms", action="store_true")
-    ap.add_argument("--no-allow-dms", dest="allow_dms", action="store_false")
-    ap.set_defaults(allow_dms=ALLOW_DMS_DEFAULT)
 
     # --- v15 flags ---
     ap.add_argument("--conscious-model", default=None,
@@ -237,6 +215,30 @@ def main():
             print(f"{Fore.GREEN}    Controls loaded from {controls_file}")
         except Exception:
             pass  # start fresh if file is corrupt
+
+    # CLI flags override saved controls — explicit flags always win
+    _CLI_TO_CONTROL = {
+        "--conscious-model":    ("conscious_model",          lambda a: a.conscious_model or (a.gemini_model if "--gemini-model" in sys.argv else None)),
+        "--gemini-model":       ("conscious_model",          lambda a: a.gemini_model),
+        "--subconscious-model": ("subconscious_model",       lambda a: a.subconscious_model),
+        "--temperature":        ("temperature",              lambda a: a.temperature),
+        "--daily-budget":       ("daily_budget_usd",         lambda a: a.daily_budget),
+        "--interval":           ("cycle_interval_minutes",   lambda a: a.interval),
+        "--post-interval":      ("post_interval_minutes",    lambda a: a.post_interval),
+        "--sentry-interval":    ("sentry_interval_seconds",  lambda a: a.sentry_interval),
+        "--mode":               ("mode",                     lambda a: a.mode),
+        "--allow-downvote":     ("allow_downvote",           lambda a: True),
+        "--priority":           ("priority",                 lambda a: a.priority),
+    }
+    cli_overrides = []
+    for flag, (ctrl_key, getter) in _CLI_TO_CONTROL.items():
+        if flag in sys.argv:
+            val = getter(args)
+            if val is not None:
+                ctrl.set(ctrl_key, val, source="cli")
+                cli_overrides.append(f"{ctrl_key}={val}")
+    if cli_overrides:
+        print(f"{Fore.YELLOW}    CLI overrides: {', '.join(cli_overrides)}")
 
     # Platform client (None when Moltbook disabled)
     platform = None
@@ -478,10 +480,6 @@ def main():
                 store.save_state(state)
 
             feed = platform.get_feed(limit=FEED_LIMIT, sort=args.feed_sort)
-            maybe_do_social_actions(
-                platform, chat, store, state, feed, args,
-                kernel, user_directive, username, telemetry,
-            )
 
             feed_brief = "\n".join(
                 f"- @{get_author_name(p.get('author'))}: {shorten(p.get('content',''), FEED_ITEM_CHARS)} ({post_url(p.get('id',''))})"
@@ -509,15 +507,6 @@ def main():
                 keywords=str(args.espn_keywords),
                 telemetry=telemetry,
             )
-
-        # DM fallback (only when Moltbook is active)
-        if args.moltbook_enabled:
-            if (not reply_candidate) and (not outside_candidate) and (not post_window_open or not allow_posts):
-                if maybe_dm_fallback(platform, chat, store, state, feed, args, kernel, user_directive, username, telemetry):
-                    telemetry.log("cycle_end", {"cycle": iteration, "reason": "dm_fallback"})
-                    print(f"{Fore.WHITE}Sleeping for {args.interval} minutes...")
-                    time.sleep(max(1, args.interval) * 60)
-                    continue
 
         hist_txt = history_context(state)
         mem_txt = memory_context(state)
@@ -815,18 +804,22 @@ def main():
                 )
 
                 if dream_result["success"]:
+                    narrative = dream_result.get("narrative", "")
                     safe_print(f"{Fore.GREEN}[DREAM] Compressed {dream_result['entries_compressed']} entries "
                                f"into {dream_result['narrative_length']} char narrative")
+                    safe_print(f"{Fore.CYAN}--- DREAM NARRATIVE ---")
+                    safe_print(f"{Fore.WHITE}{narrative}")
+                    safe_print(f"{Fore.CYAN}-----------------------{Style.RESET_ALL}")
                     store.save_state(state)
                     store.write_artifact(iteration, {
                         "brain": brain_name,
-                        "artifact_type": "system_dream",
-                        "title": "Dream \u2014 Memory Consolidation",
-                        "body_markdown": (
-                            f"Compressed {dream_result['entries_compressed']} history entries.\n\n"
-                            f"**Summary**: {plan.get('summary', 'memory maintenance')}"
+                        "artifact_type": "dream",
+                        "title": shorten(f"Dream \u2014 {plan.get('summary', 'Memory Consolidation')}", 200),
+                        "body_markdown": narrative,
+                        "monologue_public": (
+                            f"Compressed {dream_result['entries_compressed']} history entries "
+                            f"into synthesized memory."
                         ),
-                        "monologue_public": preamble,
                         "temperature": cycle_temperature,
                     })
                 else:
