@@ -20,12 +20,16 @@ COST_TABLE: Dict[str, Dict[str, float]] = {
     "gemini-3-pro-preview":      {"input": 0.00125,  "output": 0.005},
     "gemini-3-flash-preview":    {"input": 0.00015,  "output": 0.0006},
     # Anthropic
-    "claude-3.5-haiku":          {"input": 0.0008,   "output": 0.004},
+    "claude-haiku-4-5":          {"input": 0.001,    "output": 0.005},
     "claude-sonnet-4-5":         {"input": 0.003,    "output": 0.015},
-    "claude-opus-4-6":           {"input": 0.015,    "output": 0.075},
+    "claude-opus-4-6":           {"input": 0.005,    "output": 0.025},
     # OpenAI
-    "gpt-4o-mini":               {"input": 0.00015,  "output": 0.0006},
-    "gpt-4o":                    {"input": 0.0025,   "output": 0.01},
+    "gpt-5-nano":                {"input": 0.00005,  "output": 0.0004},
+    "gpt-5-mini":                {"input": 0.00025,  "output": 0.002},
+    "gpt-5.1":                   {"input": 0.00125,  "output": 0.01},
+    "gpt-5.2":                   {"input": 0.00175,  "output": 0.014},
+    "gpt-5-pro":                 {"input": 0.015,    "output": 0.12},
+    "gpt-5.2-pro":               {"input": 0.021,    "output": 0.168},
     # Mistral
     "mistral-small-latest":      {"input": 0.0002,   "output": 0.0006},
     "mistral-large-latest":      {"input": 0.002,    "output": 0.006},
@@ -89,3 +93,15 @@ class DailyBudget:
             "remaining_usd": round(self.remaining_usd(), 6),
             "by_model": {k: round(v, 6) for k, v in self._spend_by_model.items()},
         }
+
+    def spend_summary_text(self) -> str:
+        """Human-readable budget summary for inclusion in LLM prompt."""
+        s = self.spend_summary()
+        lines = [
+            f"Daily limit: ${s['daily_limit_usd']:.2f} | "
+            f"Spent: ${s['spent_usd']:.4f} | "
+            f"Remaining: ${s['remaining_usd']:.4f}"
+        ]
+        for model, cost in sorted(s.get("by_model", {}).items()):
+            lines.append(f"  {model}: ${cost:.4f}")
+        return "\n".join(lines)

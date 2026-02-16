@@ -10,6 +10,7 @@ v15.0: Multi-model LLM backend with ModelRegistry.
 """
 
 import hashlib
+import json
 import os
 import re
 import time
@@ -100,7 +101,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     ap.add_argument("--espn-date", default="")
     ap.add_argument("--espn-keywords", default="")
     ap.add_argument("--priority", choices=["replies_first", "outside_first"], default="replies_first")
-    ap.add_argument("--mode", choices=["all", "comment_only", "no_post"], default="all")
+    ap.add_argument("--mode", choices=["all", "comment_only", "no_post", "no_comment", "post_only"], default="all")
     ap.add_argument("--allow-votes", action="store_true")
     ap.add_argument("--allow-downvote", action="store_true")
     ap.add_argument("--feed-sort", choices=["hot", "new", "top", "rising"], default="hot")
@@ -205,7 +206,24 @@ def main():
         from .llm.mistral import MistralBackend
         registry.register_backend("mistral", MistralBackend(api_key=mistral_key))
 
+    # Local models — register when any model arg uses the "local:" prefix
+    if conscious_model.startswith("local:") or args.subconscious_model.startswith("local:"):
+        from .llm.local import LocalBackend
+        registry.register_backend("local", LocalBackend())
+
     llm_client = registry.as_llm_client(default_model_id=conscious_model)
+
+    # --- Control Registry (Phase 4) ---
+    from .controls import build_default_registry
+    ctrl = build_default_registry(args, registry)
+    controls_file = os.path.join(BRAINS_DIR, f"{brain_name}_controls.json")
+    if os.path.exists(controls_file):
+        try:
+            with open(controls_file, "r", encoding="utf-8") as cf:
+                ctrl.load_from_dict(json.load(cf))
+            print(f"{Fore.GREEN}    Controls loaded from {controls_file}")
+        except Exception:
+            pass  # start fresh if file is corrupt
 
     # Platform client (None when Moltbook disabled)
     platform = None
@@ -364,6 +382,9 @@ def main():
                     "vote_label_3": analog_controls.get("vote_label_3", "self"),
                 }
 
+        # Read current conscious model from control registry (may have changed)
+        conscious_model = ctrl.get("conscious_model")
+
         # Recreate chat each cycle to avoid token accumulation
         chat = llm_client.create_chat(
             system_instruction=kernel,
@@ -462,6 +483,8 @@ def main():
             cycle_temperature=cycle_temperature if analog_home_url else None,
             default_temperature=args.temperature,
             allow_default_temp=bool(args.enable_default_temp),
+            controls_block=ctrl.to_llm_block(),
+            budget_summary=budget.spend_summary_text() if budget else "",
         )
 
         try:
@@ -609,6 +632,53 @@ def main():
                         print(f"{Fore.CYAN}>> TRAJECTORY UPDATED")
                     else:
                         print(f"{Fore.YELLOW}>> TRAJECTORY UPDATE FAILED")
+
+            # --- Handle controls_update from planner ---
+            control_updates = plan.pop("controls_update", None)
+            if control_updates and isinstance(control_updates, dict):
+                results = ctrl.apply_updates(control_updates, source="conscious")
+                applied = {k: v for k, v in results.items() if v == "ok"}
+                blocked = {k: v for k, v in results.items() if v == "blocked"}
+
+                telemetry.log("controls_update", {
+                    "cycle": iteration, "updates": control_updates,
+                    "results": results, "applied_count": len(applied),
+                    "blocked_count": len(blocked),
+                })
+
+                for ck, cv in results.items():
+                    if cv == "ok":
+                        safe_print(f"{Fore.GREEN}  [CTRL] {ck} -> {ctrl.get(ck)}")
+                    elif cv == "blocked":
+                        safe_print(f"{Fore.YELLOW}  [CTRL] {ck} BLOCKED (blacklisted)")
+
+                # Actuate model change
+                if results.get("conscious_model") == "ok":
+                    new_model = ctrl.get("conscious_model")
+                    if registry.has_model(new_model):
+                        llm_client = registry.as_llm_client(default_model_id=new_model)
+                        safe_print(f"{Fore.CYAN}  [CTRL] Switched conscious model to {new_model}")
+
+                # Actuate budget change
+                if results.get("daily_budget_usd") == "ok":
+                    budget.daily_limit_usd = ctrl.get("daily_budget_usd")
+
+                # Publish control changes to Analog Home
+                if applied:
+                    changes_lines = []
+                    for ck in sorted(applied.keys()):
+                        changes_lines.append(f"- **{ck}**: {ctrl.get(ck)}")
+                    if blocked:
+                        changes_lines.append("")
+                        for ck in sorted(blocked.keys()):
+                            changes_lines.append(f"- ~~{ck}~~ (blocked by blacklist)")
+                    store.write_artifact(iteration, {
+                        "brain": brain_name,
+                        "artifact_type": "system_controls_update",
+                        "title": "Controls Updated",
+                        "body_markdown": "\n".join(changes_lines),
+                        "temperature": cycle_temperature,
+                    })
 
             # Fill missing IDs from candidates
             if (plan.get("action") or "").upper() == "REPLY" and reply_candidate:
@@ -788,9 +858,17 @@ def main():
             telemetry.log("error", {"cycle": iteration, "error": str(e)})
             safe_print(f"{Fore.RED}[ERROR] {e}")
 
+        # Persist controls state
+        try:
+            with open(controls_file, "w", encoding="utf-8") as cf:
+                json.dump(ctrl.to_dict(), cf, indent=2)
+        except Exception:
+            pass
+
         telemetry.log("cycle_end", {"cycle": iteration})
-        print(f"{Fore.WHITE}Sleeping for {args.interval} minutes...")
-        time.sleep(max(1, args.interval) * 60)
+        sleep_minutes = ctrl.get("cycle_interval_minutes")
+        print(f"{Fore.WHITE}Sleeping for {sleep_minutes} minutes...")
+        time.sleep(max(1, sleep_minutes) * 60)
 
 
 if __name__ == "__main__":

@@ -123,15 +123,31 @@ v15_0/ is the next major version. **Do not modify v14_0/** — it is the stable 
 - **Downward Causality**: every conscious output includes directives to daemon + control updates to any system parameter
 - **Feedback Controls**: every configurable number is a control (readable/writable by conscious, settable/blacklistable by user)
 
-### Multi-Model LLM Backend (Phase 1-2: COMPLETE)
+### Multi-Model LLM Backend (Phase 1-3: COMPLETE)
 - `v15_0/llm/base.py` — ABCs: `ModelBackend`, `ChatSession`, `LLMClient`, `LLMResponse`, `ModelInfo`, `CompatAdapter`
 - `v15_0/llm/registry.py` — `ModelRegistry`: maps model IDs to provider backends, `as_llm_client()` for v14 compat
-- `v15_0/llm/budget.py` — `DailyBudget`: per-model USD tracking, resets midnight UTC
+- `v15_0/llm/budget.py` — `DailyBudget`: per-model USD tracking, resets midnight UTC, `spend_summary_text()` for LLM prompt
 - `v15_0/llm/gemini.py` — `GeminiBackend`: 5 models (2.5 Flash/Pro, 2.0 Flash-Lite, 3 Pro/Flash Preview)
-- `v15_0/llm/anthropic.py` — `AnthropicBackend`: Claude 3.5 Haiku, Sonnet 4.5, Opus 4.6
-- `v15_0/llm/openai.py` — `OpenAIBackend`: GPT-4o Mini, GPT-4o
+- `v15_0/llm/anthropic.py` — `AnthropicBackend`: Claude Haiku 4.5, Sonnet 4.5, Opus 4.6
+- `v15_0/llm/openai.py` — `OpenAIBackend`: GPT-5 Nano, Mini, 5.1, 5.2, Pro, 5.2 Pro
 - `v15_0/llm/mistral.py` — `MistralBackend`: Mistral Small, Mistral Large
+- `v15_0/llm/local.py` — `LocalBackend`: HuggingFace transformers, lazy GPU loading, 4-bit quantization for 7B+ on <=10GB VRAM
+  - Small: Qwen3 1.5B, Llama 3.2 3B (float16, no quantization)
+  - Full: Qwen3 8B, Mistral 7B, Llama 3.1 8B (4-bit NF4 via bitsandbytes)
 - See `v15_0/MODELS.md` for full pricing and usage reference
+
+### ControlRegistry (Phase 4: COMPLETE)
+- `v15_0/controls.py` — `Control` dataclass, `ControlRegistry` class, `build_default_registry()` factory
+- Every tunable is a first-class control: readable by LLM, writable by LLM, blacklistable by user
+- 22 controls across 7 categories: llm, cost, timing, output, social, daemon, context
+- **Model selection as a control**: `conscious_model` and `subconscious_model` are controls the LLM can modify to switch models mid-run
+- **Budget visibility**: LLM sees per-model spend summary and remaining budget in its prompt
+- **Blacklist**: `--blacklist-controls key1,key2` prevents LLM from modifying those controls (shown as `[LOCKED]`)
+- **Output destination**: `output_destination` control chooses between `analog_home` or `moltbook_and_analog_home`
+- **Mode expansion**: `mode` control supports `all`, `comment_only`, `no_post`, `no_comment`, `post_only`
+- Controls persisted to `brains/{brain}_controls.json` between runs
+- LLM returns `"controls_update": {...}` in JSON response to modify controls
+- Validation: type coercion, range clamping, choice checking, change logging
 
 ### v15 CLI Flags (additive to v14)
 - `--conscious-model` — Model for conscious loop (default: same as `--gemini-model`)
@@ -149,8 +165,6 @@ Optional per-provider API keys (per-brain or global):
 - `{PREFIX}_MISTRAL_API_KEY` / `MISTRAL_API_KEY`
 
 ### Remaining Phases
-- **Phase 3**: Local model backend (HuggingFace transformers, lazy GPU loading)
-- **Phase 4**: ControlRegistry (all tunables as feedback controls with blacklist)
 - **Phase 5**: Subconscious daemon (sentry + strategist + integrate-and-fire)
 - **Phase 6**: Conscious runner + dreaming action
 - **Phase 7**: Remote management via Analog Home dashboard

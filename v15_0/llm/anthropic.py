@@ -13,11 +13,11 @@ from .base import ChatSession, LLMResponse, ModelBackend, ModelInfo
 # All Anthropic models this backend serves
 ANTHROPIC_MODELS: List[ModelInfo] = [
     ModelInfo(
-        model_id="claude-3.5-haiku",
+        model_id="claude-haiku-4-5",
         provider="anthropic",
-        display_name="Claude 3.5 Haiku",
-        input_cost_per_1k=0.0008,
-        output_cost_per_1k=0.004,
+        display_name="Claude Haiku 4.5",
+        input_cost_per_1k=0.001,
+        output_cost_per_1k=0.005,
         max_context_tokens=200_000,
     ),
     ModelInfo(
@@ -32,8 +32,8 @@ ANTHROPIC_MODELS: List[ModelInfo] = [
         model_id="claude-opus-4-6",
         provider="anthropic",
         display_name="Claude Opus 4.6",
-        input_cost_per_1k=0.015,
-        output_cost_per_1k=0.075,
+        input_cost_per_1k=0.005,
+        output_cost_per_1k=0.025,
         max_context_tokens=200_000,
     ),
 ]

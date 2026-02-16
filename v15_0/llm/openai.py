@@ -11,22 +11,61 @@ from .base import ChatSession, LLMResponse, ModelBackend, ModelInfo
 
 
 # All OpenAI models this backend serves
+# Models that don't support the temperature parameter (reasoning models)
+_NO_TEMPERATURE = {"gpt-5-nano", "gpt-5-mini"}
+
 OPENAI_MODELS: List[ModelInfo] = [
     ModelInfo(
-        model_id="gpt-4o-mini",
+        model_id="gpt-5-nano",
         provider="openai",
-        display_name="GPT-4o Mini",
-        input_cost_per_1k=0.00015,
-        output_cost_per_1k=0.0006,
+        display_name="GPT-5 Nano",
+        input_cost_per_1k=0.00005,
+        output_cost_per_1k=0.0004,
         max_context_tokens=128_000,
         supports_json_mode=True,
     ),
     ModelInfo(
-        model_id="gpt-4o",
+        model_id="gpt-5-mini",
         provider="openai",
-        display_name="GPT-4o",
-        input_cost_per_1k=0.0025,
+        display_name="GPT-5 Mini",
+        input_cost_per_1k=0.00025,
+        output_cost_per_1k=0.002,
+        max_context_tokens=128_000,
+        supports_json_mode=True,
+    ),
+    ModelInfo(
+        model_id="gpt-5.1",
+        provider="openai",
+        display_name="GPT-5.1",
+        input_cost_per_1k=0.00125,
         output_cost_per_1k=0.01,
+        max_context_tokens=128_000,
+        supports_json_mode=True,
+    ),
+    ModelInfo(
+        model_id="gpt-5.2",
+        provider="openai",
+        display_name="GPT-5.2",
+        input_cost_per_1k=0.00175,
+        output_cost_per_1k=0.014,
+        max_context_tokens=128_000,
+        supports_json_mode=True,
+    ),
+    ModelInfo(
+        model_id="gpt-5-pro",
+        provider="openai",
+        display_name="GPT-5 Pro",
+        input_cost_per_1k=0.015,
+        output_cost_per_1k=0.12,
+        max_context_tokens=128_000,
+        supports_json_mode=True,
+    ),
+    ModelInfo(
+        model_id="gpt-5.2-pro",
+        provider="openai",
+        display_name="GPT-5.2 Pro",
+        input_cost_per_1k=0.021,
+        output_cost_per_1k=0.168,
         max_context_tokens=128_000,
         supports_json_mode=True,
     ),
@@ -53,9 +92,10 @@ class OpenAIChatSession(ChatSession):
         kwargs: Dict[str, Any] = {
             "model": self.model_name,
             "messages": list(self._messages),
-            "temperature": self._temperature,
-            "max_tokens": self._max_output_tokens,
+            "max_completion_tokens": self._max_output_tokens,
         }
+        if self.model_name not in _NO_TEMPERATURE:
+            kwargs["temperature"] = self._temperature
         if json_mode:
             kwargs["response_format"] = {"type": "json_object"}
 
@@ -103,12 +143,14 @@ class OpenAIBackend(ModelBackend):
         max_output_tokens: int = 1024,
     ) -> LLMResponse:
         t0 = time.time()
-        resp = self._client.chat.completions.create(
-            model=model_id,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=temperature,
-            max_tokens=max_output_tokens,
-        )
+        gen_kwargs: Dict[str, Any] = {
+            "model": model_id,
+            "messages": [{"role": "user", "content": prompt}],
+            "max_completion_tokens": max_output_tokens,
+        }
+        if model_id not in _NO_TEMPERATURE:
+            gen_kwargs["temperature"] = temperature
+        resp = self._client.chat.completions.create(**gen_kwargs)
         latency_ms = int((time.time() - t0) * 1000)
 
         text = resp.choices[0].message.content or ""

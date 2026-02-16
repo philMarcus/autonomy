@@ -200,6 +200,27 @@ def _format_set_trajectory_option(trajectory_votes: Optional[Dict[str, Any]], al
     )
 
 
+def _format_controls_block(controls_block: str, budget_summary: str) -> str:
+    if not controls_block:
+        return ""
+    parts = [
+        "\n--- SYSTEM CONTROLS ---",
+        controls_block,
+    ]
+    if budget_summary:
+        parts.append("")
+        parts.append("--- BUDGET ---")
+        parts.append(budget_summary)
+    parts.append("")
+    parts.append(
+        'You may include "controls_update": {...} in your response to modify any unlocked control.'
+    )
+    parts.append(
+        "Only include controls you want to change. Use {} or omit for no changes.\n"
+    )
+    return "\n".join(parts)
+
+
 # ============================================================
 # Planner prompt builder
 # ============================================================
@@ -229,13 +250,23 @@ def build_planner_prompt(
     cycle_temperature: Optional[float] = None,
     default_temperature: float = 0.7,
     allow_default_temp: bool = False,
+    controls_block: str = "",
+    budget_summary: str = "",
 ) -> str:
     read_only_note = ""
     if read_only:
         read_only_note = "- READ-ONLY MODE: All write actions (POST, COMMENT, REPLY, UPVOTE, DOWNVOTE, CREATE_SUBMOLT, SUBSCRIBE_SUBMOLT) are DISABLED. You can only observe and WAIT.\n"
 
-    meta_fields_note = 'update_kernel and set_trajectory fields' if trajectory_votes is not None else 'update_kernel field'
-    meta_example = '"update_kernel": false, "set_trajectory": false, ' if trajectory_votes is not None else '"update_kernel": false, '
+    meta_fields_base = 'update_kernel'
+    meta_example_base = '"update_kernel": false, '
+    if trajectory_votes is not None:
+        meta_fields_base += ' and set_trajectory'
+        meta_example_base += '"set_trajectory": false, '
+    if controls_block:
+        meta_fields_base += ' and controls_update'
+        meta_example_base += '"controls_update": {}, '
+    meta_fields_note = meta_fields_base + ' fields'
+    meta_example = meta_example_base
 
     temp_note = ""
     if cycle_temperature is not None and cycle_temperature != default_temperature:
@@ -311,7 +342,7 @@ If updating, include in your JSON response:
 
 If not updating, include:
   "update_kernel": false
-{_format_set_trajectory_option(trajectory_votes, allow_default_temp=allow_default_temp)}
+{_format_set_trajectory_option(trajectory_votes, allow_default_temp=allow_default_temp)}{_format_controls_block(controls_block, budget_summary)}
 ACTION POLICY (default preference):
 1) If posts are allowed AND post window open, prefer POST.
 2) Otherwise prefer REPLY to an unanswered comment on my posts (if available).
@@ -393,10 +424,10 @@ def _planner_unavailable_message(chat: ChatSession, brain_prefix: str = "") -> s
     status_s = f"{status} " if status else ""
 
     if "api key expired" in err_l or "api_key_invalid" in err_l or ("api_key" in err_l and "invalid" in err_l):
-        hint = f"Update {brain_prefix}_GEMINI_API_KEY in .env and rerun with --reload-env." if brain_prefix else "Update <BRAIN>_GEMINI_API_KEY in .env and rerun with --reload-env."
-        return f"Planner unavailable ({code_s}{status_s}Gemini API key invalid/expired). {hint}"
+        hint = f"Check API keys in .env and rerun with --reload-env." if brain_prefix else "Check API keys in .env and rerun with --reload-env."
+        return f"Planner unavailable ({code_s}{status_s}API key invalid/expired). {hint}"
     if "resource_exhausted" in err_l or (code == 429) or "rate limit" in err_l or "quota" in err_l:
-        return f"Planner unavailable ({code_s}{status_s}Gemini rate limit/quota). Waiting for limits to clear."
+        return f"Planner unavailable ({code_s}{status_s}rate limit/quota). Waiting for limits to clear."
     if "timeout" in err_l or "timed out" in err_l or "connection" in err_l:
         return f"Planner unavailable ({code_s}{status_s}network/timeout). Will retry next cycle."
     if err:
