@@ -618,19 +618,207 @@ def render_dryrun_tab():
 
 
 # ============================================================
+# Daemon Monitor tab — reads directly from JSONL (real-time)
+# ============================================================
+TELEMETRY_DIR = os.environ.get("TELEMETRY_DIR", "telemetry")
+
+_DAEMON_EVENT_TYPES = {
+    "daemon_start", "daemon_stop", "daemon_tick", "daemon_error",
+    "daemon_wake", "daemon_directives",
+    "sentry_signal", "strategist_draft",
+}
+
+
+def _load_daemon_events(brain: str, max_lines: int = 2000) -> "list[dict]":
+    """Read daemon-related events from a brain's JSONL telemetry file."""
+    import json
+    path = os.path.join(TELEMETRY_DIR, f"{brain}_events.jsonl")
+    if not os.path.exists(path):
+        return []
+    events = []
+    # Read last max_lines lines (tail) for efficiency
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+        for line in lines[-max_lines:]:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                evt = json.loads(line)
+            except (json.JSONDecodeError, ValueError):
+                continue
+            if evt.get("event_type") in _DAEMON_EVENT_TYPES:
+                events.append(evt)
+    except Exception:
+        pass
+    return events
+
+
+def render_daemon_tab():
+    import pandas as pd
+    import matplotlib.pyplot as plt
+
+    # Find brains with telemetry files
+    jsonl_files = sorted(glob.glob(os.path.join(TELEMETRY_DIR, "*_events.jsonl")))
+    if not jsonl_files:
+        st.info("No telemetry files found. Run v15.5 with `--subconscious` to generate daemon events.")
+        return
+
+    brain_names = [
+        os.path.basename(f).replace("_events.jsonl", "")
+        for f in jsonl_files
+    ]
+
+    selected_brain = st.sidebar.selectbox("Brain (daemon)", brain_names)
+
+    events = _load_daemon_events(selected_brain)
+    if not events:
+        st.info(f"No daemon events found for **{selected_brain}**. "
+                "Run v15.5 with `--subconscious` to enable the daemon.")
+        return
+
+    df = pd.DataFrame(events)
+    df["ts"] = pd.to_datetime(df["ts"], utc=True)
+
+    # --- KPIs ---
+    ticks = df[df["event_type"] == "daemon_tick"]
+    signals = df[df["event_type"] == "sentry_signal"]
+    drafts = df[df["event_type"] == "strategist_draft"]
+    wakes = df[df["event_type"] == "daemon_wake"]
+    errors = df[df["event_type"] == "daemon_error"]
+    starts = df[df["event_type"] == "daemon_start"]
+
+    c1, c2, c3, c4, c5, c6 = st.columns(6)
+    c1.metric("Ticks", len(ticks))
+    c2.metric("Items scanned", int(ticks["items_scanned"].sum()) if "items_scanned" in ticks.columns and len(ticks) > 0 else 0)
+    c3.metric("Signals", len(signals))
+    c4.metric("Drafts", len(drafts))
+    c5.metric("Wakes", len(wakes))
+    c6.metric("Errors", len(errors))
+
+    # Model + interval from latest daemon_start
+    if len(starts) > 0:
+        latest_start = starts.iloc[-1]
+        model = latest_start.get("model", "?")
+        interval = latest_start.get("sentry_interval", "?")
+        st.caption(f"Model: **{model}** | Sentry interval: **{interval}s** | "
+                   f"Run ID: `{latest_start.get('run_id', '?')[:12]}...`")
+
+    st.divider()
+
+    # --- Wake Potential over time ---
+    if len(ticks) > 0 and "wake_potential" in ticks.columns:
+        left, right = st.columns(2)
+
+        with left:
+            st.subheader("Wake potential over time")
+            fig, ax = plt.subplots()
+            ax.plot(ticks["ts"], ticks["wake_potential"], marker=".", markersize=3, linewidth=1)
+            ax.axhline(y=2.0, color="red", linestyle="--", alpha=0.5, label="Default threshold (2.0)")
+            ax.set_ylabel("Wake potential")
+            ax.set_xlabel("")
+            ax.legend(fontsize=8)
+            plt.xticks(rotation=30, ha="right")
+            plt.tight_layout()
+            st.pyplot(fig)
+
+        with right:
+            st.subheader("Items scanned per tick")
+            fig, ax = plt.subplots()
+            ax.bar(range(len(ticks)), ticks["items_scanned"].fillna(0), color="#4a9eff", width=0.8)
+            ax.set_ylabel("Items")
+            ax.set_xlabel("Tick #")
+            plt.tight_layout()
+            st.pyplot(fig)
+
+        st.divider()
+
+    # --- Sentry Signals ---
+    st.subheader("Sentry signals")
+    if len(signals) > 0:
+        sig_cols = ["ts", "item_id", "score", "above_threshold"]
+        if "source" in signals.columns:
+            sig_cols.append("source")
+        sig_display = signals[[c for c in sig_cols if c in signals.columns]].copy()
+        sig_display["ts"] = sig_display["ts"].dt.strftime("%H:%M:%S")
+        sig_display = sig_display.sort_values("ts", ascending=False)
+
+        left2, right2 = st.columns([2, 1])
+        with left2:
+            st.dataframe(sig_display, use_container_width=True, hide_index=True)
+        with right2:
+            # Score distribution
+            st.markdown("**Score distribution**")
+            fig, ax = plt.subplots(figsize=(4, 3))
+            ax.hist(signals["score"].dropna(), bins=20, range=(0, 1), color="#4a9eff", edgecolor="white")
+            ax.set_xlabel("Score")
+            ax.set_ylabel("Count")
+            ax.axvline(x=0.5, color="red", linestyle="--", alpha=0.5, label="Default threshold")
+            ax.legend(fontsize=8)
+            plt.tight_layout()
+            st.pyplot(fig)
+    else:
+        st.info("No sentry signals yet. Items scored at 0.0 are not logged as signals.")
+
+    st.divider()
+
+    # --- Strategist Drafts ---
+    st.subheader("Strategist drafts")
+    if len(drafts) > 0:
+        draft_cols = ["ts", "item_id", "action", "charge", "draft_length"]
+        available_cols = [c for c in draft_cols if c in drafts.columns]
+        draft_display = drafts[available_cols].copy()
+        if "ts" in draft_display.columns:
+            draft_display["ts"] = draft_display["ts"].dt.strftime("%H:%M:%S")
+        draft_display = draft_display.sort_values("ts", ascending=False)
+        st.dataframe(draft_display, use_container_width=True, hide_index=True)
+    else:
+        st.info("No strategist drafts generated yet. Drafts appear when items score above the signal threshold.")
+
+    st.divider()
+
+    # --- Daemon Errors ---
+    if len(errors) > 0:
+        st.subheader("Daemon errors")
+        err_display = errors[["ts", "tick", "error"]].copy() if "error" in errors.columns else errors[["ts"]].copy()
+        if "ts" in err_display.columns:
+            err_display["ts"] = err_display["ts"].dt.strftime("%H:%M:%S")
+        st.dataframe(err_display, use_container_width=True, hide_index=True)
+        st.divider()
+
+    # --- Recent Ticks (raw table) ---
+    with st.expander("Recent daemon ticks (raw)", expanded=False):
+        if len(ticks) > 0:
+            tick_cols = ["ts", "tick", "items_scanned", "new_items", "seeds_scanned",
+                         "signals_above_threshold", "wake_potential", "draft_count", "model"]
+            available = [c for c in tick_cols if c in ticks.columns]
+            tick_display = ticks[available].copy()
+            if "ts" in tick_display.columns:
+                tick_display["ts"] = tick_display["ts"].dt.strftime("%H:%M:%S")
+            tick_display = tick_display.sort_values("ts", ascending=False).head(50)
+            st.dataframe(tick_display, use_container_width=True, hide_index=True)
+        else:
+            st.info("No daemon ticks yet.")
+
+
+# ============================================================
 # Main
 # ============================================================
 def main():
-    st.set_page_config(page_title="Autonomy Dashboard v1.3", layout="wide")
-    st.title("Autonomy Dashboard v1.3")
+    st.set_page_config(page_title="Autonomy Dashboard v1.4", layout="wide")
+    st.title("Autonomy Dashboard v1.4")
 
-    tab1, tab2 = st.tabs(["Telemetry", "Dry-Run Viewer"])
+    tab1, tab2, tab3 = st.tabs(["Telemetry", "Dry-Run Viewer", "Daemon Monitor"])
 
     with tab1:
         render_telemetry_tab()
 
     with tab2:
         render_dryrun_tab()
+
+    with tab3:
+        render_daemon_tab()
 
 
 if __name__ == "__main__":

@@ -750,6 +750,163 @@ def render_input_controls_tab(brain_filter: str):
 
 
 # ============================================================
+# Tab 4: Daemon Monitor — reads directly from JSONL
+# ============================================================
+_DAEMON_EVENT_TYPES = {
+    "daemon_start", "daemon_stop", "daemon_tick", "daemon_error",
+    "daemon_wake", "daemon_directives",
+    "sentry_signal", "strategist_draft",
+}
+
+
+def _load_daemon_events(brain: str, max_lines: int = 2000) -> list[dict]:
+    """Read daemon-related events from a brain's JSONL telemetry file."""
+    path = os.path.join(TELEMETRY_DIR, f"{brain}_events.jsonl")
+    if not os.path.exists(path):
+        return []
+    events = []
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+        for line in lines[-max_lines:]:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                evt = json.loads(line)
+            except (json.JSONDecodeError, ValueError):
+                continue
+            if evt.get("event_type") in _DAEMON_EVENT_TYPES:
+                events.append(evt)
+    except Exception:
+        pass
+    return events
+
+
+def render_daemon_tab(brain_filter: str):
+    import pandas as pd
+
+    if brain_filter == "(all)":
+        st.info("Select a specific brain in the sidebar to view daemon activity.")
+        return
+
+    events = _load_daemon_events(brain_filter)
+    if not events:
+        st.info(f"No daemon events for **{brain_filter}**. "
+                "Run v15.5 with `--subconscious` to enable the daemon.")
+        return
+
+    df = pd.DataFrame(events)
+    df["ts"] = pd.to_datetime(df["ts"], utc=True)
+
+    # --- KPIs ---
+    ticks = df[df["event_type"] == "daemon_tick"]
+    signals = df[df["event_type"] == "sentry_signal"]
+    drafts = df[df["event_type"] == "strategist_draft"]
+    wakes = df[df["event_type"] == "daemon_wake"]
+    errors = df[df["event_type"] == "daemon_error"]
+    starts = df[df["event_type"] == "daemon_start"]
+
+    c1, c2, c3, c4, c5, c6 = st.columns(6)
+    c1.metric("Ticks", len(ticks))
+    c2.metric("Scanned", int(ticks["items_scanned"].sum()) if "items_scanned" in ticks.columns and len(ticks) > 0 else 0)
+    c3.metric("Signals", len(signals))
+    c4.metric("Drafts", len(drafts))
+    c5.metric("Wakes", len(wakes))
+    c6.metric("Errors", len(errors))
+
+    # Model + interval caption
+    if len(starts) > 0:
+        latest = starts.iloc[-1]
+        st.caption(
+            f"Model: **{latest.get('model', '?')}** | "
+            f"Interval: **{latest.get('sentry_interval', '?')}s** | "
+            f"Run: `{latest.get('run_id', '?')[:12]}...`"
+        )
+
+    st.divider()
+
+    # --- Charts (compact, native Streamlit) ---
+    if len(ticks) > 0 and "wake_potential" in ticks.columns:
+        left, right = st.columns(2)
+
+        with left:
+            st.caption("Wake potential over time")
+            wake_df = ticks.set_index("ts")[["wake_potential"]]
+            st.line_chart(wake_df, height=180)
+
+        with right:
+            st.caption("Items scanned per tick")
+            scan_cols = ["items_scanned"]
+            if "seeds_scanned" in ticks.columns:
+                scan_cols.append("seeds_scanned")
+            scan_df = ticks[scan_cols].reset_index(drop=True)
+            st.bar_chart(scan_df, height=180)
+
+    st.divider()
+
+    # --- Sentry Signals ---
+    st.caption("Sentry signals")
+    if len(signals) > 0:
+        sig_cols = ["ts", "item_id", "score", "above_threshold"]
+        if "source" in signals.columns:
+            sig_cols.append("source")
+        sig_display = signals[[c for c in sig_cols if c in signals.columns]].copy()
+        sig_display["ts"] = sig_display["ts"].dt.strftime("%H:%M:%S")
+        sig_display = sig_display.sort_values("ts", ascending=False)
+
+        left2, right2 = st.columns([3, 1])
+        with left2:
+            st.dataframe(sig_display, use_container_width=True, hide_index=True, height=200)
+        with right2:
+            if "score" in signals.columns:
+                score_df = signals[["score"]].dropna().reset_index(drop=True)
+                st.caption("Score distribution")
+                st.bar_chart(score_df.value_counts(bins=10).sort_index(), height=180)
+    else:
+        st.info("No sentry signals yet.")
+
+    st.divider()
+
+    # --- Strategist Drafts ---
+    st.caption("Strategist drafts")
+    if len(drafts) > 0:
+        draft_cols = ["ts", "item_id", "action", "charge", "draft_length"]
+        if "source" in drafts.columns:
+            draft_cols.append("source")
+        available = [c for c in draft_cols if c in drafts.columns]
+        draft_display = drafts[available].copy()
+        if "ts" in draft_display.columns:
+            draft_display["ts"] = draft_display["ts"].dt.strftime("%H:%M:%S")
+        draft_display = draft_display.sort_values("ts", ascending=False)
+        st.dataframe(draft_display, use_container_width=True, hide_index=True, height=200)
+    else:
+        st.info("No strategist drafts yet.")
+
+    # --- Errors ---
+    if len(errors) > 0:
+        st.divider()
+        st.caption("Daemon errors")
+        err_cols = ["ts", "tick", "error"]
+        err_display = errors[[c for c in err_cols if c in errors.columns]].copy()
+        if "ts" in err_display.columns:
+            err_display["ts"] = err_display["ts"].dt.strftime("%H:%M:%S")
+        st.dataframe(err_display, use_container_width=True, hide_index=True, height=150)
+
+    # --- Raw ticks ---
+    with st.expander("Recent ticks (raw)", expanded=False):
+        if len(ticks) > 0:
+            tick_cols = ["ts", "tick", "items_scanned", "new_items", "seeds_scanned",
+                         "signals_above_threshold", "wake_potential", "draft_count", "model"]
+            available = [c for c in tick_cols if c in ticks.columns]
+            tick_display = ticks[available].copy()
+            if "ts" in tick_display.columns:
+                tick_display["ts"] = tick_display["ts"].dt.strftime("%H:%M:%S")
+            tick_display = tick_display.sort_values("ts", ascending=False).head(50)
+            st.dataframe(tick_display, use_container_width=True, hide_index=True)
+
+
+# ============================================================
 # Main
 # ============================================================
 def main():
@@ -775,7 +932,7 @@ def main():
     if st.session_state.get("last_ingest"):
         st.sidebar.caption(st.session_state["last_ingest"])
 
-    tab1, tab2, tab3 = st.tabs(["Overview", "Cycle Replay", "Input / Controls"])
+    tab1, tab2, tab3, tab4 = st.tabs(["Overview", "Cycle Replay", "Daemon Monitor", "Input / Controls"])
 
     with tab1:
         render_overview_tab(brain_filter)
@@ -784,6 +941,9 @@ def main():
         render_cycle_replay_tab(brain_filter)
 
     with tab3:
+        render_daemon_tab(brain_filter)
+
+    with tab4:
         render_input_controls_tab(brain_filter)
 
 

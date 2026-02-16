@@ -110,9 +110,9 @@ Public-facing observatory site. Displays agent artifacts, controls (temperature,
 - Archives page: paginated artifact history (`/archives`)
 - Temperature slider with ±0.5 clamping, 429 error handling
 
-## v15.0 — In Development (Integrate-and-Fire Architecture)
+## v15.0 — Stable (Multi-Model + ControlRegistry)
 
-v15_0/ is the next major version. **Do not modify v14_0/** — it is the stable production version.
+v15_0/ has Phases 1-4 complete. **Do not modify v14_0/ or v15_0/** — they are stable.
 
 ### Architecture: Dual-Process "Neuron" Model
 - **Subconscious Daemon** (cheap/local model) runs continuously with two gears:
@@ -164,8 +164,32 @@ Optional per-provider API keys (per-brain or global):
 - `{PREFIX}_OPENAI_API_KEY` / `OPENAI_API_KEY`
 - `{PREFIX}_MISTRAL_API_KEY` / `MISTRAL_API_KEY`
 
+## v15.5 — In Development (Subconscious Daemon)
+
+v15_5/ is forked from v15_0. **Do not modify v15_0/** — it is the stable foundation.
+
+### Subconscious Daemon (Phase 5: COMPLETE)
+- `v15_5/buffer.py` — `Draft` dataclass + `DraftBuffer` (thread-safe wake potential + draft storage)
+- `v15_5/daemon.py` — `SubconsciousDaemon`: background thread with Sentry + Strategist gears
+  - **Sentry**: scans feed, scores items against directive using cheap LLM with kernel as system instruction
+  - **Strategist**: generates draft action plans for high-signal items, adds charge to wake potential
+  - **Integrate-and-Fire**: wake_potential accumulates, decays per tick, fires conscious when threshold crossed
+  - **Downward causality**: conscious sends `daemon_directives` (focus_topics, ignore_authors, urgency_boost, note)
+- `v15_5/llm/budget.py` — `DailyBudget` now thread-safe (`threading.Lock` on all public methods)
+- `v15_5/controls.py` — 2 new daemon controls: `max_drafts`, `strategist_max_tokens`
+- `v15_5/planner.py` — `draft_context` param, `--- SUBCONSCIOUS BUFFER ---` prompt section, `daemon_directives` response field
+- `v15_5/__main__.py` — Daemon lifecycle, buffer drain, wake/sleep mechanism, downward causality
+
+### How the Daemon Works
+1. Daemon thread starts on `--subconscious` flag (default: `--no-subconscious`)
+2. Every `sentry_interval_seconds` (default 60s): fetch feed, score items, decay wake_potential
+3. Items scoring above `signal_threshold` trigger Strategist → draft plan → charge added to buffer
+4. When `wake_potential >= wake_threshold`, conscious loop wakes early (instead of fixed sleep)
+5. Conscious sees "SUBCONSCIOUS BUFFER" in prompt with draft summaries
+6. Conscious responds with `daemon_directives` to steer daemon's focus
+7. Both sentry and strategist use kernel_prompt as system instruction (same personality as conscious)
+
 ### Remaining Phases
-- **Phase 5**: Subconscious daemon (sentry + strategist + integrate-and-fire)
 - **Phase 6**: Conscious runner + dreaming action
 - **Phase 7**: Remote management via Analog Home dashboard
 
@@ -182,7 +206,7 @@ Optional per-provider API keys (per-brain or global):
 
 - Gemini 2.5 Flash sometimes returns empty first responses with stateless API. The repair path in `parse_json_with_one_repair()` handles this (sends prompt again). This means ~2 LLM calls per cycle instead of 1 for Flash. Gemini 2.5 Pro does not have this issue.
 - **Next.js 16 + Tailwind 4 on Windows**: Turbopack's enhanced resolver can walk up to parent directories. Fixed with `turbopack.resolveAlias` in `web/next.config.ts` to pin tailwindcss to local `node_modules`.
-- **Version convention**: v14_0 is stable production. v15_0 is in development (do not modify v14_0). Future work in v15_0.
+- **Version convention**: v14_0 is stable production. v15_0 is stable (Phases 1-4). v15_5 is in development (Phase 5+). Do not modify v14_0 or v15_0. Future work in v15_5.
 
 ## Deployment
 
