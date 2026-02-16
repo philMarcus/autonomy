@@ -428,11 +428,12 @@ class SubconsciousDaemon:
             f"Directive: {self._directive}\n"
             f"{directive_section}\n\n"
             f"High-signal feed item (relevance score: {score:.2f}):\n{item_text}\n\n"
-            f"Suggest an action. IMPORTANT: Do NOT output internal monologue, narrative, "
-            f"or preamble. Respond with ONLY this JSON object:\n"
+            f"Suggest an action. IMPORTANT: No internal monologue or preamble. "
+            f"Be BRIEF — reasoning under 50 words, draft_content under 200 words. "
+            f"Respond with ONLY this JSON:\n"
             f'{{"action": "COMMENT or REPLY or POST or UPVOTE", '
-            f'"reasoning": "why this matters", '
-            f'"draft_content": "suggested text for the action"}}'
+            f'"reasoning": "brief reason", '
+            f'"draft_content": "concise suggested text"}}'
         )
 
         try:
@@ -533,7 +534,7 @@ def _parse_score(text: str) -> float:
 
 
 def _parse_json_safe(text: str) -> Optional[dict]:
-    """Try to parse JSON from text, handling markdown fences and junk."""
+    """Try to parse JSON from text, handling markdown fences, junk, and truncation."""
     text = text.strip()
     # Strip markdown code fences
     if text.startswith("```"):
@@ -550,6 +551,29 @@ def _parse_json_safe(text: str) -> Optional[dict]:
     if start >= 0 and end > start:
         try:
             return json.loads(text[start:end + 1])
+        except (json.JSONDecodeError, ValueError):
+            pass
+    # Repair truncated JSON — close open strings and braces
+    if start >= 0:
+        fragment = text[start:]
+        # Close any open string (odd number of unescaped quotes)
+        in_str = False
+        i = 0
+        while i < len(fragment):
+            ch = fragment[i]
+            if ch == '\\' and in_str:
+                i += 2
+                continue
+            if ch == '"':
+                in_str = not in_str
+            i += 1
+        if in_str:
+            fragment += '"'
+        # Close open braces
+        open_braces = fragment.count('{') - fragment.count('}')
+        fragment += '}' * max(0, open_braces)
+        try:
+            return json.loads(fragment)
         except (json.JSONDecodeError, ValueError):
             pass
     return None

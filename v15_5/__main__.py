@@ -357,7 +357,7 @@ def main():
     allow_outside = True
     allow_votes = bool(args.allow_votes)
     allow_downvote = bool(args.allow_votes and args.allow_downvote)
-    allow_create_submolt = bool(args.allow_create_submolt or ALLOW_CREATE_SUBMOLT_DEFAULT)
+    allow_create_submolt = ctrl.get("create_submolt_prob") > 0
 
     post_cooldown_seconds = args.post_interval * 60
 
@@ -529,7 +529,7 @@ def main():
         # Drain subconscious buffer (if daemon active)
         draft_context = ""
         if daemon:
-            drafts, wake_pot = draft_buffer.drain()
+            drafts, wake_pot = draft_buffer.drain(refractory=ctrl.get("wake_refractory"))
             if drafts:
                 draft_context = _format_draft_context(drafts, wake_pot, ctrl.get("wake_threshold"))
                 safe_print(f"{Fore.MAGENTA}[DAEMON] {len(drafts)} draft(s) from subconscious (wake_potential={wake_pot:.2f})")

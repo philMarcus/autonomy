@@ -78,16 +78,19 @@ class DraftBuffer:
     # Reader side (conscious thread)
     # ------------------------------------------------------------------
 
-    def drain(self) -> Tuple[List[Draft], float]:
+    def drain(self, refractory: float = 0.0) -> Tuple[List[Draft], float]:
         """Return all drafts and wake_potential, then reset the buffer.
 
         Called by the conscious loop when it wakes (by signal or timeout).
+        Args:
+            refractory: Value to set wake_potential to after draining.
+                        Use negative values for a refractory period.
         """
         with self._lock:
             drafts = list(self._drafts)
             potential = self._wake_potential
             self._drafts.clear()
-            self._wake_potential = 0.0
+            self._wake_potential = refractory
             self._wake_event.clear()
             return drafts, potential
 

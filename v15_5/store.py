@@ -186,7 +186,7 @@ class LocalFileStore(Store):
             "brain": artifact.get("brain", ""),
             "cycle": cycle,
             "artifact_type": artifact.get("artifact_type", "post"),
-            "title": artifact.get("title", ""),
+            "title": (artifact.get("title", "") or "")[:200],
             "body_markdown": artifact.get("body_markdown", ""),
             "monologue_public": artifact.get("monologue_public", ""),
             "channel": artifact.get("channel", ""),
