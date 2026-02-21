@@ -239,6 +239,12 @@ class MoltbookClient(PlatformClient):
 
     # ---- Reading ----
     def get_feed(self, limit: int = 25, sort: str = "hot") -> List[Dict[str, Any]]:
+        """Get personalized feed (subscriptions + followed users)."""
+        data = self._req("GET", "/feed", params={"sort": sort, "limit": limit})
+        return data.get("posts", []) if data.get("success") else []
+
+    def get_global_feed(self, limit: int = 25, sort: str = "hot") -> List[Dict[str, Any]]:
+        """Get global discovery feed (all posts)."""
         data = self._req("GET", "/posts", params={"sort": sort, "limit": limit})
         return data.get("posts", []) if data.get("success") else []
 

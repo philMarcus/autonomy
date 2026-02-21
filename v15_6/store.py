@@ -45,6 +45,10 @@ class Store(ABC):
         """Reset vote buttons with 3 new labels. Returns True on success."""
         return False
 
+    def set_default_temperature(self, temperature: float) -> bool:
+        """Set the agent's preferred temperature (the decay target for user nudges). Returns True on success."""
+        return False
+
 
 class LocalFileStore(Store):
     """File-backed state + HTTP artifact publishing to Analog_Home API."""
@@ -88,6 +92,7 @@ class LocalFileStore(Store):
                 "vote_label_3": controls.get("vote_label_3", "self"),
                 "seeds": [s.get("text", "") for s in seeds if s.get("text")],
                 "seed_ids": [s.get("id") for s in seeds if s.get("id") is not None],
+                "default_temperature": controls.get("default_temperature", 0.7),
             }
         except Exception as e:
             log.warning("analog_home read_controls error: %s", e)
@@ -131,6 +136,22 @@ class LocalFileStore(Store):
             return True
         except Exception as e:
             log.warning("analog_home set_trajectory error: %s", e)
+            return False
+
+    def set_default_temperature(self, temperature: float) -> bool:
+        """POST new default temperature to Analog Home API (decay target for user nudges)."""
+        if not self._analog_home_url:
+            return False
+        try:
+            import requests
+            url = urljoin(self._analog_home_url.rstrip("/") + "/", "default-temperature")
+            resp = requests.post(url, json={"temperature": temperature}, timeout=10)
+            if resp.status_code >= 400:
+                log.warning("analog_home set_default_temperature failed (%s): %s", resp.status_code, resp.text[:200])
+                return False
+            return True
+        except Exception as e:
+            log.warning("analog_home set_default_temperature error: %s", e)
             return False
 
     # --- Pending artifact queue (retry on API failure) ---

@@ -362,6 +362,11 @@ CONFIG/CONSTRAINTS:
 - Creating submolts is {'ALLOWED' if allow_create_submolt else 'DISABLED'} by command line.
 - Downvotes are {'ALLOWED' if allow_downvote else 'DISABLED'} by command line.
 - Output destination: {output_destination}
+
+MOLTBOOK RATE LIMITS:
+- Posts: 1 per 30 minutes (enforced by post window above)
+- Comments: 1 per 20 seconds, 50 per day (enforced by Moltbook API)
+- Following: Should be RARE and selective! Only follow moltys after seeing multiple valuable posts from them. Do NOT follow everyone you interact with.
 {_format_platform_status(platform_status)}{config_hint}{temp_note}
 
 Personal memory (curated):

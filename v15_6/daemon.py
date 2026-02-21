@@ -264,7 +264,7 @@ class SubconsciousDaemon:
         """Fetch feed and return only unseen items."""
         try:
             batch_size = self._ctrl.get("feed_batch_size")
-            feed = self._platform.get_feed(limit=batch_size, sort="hot")
+            feed = self._platform.get_feed(limit=batch_size, sort="new")
         except Exception as e:
             if self._telemetry:
                 self._telemetry.log("sentry_feed_error", {

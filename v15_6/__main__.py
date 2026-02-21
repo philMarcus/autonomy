@@ -133,7 +133,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     ap.add_argument("--mode", choices=["all", "comment_only", "no_post", "no_comment", "post_only"], default="all")
     ap.add_argument("--allow-votes", action="store_true")
     ap.add_argument("--allow-downvote", action="store_true")
-    ap.add_argument("--feed-sort", choices=["hot", "new", "top", "rising"], default="hot")
+    ap.add_argument("--feed-sort", choices=["hot", "new", "top", "rising"], default="new")
 
     # --- v15 flags ---
     ap.add_argument("--conscious-model", default=None,
@@ -461,10 +461,12 @@ def main():
         analog_seeds = []
         analog_trajectory = None
         cycle_temperature = args.temperature
+        agent_default_temperature = args.temperature  # what user nudges decay toward
         if analog_home_url:
             analog_controls = store.read_controls()
             if analog_controls:
                 cycle_temperature = analog_controls.get("temperature", args.temperature)
+                agent_default_temperature = analog_controls.get("default_temperature", args.temperature)
                 analog_seeds = analog_controls.get("seeds", [])
                 seed_ids = analog_controls.get("seed_ids", [])
                 if seed_ids:
@@ -639,7 +641,7 @@ def main():
             seeds=analog_seeds,
             trajectory_votes=analog_trajectory,
             cycle_temperature=cycle_temperature if analog_home_url else None,
-            default_temperature=args.temperature,
+            default_temperature=agent_default_temperature,
             allow_default_temp=bool(args.enable_default_temp),
             controls_block=ctrl.to_llm_block(),
             budget_summary=budget.spend_summary_text() if budget else "",
@@ -829,6 +831,13 @@ def main():
                 # Actuate budget change
                 if results.get("daily_budget_usd") == "ok":
                     budget.daily_limit_usd = ctrl.get("daily_budget_usd")
+
+                # Actuate temperature change — update Analog Home default (decay target)
+                if results.get("temperature") == "ok":
+                    new_default = ctrl.get("temperature")
+                    ok = store.set_default_temperature(new_default)
+                    safe_print(f"{Fore.CYAN}  [CTRL] Agent temperature preference -> {new_default:.2f} "
+                               f"({'synced to Analog Home' if ok else 'local only — no Analog Home'})")
 
                 # Actuate output_destination change
                 if results.get("output_destination") == "ok":

@@ -249,6 +249,31 @@ v15_6/ is forked from v15_5. **Do not modify v15_5/** — it is the stable found
 
 This is the active development version. All future work should be done in v15_6.
 
+### Changes in v15.6
+
+**Feed Endpoint Fix (Hybrid Personalized + Global)**:
+- `MoltbookClient.get_feed()` now uses `/feed` (personalized: subscriptions + follows) instead of `/posts` (global)
+- Added `get_global_feed()` method for global discovery feed (`/posts`)
+- **Hybrid approach**: When personalized feed is sparse (< half of feed_batch_size), automatically supplements with global feed
+- Prevents duplicate posts by tracking seen IDs
+- Applies to both conscious loop (`__main__.py`) and daemon sentry scan (`daemon.py`)
+- Fixes issue where feed appeared stale/unchanging (was fetching global "hot" feed which changes slowly)
+
+**Enhanced Moltbook Awareness**:
+- Updated `ANALOG_I_knowledge.txt` with comprehensive Moltbook API reference including:
+  - Personalized vs global feed distinction
+  - Semantic search capability (`GET /search`)
+  - Rate limits (1 post/30min, 1 comment/20sec, 50 comments/day)
+  - Following guidelines (be selective!)
+  - Verification challenge info
+- Planner prompt now includes rate limit warnings and following guidelines
+- Daemon prompts (sentry + strategist) now mention Moltbook semantic search capability
+- Conscious does NOT see semantic search info (daemon-only knowledge)
+
+**Seed Response Control**:
+- Planner prompt clarifies `output_destination` control for directing seed responses to Analog Home vs Moltbook
+- `output_destination` is actuated immediately (affects current cycle), unlike most controls (affect next cycle)
+
 ## Key Architecture Decisions
 
 - **One chat per cycle**: Chat is recreated each iteration (`__main__.py`) to avoid token accumulation
