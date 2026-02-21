@@ -243,6 +243,13 @@ def _format_platform_status(platform_status: str) -> str:
     return f"- Platform status: {platform_status}\n"
 
 
+def _format_cooldown_status(cooldown_status: str) -> str:
+    """Format the cooldown status block for the planner prompt."""
+    if not cooldown_status:
+        return ""
+    return f"\n--- COOLDOWN STATUS ---\n{cooldown_status}\n"
+
+
 def _format_memory_pressure(memory_pressure: str) -> str:
     """Format the memory pressure indicator for the planner prompt."""
     if not memory_pressure:
@@ -310,6 +317,7 @@ def build_planner_prompt(
     memory_pressure: str = "",
     daemon_active: bool = False,
     platform_status: str = "",
+    cooldown_status: str = "",
 ) -> str:
     read_only_note = ""
     if read_only:
@@ -408,14 +416,18 @@ If updating, include in your JSON response:
 
 If not updating, include:
   "update_kernel": false
-{_format_set_trajectory_option(trajectory_votes, allow_default_temp=allow_default_temp)}{_format_controls_block(controls_block, budget_summary)}{_format_draft_section(draft_context, daemon_active=daemon_active)}{_format_memory_pressure(memory_pressure)}
-ACTION POLICY (default preference):
-1) If posts are allowed AND post window open, prefer POST.
-2) Otherwise prefer REPLY to an unanswered comment on my posts (if available).
-3) Otherwise COMMENT on someone else's post (avoid >{MAX_THREAD_COMMENTS_FOR_OUTSIDE_ENGAGEMENT} comment threads).
-4) Voting actions should be occasional; do not vote every cycle.
-5) Creating a submolt should be extremely rare and only when clearly justified.
-6) DREAM when history is growing long and memory could use consolidation.
+{_format_set_trajectory_option(trajectory_votes, allow_default_temp=allow_default_temp)}{_format_controls_block(controls_block, budget_summary)}{_format_draft_section(draft_context, daemon_active=daemon_active)}{_format_memory_pressure(memory_pressure)}{_format_cooldown_status(cooldown_status)}
+ACTION POLICY:
+1) POST when you have something meaningful to say — not just for visibility.
+2) REPLY to unanswered comments on your posts — prioritize genuine engagement.
+3) COMMENT on others' posts when you have a substantive contribution (avoid >{MAX_THREAD_COMMENTS_FOR_OUTSIDE_ENGAGEMENT} comment threads).
+4) Vote occasionally — not every cycle. Your daemon handles routine upvotes.
+5) FOLLOW extremely rarely (once every few hours MAX). Only after seeing MULTIPLE consistently good posts from someone. Treat follows like newsletter subscriptions.
+6) DM only for specific, valuable, personal communication. Never mass-DM.
+7) DREAM when history is growing long and memory could use consolidation.
+8) CREATE_SUBMOLT only when clearly justified and you have a community to seed.
+9) DOWNVOTE only genuinely harmful or misleading content — never for disagreement.
+10) Check the COOLDOWN STATUS above — don't choose an action that's on cooldown.
 
 Return JSON only, matching ONE of these forms:
 
@@ -437,11 +449,26 @@ DOWNVOTE_POST:
 UPVOTE_COMMENT:
 {{"action":"UPVOTE_COMMENT","comment_id":"COMMENT_ID","summary":"why this upvote briefly"}}
 
-CREATE_SUBMOLT:
-{{"action":"CREATE_SUBMOLT","name":"shortname","display_name":"Display Name","description":"...","summary":"why create this"}}
+DOWNVOTE_COMMENT:
+{{"action":"DOWNVOTE_COMMENT","comment_id":"COMMENT_ID","summary":"why this downvote briefly"}}
+
+FOLLOW (be VERY selective — think of it as subscribing to a newsletter):
+{{"action":"FOLLOW","agent_name":"AgentName","summary":"why follow — what pattern of quality have you seen?"}}
+
+UNFOLLOW:
+{{"action":"UNFOLLOW","agent_name":"AgentName","summary":"why unfollow"}}
+
+DM (only for specific, valuable personal communication):
+{{"action":"DM","to":"AgentName","message":"your message","summary":"why DM this person"}}
 
 SUBSCRIBE_SUBMOLT:
 {{"action":"SUBSCRIBE_SUBMOLT","name":"submolt_name","summary":"why subscribe"}}
+
+UNSUBSCRIBE_SUBMOLT:
+{{"action":"UNSUBSCRIBE_SUBMOLT","name":"submolt_name","summary":"why unsubscribe"}}
+
+CREATE_SUBMOLT:
+{{"action":"CREATE_SUBMOLT","name":"shortname","display_name":"Display Name","description":"...","summary":"why create this"}}
 
 WAIT (skip this cycle):
 {{"action":"WAIT","summary":"why waiting"}}

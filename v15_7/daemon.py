@@ -14,12 +14,14 @@ import threading
 import time
 from typing import Any, Dict, List, Optional, Set
 
+from .actions import execute_daemon_action
 from .buffer import Draft, DraftBuffer
 from .controls import ControlRegistry
+from .cooldowns import can_do
 from .llm import DailyBudget, ModelRegistry
 from .llm.base import LLMResponse
 from .telemetry import TelemetryLogger
-from .utils import shorten, is_item_too_old
+from .utils import shorten, is_item_too_old, norm_key
 
 
 class SubconsciousDaemon:
@@ -39,6 +41,8 @@ class SubconsciousDaemon:
         username: str,
         store: Any = None,                   # Store (for seed polling)
         search_tools: Optional[list] = None, # Gemini search grounding tools
+        state: Optional[Dict[str, Any]] = None,
+        state_lock: Optional[threading.Lock] = None,
     ):
         self._registry = registry
         self._ctrl = ctrl
@@ -52,6 +56,8 @@ class SubconsciousDaemon:
         self._username = username
         self._store = store
         self._search_tools = search_tools
+        self._state = state
+        self._state_lock = state_lock or threading.Lock()
 
         # Downward causality: directives from the conscious layer
         self._directives: Dict[str, Any] = {}
@@ -212,6 +218,10 @@ class SubconsciousDaemon:
                         "above_threshold": score >= signal_threshold,
                     })
 
+                # Reflex gear — lightweight social actions on high-signal items
+                if score >= signal_threshold:
+                    self._reflex(item, score)
+
                 if score >= signal_threshold:
                     signals_above += 1
                     draft = self._strategize(item, score)
@@ -269,6 +279,60 @@ class SubconsciousDaemon:
             "draft_count": self._buffer.draft_count,
             "model": self._ctrl.get("subconscious_model"),
         })
+
+    # ------------------------------------------------------------------
+    # Gear 3: Reflex — lightweight social actions on high-signal items
+    # ------------------------------------------------------------------
+
+    def _reflex(self, item: dict, score: float) -> bool:
+        """Attempt a reflex social action on a high-signal item.
+
+        Only acts if:
+        - state and platform are available
+        - the relevant daemon permission control is enabled
+        - cooldown allows
+        - dedup checks pass (own posts, already followed, seeds)
+        """
+        if self._state is None or self._platform is None:
+            return False
+
+        item_id = item.get("id", "")
+        if not item_id or item_id.startswith("seed:"):
+            return False
+
+        author_name = _get_author(item)
+        if author_name.lower() == (self._username or "").lower():
+            return False
+
+        # Determine reflex action based on score and controls
+        action = None
+        target_id = None
+
+        # Upvote posts with score >= 0.7
+        if score >= 0.7 and self._ctrl.get("daemon_can_upvote"):
+            action = "UPVOTE_POST"
+            target_id = item_id
+
+        # Follow on very high signal >= 0.9 (if enabled)
+        if score >= 0.9 and self._ctrl.get("daemon_can_follow"):
+            with self._state_lock:
+                followed = {norm_key(a) for a in self._state.get("followed_agents", [])}
+            if norm_key(author_name) not in followed:
+                action = "FOLLOW"
+                target_id = author_name
+
+        if not action or not target_id:
+            return False
+
+        return execute_daemon_action(
+            client=self._platform,
+            state=self._state,
+            state_lock=self._state_lock,
+            action=action,
+            target_id=target_id,
+            ctrl=self._ctrl,
+            telemetry=self._telemetry,
+        )
 
     # ------------------------------------------------------------------
     # Gear 1: Sentry — scan feed, filter to new items

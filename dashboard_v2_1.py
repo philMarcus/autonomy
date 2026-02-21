@@ -973,12 +973,15 @@ CONTROLS_META = [
     ("cycle_interval_minutes",   "int",   5,      "Minutes between cycles",                         "timing",   1,    120,   None),
     ("post_interval_minutes",    "int",   30,     "Minutes between posts",                          "timing",   5,    1440,  None),
     ("post_failure_cooldown_seconds", "int", 900, "Cooldown after a failed post attempt (secs)",    "timing",   60,   7200,  None),
+    ("cooldown_upvote_seconds",  "int",   60,     "Seconds between upvote actions",                 "timing",   10,   3600,  None),
+    ("cooldown_follow_seconds",  "int",   3600,   "Seconds between follow actions",                 "timing",   60,   86400, None),
+    ("cooldown_subscribe_seconds","int",  300,    "Seconds between subscribe actions",              "timing",   60,   86400, None),
+    ("cooldown_dm_seconds",      "int",   600,    "Seconds between DM actions",                     "timing",   60,   86400, None),
+    ("cooldown_create_submolt_seconds","int",3600,"Seconds between submolt creation",               "timing",   600,  86400, None),
     # Output
     ("output_destination",       "str",   "analog_home", "Where to publish artifacts",              "output",   None, None,  ["analog_home", "moltbook_and_analog_home"]),
     # Social
     ("mode",                     "str",   "all",  "Action mode",                                    "social",   None, None,  ["all", "comment_only", "no_post", "no_comment", "post_only"]),
-    ("follow_prob",              "float", 0.60,   "Follow-on-like probability",                     "social",   0.0,  1.0,   None),
-    ("create_submolt_prob",      "float", 0.05,   "Create submolt probability",                     "social",   0.0,  1.0,   None),
     ("allow_downvote",           "bool",  True,   "Allow downvoting",                               "social",   None, None,  None),
     ("priority",                 "str",   "replies_first", "Reply priority",                        "social",   None, None,  ["replies_first", "outside_first"]),
     ("my_post_scan_limit",       "int",   50,     "Recent own posts to scan for unanswered comments", "social", 5,    200,   None),
@@ -997,6 +1000,10 @@ CONTROLS_META = [
     ("max_item_age_hours",       "int",   24,     "Ignore feed items older than this (hours)",      "daemon",   1,    168,   None),
     ("saved_plan_max_cycles",    "int",   5,      "Cycles a daemon draft persists before expiring", "daemon",   1,    20,    None),
     ("daemon_notes_max",         "int",   5,      "Max directive notes retained",                   "daemon",   1,    20,    None),
+    ("daemon_can_upvote",        "bool",  True,   "Daemon can upvote posts/comments",               "daemon",   None, None,  None),
+    ("daemon_can_follow",        "bool",  False,  "Daemon can follow (rare, off by default)",       "daemon",   None, None,  None),
+    ("daemon_can_subscribe",     "bool",  False,  "Daemon can subscribe to submolts",               "daemon",   None, None,  None),
+    ("daemon_can_downvote",      "bool",  False,  "Daemon can downvote (requires allow_downvote)",  "daemon",   None, None,  None),
     # Context
     ("feed_batch_size",          "int",   12,     "Feed items per cycle",                           "context",  1,    50,    None),
     ("feed_item_chars",          "int",   400,    "Max chars per feed item in prompt",              "context",  50,   2000,  None),

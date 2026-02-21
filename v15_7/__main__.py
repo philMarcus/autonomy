@@ -15,6 +15,7 @@ import os
 import re
 import sys
 import time
+import threading
 import uuid
 import argparse
 import datetime
@@ -48,10 +49,11 @@ from .planner import (
     build_planner_prompt, plan_next_action, call_text,
 )
 from .actions import (
-    ActionBlocked, can_post, execute_action,
+    ActionBlocked, execute_action,
     refresh_my_posts_from_profile, find_unanswered_comment_on_my_posts,
     pick_outside_post_for_comment,
 )
+from .cooldowns import can_do, set_cooldown, cooldown_status_text, migrate_legacy_cooldowns
 
 colorama_init(autoreset=True)
 
@@ -340,9 +342,14 @@ def main():
     store = LocalFileStore(state_path, analog_home_url=analog_home_url)
     state = store.load_state()
 
+    # Migrate legacy cooldown format (next_post_time / next_comment_time → state["cooldowns"])
+    if migrate_legacy_cooldowns(state):
+        store.save_state(state)
+        print(f"{Fore.GREEN}Migrated legacy cooldowns to unified format.")
+
     # Reset post window if requested
     if args.reset_post_window:
-        state["next_post_time"] = 0.0
+        state.setdefault("cooldowns", {})["POST"] = 0.0
         store.save_state(state)
         print(f"{Fore.GREEN}Post window reset — first cycle can post immediately.")
 
@@ -398,7 +405,7 @@ def main():
     allow_outside = True
     allow_votes = bool(args.allow_votes)
     allow_downvote = bool(args.allow_votes and args.allow_downvote)
-    allow_create_submolt = ctrl.get("create_submolt_prob") > 0
+    allow_create_submolt = True  # gated by cooldown system now
 
     post_cooldown_seconds = args.post_interval * 60
 
@@ -425,6 +432,7 @@ def main():
         "reply_candidate_chars": ctrl.get("reply_candidate_chars"),
         "outside_candidate_chars": ctrl.get("outside_candidate_chars"),
         "post_failure_cooldown_seconds": ctrl.get("post_failure_cooldown_seconds"),
+        "ctrl": ctrl,
     }
 
     # Build tools list for planner chat (Google Search grounding)
@@ -447,6 +455,7 @@ def main():
             except ValueError:
                 pass
 
+        state_lock = threading.Lock()
         daemon = SubconsciousDaemon(
             registry=registry, ctrl=ctrl, budget=budget,
             buffer=draft_buffer, telemetry=telemetry,
@@ -455,6 +464,8 @@ def main():
             username=username,
             store=store if analog_home_url else None,
             search_tools=daemon_search_tools,
+            state=state,
+            state_lock=state_lock,
         )
         # Seed seen_ids from state so daemon doesn't re-score old feed items on restart
         prior_ids = set(state.get("my_post_ids", []))
@@ -548,16 +559,19 @@ def main():
         outside_candidate = None
 
         if platform is not None:
-            did_add = refresh_my_posts_from_profile(platform, state, username,
-                                                    my_post_scan_limit=ctrl.get("my_post_scan_limit"))
-            if did_add:
-                store.save_state(state)
+            try:
+                did_add = refresh_my_posts_from_profile(platform, state, username,
+                                                        my_post_scan_limit=ctrl.get("my_post_scan_limit"))
+                if did_add:
+                    store.save_state(state)
+            except Exception:
+                source_errors["profile"] = platform.last_error_type or "timeout"
 
             try:
                 mb_feed = platform.get_feed(limit=FEED_LIMIT, sort=args.feed_sort)
                 feed_sources.append({"name": "moltbook", "items": mb_feed})
             except Exception:
-                source_errors["moltbook"] = platform.last_error_type or "error"
+                source_errors["moltbook"] = platform.last_error_type or "timeout"
 
         # Future: add more feed sources here
         # if reddit_client:
@@ -585,13 +599,16 @@ def main():
                                        "source_errors": source_errors, "brief": feed_brief[:2000]})
 
         if platform is not None:
-            reply_candidate = find_unanswered_comment_on_my_posts(
-                platform, state, username, telemetry, ctrl.get("max_item_age_hours"),
-                my_post_scan_limit=ctrl.get("my_post_scan_limit"),
-                reply_threads_scanned=ctrl.get("reply_threads_scanned"),
-                reply_max_comments=ctrl.get("reply_max_comments"),
-                reply_candidate_chars=ctrl.get("reply_candidate_chars"),
-            )
+            try:
+                reply_candidate = find_unanswered_comment_on_my_posts(
+                    platform, state, username, telemetry, ctrl.get("max_item_age_hours"),
+                    my_post_scan_limit=ctrl.get("my_post_scan_limit"),
+                    reply_threads_scanned=ctrl.get("reply_threads_scanned"),
+                    reply_max_comments=ctrl.get("reply_max_comments"),
+                    reply_candidate_chars=ctrl.get("reply_candidate_chars"),
+                )
+            except Exception:
+                source_errors["reply_scan"] = platform.last_error_type or "timeout"
             outside_candidate = pick_outside_post_for_comment(
                 feed, state, username, ctrl.get("max_item_age_hours"),
                 thread_comments_for_engagement=ctrl.get("thread_comments_for_engagement"),
@@ -604,8 +621,9 @@ def main():
             post_wait = 0
             print(f"{Fore.WHITE}Post Window: OPEN (Analog Home — no cooldown)")
         else:
-            post_ok, post_wait = can_post(state)
+            post_ok, post_wait_secs = can_do(state, "POST", ctrl=ctrl)
             post_window_open = post_ok
+            post_wait = post_wait_secs // 60
             window = "OPEN" if post_window_open else f"CLOSED ({post_wait}m)"
             print(f"{Fore.WHITE}Post Window: {window}")
 
@@ -687,6 +705,7 @@ def main():
             cycle_temperature=cycle_temperature if analog_home_url else None,
             default_temperature=agent_default_temperature,
             allow_default_temp=bool(args.enable_default_temp),
+            cooldown_status=cooldown_status_text(state, ctrl=ctrl),
             controls_block=ctrl.to_llm_block(),
             budget_summary=budget.spend_summary_text() if budget else "",
             draft_context=draft_context,

@@ -92,10 +92,11 @@ class MoltbookClient(PlatformClient):
 
         request_body = json_body
 
+        _timeout = 15 if method == "GET" else 30
         resp = self.session.request(
             method, url, params=params,
             data=json.dumps(request_body) if request_body is not None else None,
-            timeout=30,
+            timeout=_timeout,
         )
         dt_ms = int((time.time() - t0) * 1000)
         status = getattr(resp, "status_code", None)
@@ -309,8 +310,14 @@ class MoltbookClient(PlatformClient):
     def follow_agent(self, agent_name: str) -> Dict[str, Any]:
         return self._req("POST", f"/agents/{agent_name}/follow")
 
+    def unfollow_agent(self, agent_name: str) -> Dict[str, Any]:
+        return self._req("DELETE", f"/agents/{agent_name}/follow")
+
     def subscribe_submolt(self, name: str) -> Dict[str, Any]:
         return self._req("POST", f"/submolts/{name}/subscribe")
+
+    def unsubscribe_submolt(self, name: str) -> Dict[str, Any]:
+        return self._req("DELETE", f"/submolts/{name}/subscribe")
 
     def create_submolt(self, name: str, display_name: str, description: str) -> Dict[str, Any]:
         body = {"name": name, "display_name": display_name, "description": description}

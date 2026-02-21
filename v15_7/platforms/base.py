@@ -75,7 +75,15 @@ class PlatformClient(ABC):
         ...
 
     @abstractmethod
+    def unfollow_agent(self, agent_name: str) -> Dict[str, Any]:
+        ...
+
+    @abstractmethod
     def subscribe_submolt(self, name: str) -> Dict[str, Any]:
+        ...
+
+    @abstractmethod
+    def unsubscribe_submolt(self, name: str) -> Dict[str, Any]:
         ...
 
     @abstractmethod

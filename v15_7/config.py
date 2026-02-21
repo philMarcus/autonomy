@@ -112,15 +112,3 @@ POST_COOLDOWN_SECONDS = 30 * 60
 COMMENT_COOLDOWN_SECONDS = 20
 REQUESTS_PER_MINUTE_SOFT = 90
 
-# ============================================================
-# Social action defaults
-# ============================================================
-UPVOTE_EVERY_CYCLE_DEFAULT = True
-FOLLOW_ON_LIKE_DEFAULT = False
-FOLLOW_PROB_DEFAULT = 0.60
-SUBSCRIBE_POLICY_DEFAULT = "medium"
-SUBSCRIBE_PROB_BY_POLICY = {"off": 0.0, "low": 0.10, "medium": 0.25, "high": 0.45}
-CREATE_SUBMOLT_PROB_DEFAULT = 0.05
-ALLOW_CREATE_SUBMOLT_DEFAULT = False
-ALLOW_DMS_DEFAULT = False
-ALLOW_DOWNVOTE_DEFAULT = True

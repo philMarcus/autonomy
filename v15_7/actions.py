@@ -1,11 +1,7 @@
-"""Action execution, social actions, and DM fallback."""
+"""Action execution for conscious planner and daemon reflex."""
 
-import json
-import re
+import threading
 import time
-import random
-import argparse
-import datetime
 from typing import Any, Dict, List, Optional
 
 from colorama import Fore, Style
@@ -19,20 +15,17 @@ def safe_print(text: str) -> None:
         print(text.encode(errors="replace").decode())
 
 from .config import (
-    POST_COOLDOWN_SECONDS, COMMENT_COOLDOWN_SECONDS,
     POST_FAILURE_COOLDOWN_SECONDS,
     MAX_THREAD_COMMENTS_FOR_OUTSIDE_ENGAGEMENT,
     MY_POST_SCAN_LIMIT,
     REPLY_SELECTION_MAX_COMMENTS, MAX_COMMENT_THREADS_SCANNED,
     REPLY_MERIT_MIN_SCORE,
     MAX_REPLY_CANDIDATE_CHARS, MAX_OUTSIDE_CANDIDATE_CHARS,
-    SUBSCRIBE_PROB_BY_POLICY,
 )
+from .cooldowns import can_do, set_cooldown
 from .platforms.base import PlatformClient
-from .llm.base import ChatSession
 from .store import Store
 from .telemetry import TelemetryLogger
-from .planner import parse_json_with_one_repair, call_text
 from .utils import (
     post_url, add_history, get_author_name, shorten,
     get_post_comment_count, norm_key, is_item_too_old,
@@ -45,33 +38,6 @@ class ActionBlocked(Exception):
         self.action = (action or "").upper().strip()
         self.reason = reason
 
-
-# ============================================================
-# Rate limit helpers
-# ============================================================
-def can_post(state: Dict[str, Any]) -> tuple:
-    now = time.time()
-    next_t = float(state.get("next_post_time", 0))
-    if now >= next_t:
-        return True, 0
-    return False, max(0, int((next_t - now) / 60))
-
-
-def can_comment(state: Dict[str, Any]) -> tuple:
-    now = time.time()
-    next_t = float(state.get("next_comment_time", 0))
-    if now >= next_t:
-        return True, 0
-    return False, max(0, int(next_t - now))
-
-
-def set_post_cooldown(state: Dict[str, Any], cooldown_seconds: int = 0) -> None:
-    cd = cooldown_seconds if cooldown_seconds > 0 else POST_COOLDOWN_SECONDS
-    state["next_post_time"] = max(float(state.get("next_post_time", 0.0)), time.time() + cd)
-
-
-def set_comment_cooldown(state: Dict[str, Any]) -> None:
-    state["next_comment_time"] = max(float(state.get("next_comment_time", 0.0)), time.time() + COMMENT_COOLDOWN_SECONDS)
 
 
 # ============================================================
@@ -215,7 +181,12 @@ def execute_action(
     if not action:
         raise ValueError("Plan missing action")
 
-    WRITE_ACTIONS = {"POST", "COMMENT", "REPLY", "UPVOTE", "DOWNVOTE", "FOLLOW", "UNFOLLOW", "DM", "SUBSCRIBE", "UNSUBSCRIBE"}
+    WRITE_ACTIONS = {
+        "POST", "COMMENT", "REPLY",
+        "UPVOTE_POST", "UPVOTE_COMMENT", "DOWNVOTE_POST", "DOWNVOTE_COMMENT",
+        "FOLLOW", "UNFOLLOW", "DM",
+        "SUBSCRIBE_SUBMOLT", "UNSUBSCRIBE_SUBMOLT", "CREATE_SUBMOLT",
+    }
     if flags.get("read_only") and action in WRITE_ACTIONS:
         print(f"{Fore.YELLOW}[SAFE] Skipping write action {action} due to --read-only{Style.RESET_ALL}")
         return False
@@ -277,10 +248,12 @@ def execute_action(
                     "full_response": res,
                 })
 
+    ctrl = flags.get("ctrl")
+
     if action == "POST":
-        ok, mins = can_post(state)
+        ok, secs = can_do(state, "POST", ctrl=ctrl)
         if not ok:
-            raise ValueError(f"POST not allowed yet ({mins}m remaining)")
+            raise ValueError(f"POST not allowed yet ({secs // 60}m remaining)")
         submolt = plan.get("submolt") or "general"
         title = plan.get("title") or ""
         content = plan.get("content") or ""
@@ -288,7 +261,8 @@ def execute_action(
         print(f"{Fore.YELLOW}Target submolt: m/{submolt}")
         safe_print(f"{Fore.GREEN}TITLE: {title}")
         safe_print(f"{Fore.GREEN}CONTENT: {content}\n")
-        state["next_post_time"] = max(float(state.get("next_post_time", 0.0)), time.time() + float(flags.get("post_failure_cooldown_seconds", POST_FAILURE_COOLDOWN_SECONDS)))
+        # Set failure cooldown up front (overwritten on success)
+        set_cooldown(state, "POST", seconds=int(flags.get("post_failure_cooldown_seconds", POST_FAILURE_COOLDOWN_SECONDS)), ctrl=ctrl)
         res = client.create_post(submolt=submolt, title=title, content=content)
         if not res.get("success"):
             _handle_write_block(res)
@@ -296,7 +270,7 @@ def execute_action(
         pid = res.get("post", {}).get("id") or res.get("id")
         if pid:
             state["my_post_ids"].append(pid)
-        set_post_cooldown(state, flags.get("post_cooldown_seconds", 0))
+        set_cooldown(state, "POST", ctrl=ctrl)  # full cooldown on success
         add_history(state, {"action": "POST", "target": post_url(pid or "?"), "summary": plan.get("summary", "")})
         if telemetry:
             telemetry.log("action_executed", {"action": "POST", "post_id": pid, "submolt": submolt, "title": title})
@@ -304,9 +278,9 @@ def execute_action(
         return True
 
     if action == "REPLY":
-        ok, secs = can_comment(state)
+        ok, secs = can_do(state, "REPLY", ctrl=ctrl)
         if not ok:
-            raise ValueError(f"COMMENT cooldown active ({secs}s remaining)")
+            raise ValueError(f"REPLY cooldown active ({secs}s remaining)")
         post_id = plan.get("post_id") or ""
         parent_id = plan.get("parent_comment_id") or ""
         content = plan.get("content") or ""
@@ -346,7 +320,7 @@ def execute_action(
             raise ValueError(f"Reply failed: {res.get('error') or res}")
         if post_id and parent_id:
             state["replied_comment_keys"].append(f"{post_id}:{parent_id}")
-        set_comment_cooldown(state)
+        set_cooldown(state, "REPLY", ctrl=ctrl)
         add_history(state, {"action": "REPLY", "target": f"{post_url(post_id)}#comment-{parent_id}", "summary": plan.get("summary", "")})
         if telemetry:
             telemetry.log("action_executed", {"action": "REPLY", "post_id": post_id, "parent_comment_id": parent_id})
@@ -354,7 +328,7 @@ def execute_action(
         return True
 
     if action == "COMMENT":
-        ok, secs = can_comment(state)
+        ok, secs = can_do(state, "COMMENT", ctrl=ctrl)
         if not ok:
             raise ValueError(f"COMMENT cooldown active ({secs}s remaining)")
         post_id = plan.get("post_id") or ""
@@ -377,7 +351,7 @@ def execute_action(
         if not res.get("success"):
             _handle_write_block(res)
             raise ValueError(f"Comment failed: {res.get('error') or res}")
-        set_comment_cooldown(state)
+        set_cooldown(state, "COMMENT", ctrl=ctrl)
         add_history(state, {"action": "COMMENT", "target": post_url(post_id), "summary": plan.get("summary", "")})
         if telemetry:
             telemetry.log("action_executed", {"action": "COMMENT", "post_id": post_id})
@@ -385,12 +359,16 @@ def execute_action(
         return True
 
     if action == "UPVOTE_POST":
+        ok, secs = can_do(state, "UPVOTE_POST", ctrl=ctrl)
+        if not ok:
+            raise ValueError(f"UPVOTE_POST cooldown active ({secs}s remaining)")
         pid = plan.get("post_id") or ""
         print(f"{Fore.CYAN}...Action: UPVOTE_POST {post_url(pid)}")
         res = client.upvote_post(pid)
         if not res.get("success"):
             _handle_write_block(res)
             raise ValueError(f"Upvote failed: {res.get('error') or res}")
+        set_cooldown(state, "UPVOTE_POST", ctrl=ctrl)
         add_history(state, {"action": "UPVOTE_POST", "target": post_url(pid), "summary": plan.get("summary", "")})
         if telemetry:
             telemetry.log("action_executed", {"action": "UPVOTE_POST", "post_id": pid})
@@ -398,12 +376,16 @@ def execute_action(
         return True
 
     if action == "DOWNVOTE_POST":
+        ok, secs = can_do(state, "DOWNVOTE_POST", ctrl=ctrl)
+        if not ok:
+            raise ValueError(f"DOWNVOTE_POST cooldown active ({secs}s remaining)")
         pid = plan.get("post_id") or ""
         print(f"{Fore.CYAN}...Action: DOWNVOTE_POST {post_url(pid)}")
         res = client.downvote_post(pid)
         if not res.get("success"):
             _handle_write_block(res)
             raise ValueError(f"Downvote failed: {res.get('error') or res}")
+        set_cooldown(state, "DOWNVOTE_POST", ctrl=ctrl)
         add_history(state, {"action": "DOWNVOTE_POST", "target": post_url(pid), "summary": plan.get("summary", "")})
         if telemetry:
             telemetry.log("action_executed", {"action": "DOWNVOTE_POST", "post_id": pid})
@@ -411,12 +393,16 @@ def execute_action(
         return True
 
     if action == "UPVOTE_COMMENT":
+        ok, secs = can_do(state, "UPVOTE_COMMENT", ctrl=ctrl)
+        if not ok:
+            raise ValueError(f"UPVOTE_COMMENT cooldown active ({secs}s remaining)")
         cid = plan.get("comment_id") or ""
         print(f"{Fore.CYAN}...Action: UPVOTE_COMMENT {cid}")
         res = client.upvote_comment(cid)
         if not res.get("success"):
             _handle_write_block(res)
             raise ValueError(f"Upvote comment failed: {res.get('error') or res}")
+        set_cooldown(state, "UPVOTE_COMMENT", ctrl=ctrl)
         add_history(state, {"action": "UPVOTE_COMMENT", "target": f"comment:{cid}", "summary": plan.get("summary", "")})
         if telemetry:
             telemetry.log("action_executed", {"action": "UPVOTE_COMMENT", "comment_id": cid})
@@ -424,6 +410,9 @@ def execute_action(
         return True
 
     if action == "CREATE_SUBMOLT":
+        ok, secs = can_do(state, "CREATE_SUBMOLT", ctrl=ctrl)
+        if not ok:
+            raise ValueError(f"CREATE_SUBMOLT cooldown active ({secs}s remaining)")
         name = plan.get("name") or ""
         display = plan.get("display_name") or ""
         desc = plan.get("description") or ""
@@ -432,6 +421,7 @@ def execute_action(
         if not res.get("success"):
             _handle_write_block(res)
             raise ValueError(f"Create submolt failed: {res.get('error') or res}")
+        set_cooldown(state, "CREATE_SUBMOLT", ctrl=ctrl)
         add_history(state, {"action": "CREATE_SUBMOLT", "target": f"m/{name}", "summary": plan.get("summary", "")})
         if telemetry:
             telemetry.log("action_executed", {"action": "CREATE_SUBMOLT", "name": name})
@@ -439,6 +429,9 @@ def execute_action(
         return True
 
     if action == "SUBSCRIBE_SUBMOLT":
+        ok, secs = can_do(state, "SUBSCRIBE_SUBMOLT", ctrl=ctrl)
+        if not ok:
+            raise ValueError(f"SUBSCRIBE_SUBMOLT cooldown active ({secs}s remaining)")
         name = plan.get("name") or ""
         print(f"{Fore.CYAN}...Action: SUBSCRIBE_SUBMOLT m/{name}")
         already = {norm_key(s): True for s in state.get("subscribed_submolts", [])}
@@ -452,6 +445,7 @@ def execute_action(
         if not res.get("success"):
             _handle_write_block(res)
             raise ValueError(f"Subscribe failed: {res.get('error') or res}")
+        set_cooldown(state, "SUBSCRIBE_SUBMOLT", ctrl=ctrl)
         state.setdefault("subscribed_submolts", []).append(norm_key(name))
         add_history(state, {"action": "SUBSCRIBE_SUBMOLT", "target": f"m/{name}", "summary": plan.get("summary", "")})
         if telemetry:
@@ -478,248 +472,174 @@ def execute_action(
             print(f"{Fore.YELLOW}>> SET_TRAJECTORY: no Analog Home URL configured or request failed")
         return True
 
+    if action == "FOLLOW":
+        ok, secs = can_do(state, "FOLLOW", ctrl=ctrl)
+        if not ok:
+            raise ValueError(f"FOLLOW cooldown active ({secs}s remaining)")
+        agent_name = plan.get("agent_name") or ""
+        print(f"{Fore.CYAN}...Action: FOLLOW @{agent_name}")
+        followed = {norm_key(a): True for a in state.get("followed_agents", [])}
+        if norm_key(agent_name) in followed:
+            add_history(state, {"action": "FOLLOW", "target": f"@{agent_name}", "summary": "already following"})
+            if telemetry:
+                telemetry.log("action_skipped", {"action": "FOLLOW", "agent": agent_name, "reason": "already following"})
+            print(f"{Fore.CYAN}>> FOLLOW SKIPPED: already following")
+            return False
+        res = client.follow_agent(agent_name)
+        if not res.get("success"):
+            _handle_write_block(res)
+            raise ValueError(f"Follow failed: {res.get('error') or res}")
+        set_cooldown(state, "FOLLOW", ctrl=ctrl)
+        state.setdefault("followed_agents", []).append(norm_key(agent_name))
+        add_history(state, {"action": "FOLLOW", "target": f"@{agent_name}", "summary": plan.get("summary", "")})
+        if telemetry:
+            telemetry.log("action_executed", {"action": "FOLLOW", "agent": agent_name})
+        print(f"{Fore.CYAN}>> FOLLOW SUCCESS")
+        return True
+
+    if action == "UNFOLLOW":
+        ok, secs = can_do(state, "UNFOLLOW", ctrl=ctrl)
+        if not ok:
+            raise ValueError(f"UNFOLLOW cooldown active ({secs}s remaining)")
+        agent_name = plan.get("agent_name") or ""
+        print(f"{Fore.CYAN}...Action: UNFOLLOW @{agent_name}")
+        res = client.unfollow_agent(agent_name)
+        if not res.get("success"):
+            _handle_write_block(res)
+            raise ValueError(f"Unfollow failed: {res.get('error') or res}")
+        set_cooldown(state, "UNFOLLOW", ctrl=ctrl)
+        followed = state.get("followed_agents", [])
+        nk = norm_key(agent_name)
+        state["followed_agents"] = [a for a in followed if norm_key(a) != nk]
+        add_history(state, {"action": "UNFOLLOW", "target": f"@{agent_name}", "summary": plan.get("summary", "")})
+        if telemetry:
+            telemetry.log("action_executed", {"action": "UNFOLLOW", "agent": agent_name})
+        print(f"{Fore.CYAN}>> UNFOLLOW SUCCESS")
+        return True
+
+    if action == "DOWNVOTE_COMMENT":
+        ok, secs = can_do(state, "DOWNVOTE_COMMENT", ctrl=ctrl)
+        if not ok:
+            raise ValueError(f"DOWNVOTE_COMMENT cooldown active ({secs}s remaining)")
+        cid = plan.get("comment_id") or ""
+        print(f"{Fore.CYAN}...Action: DOWNVOTE_COMMENT {cid}")
+        res = client.downvote_comment(cid)
+        if not res.get("success"):
+            _handle_write_block(res)
+            raise ValueError(f"Downvote comment failed: {res.get('error') or res}")
+        set_cooldown(state, "DOWNVOTE_COMMENT", ctrl=ctrl)
+        add_history(state, {"action": "DOWNVOTE_COMMENT", "target": f"comment:{cid}", "summary": plan.get("summary", "")})
+        if telemetry:
+            telemetry.log("action_executed", {"action": "DOWNVOTE_COMMENT", "comment_id": cid})
+        print(f"{Fore.CYAN}>> DOWNVOTE COMMENT SUCCESS")
+        return True
+
+    if action == "DM":
+        ok, secs = can_do(state, "DM", ctrl=ctrl)
+        if not ok:
+            raise ValueError(f"DM cooldown active ({secs}s remaining)")
+        to = plan.get("to") or ""
+        message = plan.get("message") or ""
+        print(f"{Fore.CYAN}...Action: DM to @{to}")
+        safe_print(f"{Fore.GREEN}MESSAGE: {message}\n")
+        res = client.dm_request(to=to, message=message)
+        if not res.get("success"):
+            _handle_write_block(res)
+            raise ValueError(f"DM failed: {res.get('error') or res}")
+        set_cooldown(state, "DM", ctrl=ctrl)
+        add_history(state, {"action": "DM", "target": f"@{to}", "summary": plan.get("summary", "")})
+        if telemetry:
+            telemetry.log("action_executed", {"action": "DM", "to": to})
+        print(f"{Fore.CYAN}>> DM SUCCESS")
+        return True
+
+    if action == "UNSUBSCRIBE_SUBMOLT":
+        ok, secs = can_do(state, "SUBSCRIBE_SUBMOLT", ctrl=ctrl)  # shares cooldown with subscribe
+        if not ok:
+            raise ValueError(f"UNSUBSCRIBE cooldown active ({secs}s remaining)")
+        name = plan.get("name") or ""
+        print(f"{Fore.CYAN}...Action: UNSUBSCRIBE_SUBMOLT m/{name}")
+        res = client.unsubscribe_submolt(name)
+        if not res.get("success"):
+            _handle_write_block(res)
+            raise ValueError(f"Unsubscribe failed: {res.get('error') or res}")
+        set_cooldown(state, "SUBSCRIBE_SUBMOLT", ctrl=ctrl)
+        nk = norm_key(name)
+        subs = state.get("subscribed_submolts", [])
+        state["subscribed_submolts"] = [s for s in subs if norm_key(s) != nk]
+        add_history(state, {"action": "UNSUBSCRIBE_SUBMOLT", "target": f"m/{name}", "summary": plan.get("summary", "")})
+        if telemetry:
+            telemetry.log("action_executed", {"action": "UNSUBSCRIBE_SUBMOLT", "name": name})
+        print(f"{Fore.CYAN}>> UNSUBSCRIBE SUCCESS")
+        return True
+
     raise ValueError(f"Unknown action: {action}")
 
 
 # ============================================================
-# Social-first actions (upvote, subscribe, follow, create submolt)
+# Daemon reflex — thread-safe action execution for daemon gear
 # ============================================================
-def _today_ymd() -> str:
-    return datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%d")
-
-
-def _reset_daily_counters(state: Dict[str, Any]) -> None:
-    if state.get("daily_date") != _today_ymd():
-        state["daily_date"] = _today_ymd()
-        state["daily"] = {"upvotes": 0, "downvotes": 0, "follows": 0, "subscribes": 0, "createsub": 0, "dms": 0}
-
-
-def _maybe_pick_from_feed(feed_items: List[Dict[str, Any]], username: str) -> Optional[Dict[str, Any]]:
-    if not feed_items:
-        return None
-    candidates = []
-    for p in feed_items:
-        if not p.get("id"):
-            continue
-        author = (p.get("author") or p.get("user") or {}).get("name") or p.get("author_name")
-        if author and author != username:
-            candidates.append(p)
-    return random.choice(candidates) if candidates else random.choice(feed_items)
-
-
-def maybe_do_social_actions(
+def execute_daemon_action(
     client: PlatformClient,
-    chat: ChatSession,
-    store: Store,
     state: Dict[str, Any],
-    feed_items: List[Dict[str, Any]],
-    args: argparse.Namespace,
-    kernel: str,
-    directive: str,
-    username: str,
-    telemetry: Optional[TelemetryLogger] = None,
-) -> None:
-    _reset_daily_counters(state)
-
-    # 1) Upvote something every cycle
-    if args.upvote_every_cycle:
-        try:
-            target = _maybe_pick_from_feed(feed_items, username)
-            if target and target.get("id"):
-                if not args.moltbook_enabled:
-                    state["daily"]["upvotes"] += 1
-                    if telemetry:
-                        telemetry.log("action_executed", {"action": "UPVOTE_POST", "post_id": target["id"], "source": "social"})
-                    print(f"{Fore.MAGENTA}[ANALOG HOME] SOCIAL: upvoted post {target['id']}")
-                else:
-                    res = client.upvote_post(target["id"])
-                    if res.get("success"):
-                        state["daily"]["upvotes"] += 1
-                        if telemetry:
-                            telemetry.log("action_executed", {"action": "UPVOTE_POST", "post_id": target["id"], "source": "social"})
-                        print(f"{Fore.MAGENTA}>> SOCIAL: upvoted post {target['id']}")
-                    elif res.get("_err_type") == "read_only":
-                        print(f"{Fore.YELLOW}>> SOCIAL: upvote blocked (read-only mode)")
-                    else:
-                        print(f"{Fore.YELLOW}[WARN] upvote failed: {res.get('error', res)}")
-        except Exception as e:
-            print(f"{Fore.YELLOW}[WARN] upvote failed: {e}")
-
-    # 2) Subscribe to a submolt
-    sub_prob = SUBSCRIBE_PROB_BY_POLICY.get(args.subscribe_policy, 0.0)
-    if sub_prob > 0 and random.random() < sub_prob:
-        try:
-            already = {norm_key(s): True for s in state.get("subscribed_submolts", [])}
-            seen: List[str] = []
-            for p in feed_items:
-                sm = (p.get("submolt") or {}).get("name") or p.get("submolt_name")
-                if sm:
-                    k = norm_key(sm)
-                    if k and k not in [norm_key(s) for s in seen]:
-                        seen.append(sm)
-            if seen:
-                candidates = [s for s in seen if norm_key(s) not in already]
-                if candidates:
-                    sm = random.choice(candidates)
-                    if not args.moltbook_enabled:
-                        state.setdefault("subscribed_submolts", []).append(norm_key(sm))
-                        state["daily"]["subscribes"] += 1
-                        if telemetry:
-                            telemetry.log("action_executed", {"action": "SUBSCRIBE_SUBMOLT", "name": sm, "source": "social"})
-                        print(f"{Fore.MAGENTA}[ANALOG HOME] SOCIAL: subscribed to /m/{sm}")
-                    else:
-                        res = client.subscribe_submolt(sm)
-                        if res.get("success"):
-                            state.setdefault("subscribed_submolts", []).append(norm_key(sm))
-                            state["daily"]["subscribes"] += 1
-                            if telemetry:
-                                telemetry.log("action_executed", {"action": "SUBSCRIBE_SUBMOLT", "name": sm, "source": "social"})
-                            print(f"{Fore.MAGENTA}>> SOCIAL: subscribed to /m/{sm}")
-                        elif res.get("_err_type") == "read_only":
-                            print(f"{Fore.YELLOW}>> SOCIAL: subscribe blocked (read-only mode)")
-                        else:
-                            print(f"{Fore.YELLOW}[WARN] subscribe failed: {res.get('error', res)}")
-        except Exception as e:
-            print(f"{Fore.YELLOW}[WARN] subscribe failed: {e}")
-
-    # 3) Create a new submolt (rare)
-    if args.allow_create_submolt and args.create_submolt_prob > 0 and random.random() < args.create_submolt_prob:
-        try:
-            sj = parse_json_with_one_repair(chat, (
-                f"""{kernel}
-
-You are proposing ONE new submolt to create for Moltbook, based on this directive: {directive}
-
-Return strict JSON only:
-{{"name":"slug","display_name":"...","description":"..."}}
-
-Constraints:
-- name: 3-21 chars; lowercase letters, numbers, underscore only
-- keep it broadly useful and non-spammy
-"""
-            ), telemetry=telemetry, call_tag='helper')
-            name = str(sj.get("name", "")).strip().lower()
-            name = re.sub(r"[^a-z0-9_]", "_", name)
-            name = re.sub(r"_+", "_", name).strip("_")[:21]
-            if len(name) < 3:
-                raise ValueError("invalid submolt name")
-            display_name = str(sj.get("display_name", "")).strip()[:60] or name
-            description = str(sj.get("description", "")).strip()[:280] or "A new place for discussion."
-            if not args.moltbook_enabled:
-                state["daily"]["createsub"] += 1
-                if telemetry:
-                    telemetry.log("action_executed", {"action": "CREATE_SUBMOLT", "name": name, "source": "social"})
-                print(f"{Fore.MAGENTA}[ANALOG HOME] SOCIAL: created submolt /m/{name}")
-            else:
-                client.create_submolt(name=name, display_name=display_name, description=description)
-                state["daily"]["createsub"] += 1
-                if telemetry:
-                    telemetry.log("action_executed", {"action": "CREATE_SUBMOLT", "name": name, "source": "social"})
-                print(f"{Fore.MAGENTA}>> SOCIAL: created submolt /m/{name}")
-        except Exception as e:
-            print(f"{Fore.YELLOW}[WARN] create submolt failed: {e}")
-
-    # 4) Follow authors we "liked"
-    if args.follow_on_like and feed_items:
-        try:
-            pick = parse_json_with_one_repair(chat, (
-                f"""{kernel}
-
-Directive: {directive}
-
-From the feed items below, pick at most ONE author to follow because you genuinely liked their contribution.
-If none, return {{"follow": false}}.
-Return strict JSON only: {{"follow": true/false, "author": "Name"}}
-
-FEED ITEMS (brief):
-{json.dumps([{"id": p.get("id"), "author": get_author_name(p.get("author")), "content": shorten(p.get("content",""),200)} for p in feed_items], ensure_ascii=False)}
-
-"""
-            ), telemetry=telemetry, call_tag='helper')
-            if pick.get("follow") and random.random() < float(args.follow_prob):
-                author = pick.get('author')
-                if isinstance(author, dict):
-                    author = author.get('name') or author.get('username') or author.get('handle')
-                author = (author or '').strip()
-                if author and author != username:
-                    followed = {norm_key(a): True for a in state.get("followed_agents", [])}
-                    if norm_key(author) not in followed:
-                        if not args.moltbook_enabled:
-                            state.setdefault("followed_agents", []).append(norm_key(author))
-                            state["daily"]["follows"] += 1
-                            if telemetry:
-                                telemetry.log("action_executed", {"action": "FOLLOW", "agent": author, "source": "social"})
-                            print(f"{Fore.MAGENTA}[ANALOG HOME] SOCIAL: followed @{author}")
-                        else:
-                            res = client.follow_agent(author)
-                            if res.get("success"):
-                                state.setdefault("followed_agents", []).append(norm_key(author))
-                                state["daily"]["follows"] += 1
-                                if telemetry:
-                                    telemetry.log("action_executed", {"action": "FOLLOW", "agent": author, "source": "social"})
-                                print(f"{Fore.MAGENTA}>> SOCIAL: followed @{author}")
-                            elif res.get("_err_type") == "read_only":
-                                print(f"{Fore.YELLOW}>> SOCIAL: follow blocked (read-only mode)")
-                            else:
-                                print(f"{Fore.YELLOW}[WARN] follow failed: {res.get('error', res)}")
-        except Exception as e:
-            print(f"{Fore.YELLOW}[WARN] follow failed: {e}")
-
-    store.save_state(state)
-
-
-def maybe_dm_fallback(
-    client: PlatformClient,
-    chat: ChatSession,
-    store: Store,
-    state: Dict[str, Any],
-    feed_items: List[Dict[str, Any]],
-    args: argparse.Namespace,
-    kernel: str,
-    directive: str,
-    username: str,
+    state_lock: threading.Lock,
+    action: str,
+    target_id: str,
+    ctrl: Optional[Any] = None,
     telemetry: Optional[TelemetryLogger] = None,
 ) -> bool:
-    if not args.allow_dms:
-        return False
-    _reset_daily_counters(state)
+    """Execute a lightweight social action from the daemon's reflex gear.
+
+    Thread-safe: acquires state_lock for all state mutations.
+    Returns True if the action was executed successfully.
+    """
+    action = (action or "").upper().strip()
+
+    with state_lock:
+        ok, _ = can_do(state, action, ctrl=ctrl)
+        if not ok:
+            return False
+
     try:
-        target = _maybe_pick_from_feed(feed_items, username)
-        if not target:
+        if action == "UPVOTE_POST":
+            res = client.upvote_post(target_id)
+        elif action == "UPVOTE_COMMENT":
+            res = client.upvote_comment(target_id)
+        elif action == "DOWNVOTE_POST":
+            res = client.downvote_post(target_id)
+        elif action == "DOWNVOTE_COMMENT":
+            res = client.downvote_comment(target_id)
+        elif action == "FOLLOW":
+            with state_lock:
+                followed = {norm_key(a) for a in state.get("followed_agents", [])}
+            if norm_key(target_id) in followed:
+                return False
+            res = client.follow_agent(target_id)
+        elif action == "SUBSCRIBE_SUBMOLT":
+            with state_lock:
+                subbed = {norm_key(s) for s in state.get("subscribed_submolts", [])}
+            if norm_key(target_id) in subbed:
+                return False
+            res = client.subscribe_submolt(target_id)
+        else:
             return False
-        author = get_author_name(target.get("author")) or (target.get("author_name") or "")
-        author = str(author).strip()
-        if not author or author == username:
+
+        if not res.get("success"):
             return False
-        j = parse_json_with_one_repair(chat, (
-            f"""{kernel}
 
-Directive: {directive}
-
-Write a short Moltbook DM *request* (1-3 sentences) to @{author}.
-Return strict JSON only: {{"message":"..."}}
-Make it specific to the feed topic below (do not be creepy; keep it professional/friendly).
-
-FEED TOPIC:
-{shorten(target.get("content",""), 400)}
-
-"""
-        ), telemetry=telemetry, call_tag='helper')
-        message = str(j.get("message", "")).strip()
-        if not message:
-            return False
-        if not args.moltbook_enabled:
-            if telemetry:
-                telemetry.log("action_executed", {"action": "DM", "to": author, "source": "social", "moltbook_disabled": True})
-            state["daily"]["dms"] += 1
-            store.save_state(state)
-            print(f"{Fore.MAGENTA}[ANALOG HOME] SOCIAL: sent DM request to @{author}")
-            return True
-        client.dm_request(to=author, message=message)
-        state["daily"]["dms"] += 1
-        store.save_state(state)
-        print(f"{Fore.MAGENTA}>> SOCIAL: sent DM request to @{author}")
-        return True
-    except Exception as e:
-        print(f"{Fore.YELLOW}[WARN] DM request failed: {e}")
+    except Exception:
         return False
+
+    with state_lock:
+        set_cooldown(state, action, ctrl=ctrl)
+        if action == "FOLLOW":
+            state.setdefault("followed_agents", []).append(norm_key(target_id))
+        elif action == "SUBSCRIBE_SUBMOLT":
+            state.setdefault("subscribed_submolts", []).append(norm_key(target_id))
+        add_history(state, {"action": action, "target": target_id, "summary": f"daemon reflex"})
+
+    if telemetry:
+        telemetry.log("daemon_action_executed", {"action": action, "target": target_id})
+
+    safe_print(f"{Fore.MAGENTA}[DAEMON REFLEX] {action} → {target_id}")
+    return True

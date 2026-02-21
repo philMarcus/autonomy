@@ -283,11 +283,6 @@ def build_default_registry(args, model_registry) -> ControlRegistry:
         Control("mode", "str", getattr(args, "mode", "all"),
                 "Action mode", "social",
                 choices=["all", "comment_only", "no_post", "no_comment", "post_only"]),
-        Control("follow_prob", "float", getattr(args, "follow_prob", 0.60),
-                "Follow-on-like probability", "social", min_val=0.0, max_val=1.0),
-        Control("create_submolt_prob", "float",
-                getattr(args, "create_submolt_prob", 0.05),
-                "Create submolt probability", "social", min_val=0.0, max_val=1.0),
         Control("allow_downvote", "bool", getattr(args, "allow_downvote", True),
                 "Allow downvoting", "social"),
         Control("priority", "str", getattr(args, "priority", "replies_first"),
@@ -350,6 +345,28 @@ def build_default_registry(args, model_registry) -> ControlRegistry:
         # --- Timing (extended) ---
         Control("post_failure_cooldown_seconds", "int", 900,
                 "Cooldown after a failed post attempt", "timing", min_val=60, max_val=7200),
+
+        # --- Per-action cooldown controls ---
+        Control("cooldown_upvote_seconds", "int", 60,
+                "Seconds between upvote actions", "timing", min_val=10, max_val=3600),
+        Control("cooldown_follow_seconds", "int", 3600,
+                "Seconds between follow actions", "timing", min_val=60, max_val=86400),
+        Control("cooldown_subscribe_seconds", "int", 300,
+                "Seconds between subscribe actions", "timing", min_val=60, max_val=86400),
+        Control("cooldown_dm_seconds", "int", 600,
+                "Seconds between DM actions", "timing", min_val=60, max_val=86400),
+        Control("cooldown_create_submolt_seconds", "int", 3600,
+                "Seconds between submolt creation", "timing", min_val=600, max_val=86400),
+
+        # --- Daemon permission controls ---
+        Control("daemon_can_upvote", "bool", True,
+                "Daemon can upvote posts/comments", "daemon"),
+        Control("daemon_can_follow", "bool", False,
+                "Daemon can follow (rare, off by default)", "daemon"),
+        Control("daemon_can_subscribe", "bool", False,
+                "Daemon can subscribe to submolts", "daemon"),
+        Control("daemon_can_downvote", "bool", False,
+                "Daemon can downvote (requires allow_downvote)", "daemon"),
     ]
 
     # Parse blacklist from CLI
