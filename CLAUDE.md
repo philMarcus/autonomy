@@ -7,8 +7,10 @@ Autonomous Moltbook (social media platform) agent system. Each "brain" has a ker
 ## Repository Layout
 
 - `v15_6/` — **Current stable version** (Python package, run via `python -m v15_6 <brain> [directive] [flags]`)
+- `v15_7/` — Development version (forked from v15_6, Phase 7: Controls Manager)
 - `archive/` — Archived versions: v12_0, v12_1, v12_2, v13_0, v14_0, v15_0, v15_5 (reference only)
-- `dashboard_v1_3.py` — Streamlit dashboard (Telemetry + Dry-Run Viewer tabs, auto-recreates DuckDB views)
+- `dashboard_v2_0.py` — Previous dashboard (4 tabs, reference only)
+- `dashboard_v2_1.py` — **Current dashboard** (Overview, Cycle Replay, Daemon Monitor, Input/Controls, Controls Manager tabs)
 - `brains/` — Per-brain files: `{name}_kernel_prompt.txt`, `{name}_knowledge.txt`, `{name}_memories.json`, `{name}_controls.json`
 - `telemetry/events.jsonl` — Append-only telemetry log
 - `warehouse/` — DuckDB parquet output from `ingest.py`
@@ -279,6 +281,44 @@ v15_6/ is the stable foundation. **Do not modify v15_5/** — it is archived. Al
 - Planner prompt clarifies `output_destination` control for directing seed responses to Analog Home vs Moltbook
 - `output_destination` is actuated immediately (affects current cycle), unlike most controls (affect next cycle)
 
+## v15.7 — In Development (Phase 7: Controls Manager)
+
+v15_7/ is forked from v15_6. **Do not modify v15_6 or archived versions.** All Phase 7 work goes in v15_7.
+
+### Phase 7: ControlRegistry Expansion + Controls Manager UI
+
+**New Controls (v15_7/controls.py)**:
+- `feed_item_chars` (int, 400, context) — max chars per feed item in prompt
+- `reply_candidate_chars` (int, 5000, context) — max chars for reply candidate text
+- `outside_candidate_chars` (int, 5000, context) — max chars for outside comment candidate
+- `my_post_scan_limit` (int, 50, social) — recent own posts to scan for unanswered comments
+- `reply_threads_scanned` (int, 4, social) — own post threads to scan per cycle
+- `reply_max_comments` (int, 25, social) — max comments evaluated per thread
+- `thread_comments_for_engagement` (int, 12, social) — dogpile guard threshold
+- `saved_plan_max_cycles` (int, 5, daemon) — cycles a draft persists before expiry
+- `daemon_notes_max` (int, 5, daemon) — max directive notes retained
+- `post_failure_cooldown_seconds` (int, 900, timing) — cooldown after failed post
+
+**Persistent Blacklist**:
+- `_locked` key in `{brain}_controls.json` stores the blacklist between runs
+- `lock(key)` / `unlock(key)` methods on `ControlRegistry`
+- `load_from_dict()` merges file-persisted blacklist with CLI `--blacklist-controls`
+
+**Wiring Changes**:
+- `actions.py`: all hardcoded constants now accept `flags.get(key, CONSTANT_FALLBACK)` overrides
+- `utils.py`: `format_feed_brief()` accepts optional `feed_item_chars` param
+- `daemon.py`: `set_directives()` uses `self._ctrl.get("daemon_notes_max")` instead of `_MAX_NOTES`
+- `__main__.py`: passes all new ctrl values into flags dict, call sites, and `format_feed_brief()`
+
+**Controls Manager Dashboard Tab** (`dashboard_v2_1.py`):
+- 5th tab "Controls Manager" on top of the existing 4 tabs from v2_0
+- Per-brain controls.json editor: type-appropriate widgets (number_input, selectbox, checkbox, text_input)
+- Grouped by category with expandable sections
+- "Agent editable" checkbox per control (persisted in `_locked`)
+- Save button writes back to `{brain}_controls.json`
+- Raw JSON viewer expander
+- CLI command builder updated to reference `v15_7` instead of `v14_0`
+
 ## Key Architecture Decisions
 
 - **One chat per cycle**: Chat is recreated each iteration (`__main__.py`) to avoid token accumulation
@@ -292,7 +332,7 @@ v15_6/ is the stable foundation. **Do not modify v15_5/** — it is archived. Al
 
 - Gemini 2.5 Flash sometimes returns empty first responses with stateless API. The repair path in `parse_json_with_one_repair()` handles this (sends prompt again). This means ~2 LLM calls per cycle instead of 1 for Flash. Gemini 2.5 Pro does not have this issue.
 - **Next.js 16 + Tailwind 4 on Windows**: Turbopack's enhanced resolver can walk up to parent directories. Fixed with `turbopack.resolveAlias` in `web/next.config.ts` to pin tailwindcss to local `node_modules`.
-- **Version convention**: v15_6 is stable production (Phases 1-6 + feed/temperature/bug fixes). v15_5 archived in `archive/v15_5`. **Do not modify archived versions.** Older versions in `archive/`.
+- **Version convention**: v15_6 is stable production. v15_7 is in development (Phase 7). **Do not modify v15_6 or archived versions.** All Phase 7 work goes in v15_7.
 
 ## Deployment
 
@@ -308,6 +348,6 @@ v15_6/ is the stable foundation. **Do not modify v15_5/** — it is archived. Al
 - API URL configured in Next.js env
 
 ### Agent (local)
-- Runs locally via `python -m v15_6 <brain> [flags]`
+- Runs locally via `python -m v15_6 <brain> [flags]` (stable) or `python -m v15_7 <brain> [flags]` (dev)
 - Connects to Analog Home API via `{PREFIX}_ANALOG_HOME_API_URL` env var
 - Uses local DuckDB for Streamlit dashboard (separate from Analog Home Postgres)
