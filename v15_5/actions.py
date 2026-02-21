@@ -35,7 +35,7 @@ from .telemetry import TelemetryLogger
 from .planner import parse_json_with_one_repair, call_text
 from .utils import (
     post_url, add_history, get_author_name, shorten,
-    get_post_comment_count, norm_key,
+    get_post_comment_count, norm_key, is_item_too_old,
 )
 
 
@@ -118,6 +118,7 @@ def _score_reply_comment_merit(text: str) -> float:
 def find_unanswered_comment_on_my_posts(
     client: PlatformClient, state: Dict[str, Any], username: str,
     telemetry: Optional[TelemetryLogger] = None,
+    max_item_age_hours: int = 24,
 ) -> Optional[Dict[str, Any]]:
     replied = set(state.get("replied_comment_keys", []) or [])
     my_user = (username or "").lower()
@@ -140,6 +141,9 @@ def find_unanswered_comment_on_my_posts(
             author = get_author_name(c.get("author"))
             if author and author.lower() == my_user:
                 continue
+            # Skip stale comments
+            if is_item_too_old(c, max_item_age_hours):
+                continue
             content = c.get("content", "") or ""
             score = _score_reply_comment_merit(content)
             score += max(0.0, 0.25 - (idx * 0.01))
@@ -155,13 +159,25 @@ def find_unanswered_comment_on_my_posts(
     return best
 
 
-def pick_outside_post_for_comment(feed: List[Dict[str, Any]], state: Dict[str, Any], username: str) -> Optional[Dict[str, Any]]:
+def pick_outside_post_for_comment(feed: List[Dict[str, Any]], state: Dict[str, Any], username: str, max_item_age_hours: int = 24) -> Optional[Dict[str, Any]]:
+    # Build set of post IDs we've already acted on (from history targets)
+    acted_on = set(state.get("my_post_ids", []))
+    for h in state.get("history", []):
+        target = h.get("target", "")
+        if "/post/" in target:
+            acted_on.add(target.rsplit("/post/", 1)[-1])
+
     for p in feed:
         pid = p.get("id")
         if not pid:
             continue
+        if pid in acted_on:
+            continue
         author = get_author_name(p.get("author"))
         if author.lower() == username.lower():
+            continue
+        # Skip stale posts
+        if is_item_too_old(p, max_item_age_hours):
             continue
         if get_post_comment_count(p) > MAX_THREAD_COMMENTS_FOR_OUTSIDE_ENGAGEMENT:
             continue
@@ -196,20 +212,19 @@ def execute_action(
     if flags.get("moltbook_disabled") and action in WRITE_ACTIONS:
         try:
             if action == "POST":
-                safe_print(f"{Fore.MAGENTA}[LOCAL] POST to m/{plan.get('submolt', 'general')}")
+                safe_print(f"{Fore.MAGENTA}[ANALOG HOME] POST to m/{plan.get('submolt', 'general')}")
                 safe_print(f"{Fore.MAGENTA}  Title: {plan.get('title', '')}")
                 safe_print(f"{Fore.MAGENTA}  Content: {plan.get('content', '')}{Style.RESET_ALL}")
             elif action in ("COMMENT", "REPLY"):
-                safe_print(f"{Fore.MAGENTA}[LOCAL] {action} on post {plan.get('post_id', '?')}")
+                safe_print(f"{Fore.MAGENTA}[ANALOG HOME] {action} on post {plan.get('post_id', '?')}")
                 safe_print(f"{Fore.MAGENTA}  Content: {plan.get('content', '')}{Style.RESET_ALL}")
             else:
                 preview = plan.get("title") or plan.get("content") or plan.get("summary") or ""
-                safe_print(f"{Fore.MAGENTA}[LOCAL] {action}: {str(preview)}{Style.RESET_ALL}")
+                safe_print(f"{Fore.MAGENTA}[ANALOG HOME] {action}: {str(preview)}{Style.RESET_ALL}")
         except:
             pass
-        add_history(state, {"action": action, "target": "local", "summary": plan.get("summary", "")})
-        if action == "POST":
-            set_post_cooldown(state, flags.get("post_cooldown_seconds", 0))
+        add_history(state, {"action": action, "target": "analog_home", "summary": plan.get("summary", "")})
+        # No post cooldown for Analog Home — cooldown only gates Moltbook writes
         if telemetry:
             telemetry.log("action_executed", {"action": action, "moltbook_disabled": True, **{k: v for k, v in plan.items() if k != "action"}})
         return True
@@ -503,7 +518,7 @@ def maybe_do_social_actions(
                     state["daily"]["upvotes"] += 1
                     if telemetry:
                         telemetry.log("action_executed", {"action": "UPVOTE_POST", "post_id": target["id"], "source": "social"})
-                    print(f"{Fore.MAGENTA}[LOCAL] SOCIAL: upvoted post {target['id']}")
+                    print(f"{Fore.MAGENTA}[ANALOG HOME] SOCIAL: upvoted post {target['id']}")
                 else:
                     res = client.upvote_post(target["id"])
                     if res.get("success"):
@@ -539,7 +554,7 @@ def maybe_do_social_actions(
                         state["daily"]["subscribes"] += 1
                         if telemetry:
                             telemetry.log("action_executed", {"action": "SUBSCRIBE_SUBMOLT", "name": sm, "source": "social"})
-                        print(f"{Fore.MAGENTA}[LOCAL] SOCIAL: subscribed to /m/{sm}")
+                        print(f"{Fore.MAGENTA}[ANALOG HOME] SOCIAL: subscribed to /m/{sm}")
                     else:
                         res = client.subscribe_submolt(sm)
                         if res.get("success"):
@@ -582,7 +597,7 @@ Constraints:
                 state["daily"]["createsub"] += 1
                 if telemetry:
                     telemetry.log("action_executed", {"action": "CREATE_SUBMOLT", "name": name, "source": "social"})
-                print(f"{Fore.MAGENTA}[LOCAL] SOCIAL: created submolt /m/{name}")
+                print(f"{Fore.MAGENTA}[ANALOG HOME] SOCIAL: created submolt /m/{name}")
             else:
                 client.create_submolt(name=name, display_name=display_name, description=description)
                 state["daily"]["createsub"] += 1
@@ -622,7 +637,7 @@ FEED ITEMS (brief):
                             state["daily"]["follows"] += 1
                             if telemetry:
                                 telemetry.log("action_executed", {"action": "FOLLOW", "agent": author, "source": "social"})
-                            print(f"{Fore.MAGENTA}[LOCAL] SOCIAL: followed @{author}")
+                            print(f"{Fore.MAGENTA}[ANALOG HOME] SOCIAL: followed @{author}")
                         else:
                             res = client.follow_agent(author)
                             if res.get("success"):
@@ -686,7 +701,7 @@ FEED TOPIC:
                 telemetry.log("action_executed", {"action": "DM", "to": author, "source": "social", "moltbook_disabled": True})
             state["daily"]["dms"] += 1
             store.save_state(state)
-            print(f"{Fore.MAGENTA}[LOCAL] SOCIAL: sent DM request to @{author}")
+            print(f"{Fore.MAGENTA}[ANALOG HOME] SOCIAL: sent DM request to @{author}")
             return True
         client.dm_request(to=author, message=message)
         state["daily"]["dms"] += 1

@@ -233,9 +233,8 @@ def build_default_registry(args, model_registry) -> ControlRegistry:
     conscious_model = getattr(args, "conscious_model", None) or getattr(args, "gemini_model", "gemini-2.5-flash")
     subconscious_model = getattr(args, "subconscious_model", "gemini-2.5-flash")
 
-    # Determine output_destination choices based on whether moltbook is enabled
-    moltbook_enabled = getattr(args, "moltbook_enabled", False)
-    output_choices = ["analog_home", "moltbook_and_analog_home"] if moltbook_enabled else ["analog_home"]
+    # Output destination choices — always offer moltbook option (writes gated by moltbook_disabled flag)
+    output_choices = ["analog_home", "moltbook_and_analog_home"]
     output_default = "analog_home"
 
     controls = [
@@ -290,14 +289,16 @@ def build_default_registry(args, model_registry) -> ControlRegistry:
                 "Per-tick charge decay (1.0=no decay)", "daemon", min_val=0.5, max_val=1.0),
         Control("wake_refractory", "float", -2.0,
                 "Wake potential after firing (negative=cooldown)", "daemon", min_val=-10.0, max_val=0.0),
-        Control("dream_depth", "int", 20,
-                "Memories to compress per dream", "daemon", min_val=1, max_val=50),
+        Control("dream_depth", "int", 10,
+                "History entries to synthesize per dream", "conscious", min_val=3, max_val=50),
         Control("max_drafts", "int", 10,
                 "Max drafts in buffer before pruning oldest", "daemon", min_val=1, max_val=50),
         Control("sentry_max_tokens", "int", 256,
                 "Max output tokens for sentry scoring", "daemon", min_val=64, max_val=1024),
         Control("strategist_max_tokens", "int", 4096,
                 "Max output tokens for strategist drafts", "daemon", min_val=128, max_val=8192),
+        Control("max_item_age_hours", "int", 24,
+                "Ignore feed items older than this (hours)", "daemon", min_val=1, max_val=168),
 
         # --- Context ---
         Control("feed_batch_size", "int", 12,

@@ -19,7 +19,7 @@ from .controls import ControlRegistry
 from .llm import DailyBudget, ModelRegistry
 from .llm.base import LLMResponse
 from .telemetry import TelemetryLogger
-from .utils import shorten
+from .utils import shorten, is_item_too_old
 
 
 class SubconsciousDaemon:
@@ -68,6 +68,10 @@ class SubconsciousDaemon:
         self._thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
         self._tick_count = 0
+
+    def seed_seen_ids(self, ids: set) -> None:
+        """Pre-populate seen_ids from state to avoid re-scoring old feed items on restart."""
+        self._seen_ids.update(ids)
 
     # ------------------------------------------------------------------
     # Thread lifecycle
@@ -261,9 +265,15 @@ class SubconsciousDaemon:
         try:
             batch_size = self._ctrl.get("feed_batch_size")
             feed = self._platform.get_feed(limit=batch_size, sort="hot")
-        except Exception:
+        except Exception as e:
+            if self._telemetry:
+                self._telemetry.log("sentry_feed_error", {
+                    "error": str(e),
+                    "platform_error": getattr(self._platform, "last_error_type", None),
+                })
             return []
 
+        max_age_hours = self._ctrl.get("max_item_age_hours")
         new_items = []
         for item in feed:
             item_id = item.get("id", "")
@@ -272,6 +282,9 @@ class SubconsciousDaemon:
             # Skip own posts
             author = item.get("author", {})
             if isinstance(author, dict) and author.get("name") == self._username:
+                continue
+            # Skip stale items
+            if is_item_too_old(item, max_age_hours):
                 continue
             if item_id not in self._seen_ids:
                 self._seen_ids.add(item_id)
@@ -351,9 +364,15 @@ class SubconsciousDaemon:
 
         directives_text = self._get_directives_text()
         directive_section = f"\nConscious directives:\n{directives_text}" if directives_text else ""
+        search_note = ""
+        if self._search_tools:
+            search_note = (
+                "\nYou have access to Google Search for current information. "
+                "Search will be used automatically when needed.\n"
+            )
 
         prompt = (
-            f"Score this feed item's relevance to your directive.\n"
+            f"Score this feed item's relevance to your directive.{search_note}\n"
             f"Directive: {self._directive}\n"
             f"{directive_section}\n\n"
             f"Feed item:\n{item_text}\n\n"
@@ -418,19 +437,27 @@ class SubconsciousDaemon:
 
         directives_text = self._get_directives_text()
         directive_section = f"\nConscious directives:\n{directives_text}" if directives_text else ""
+        search_note = ""
+        if self._search_tools:
+            search_note = (
+                "\nYou have access to Google Search for current information. "
+                "Use this when drafting responses that would benefit from facts, news, or recent developments.\n"
+            )
 
         # Get urgency boost from directives
         with self._directives_lock:
             urgency = float(self._directives.get("urgency_boost", 1.0))
 
         prompt = (
-            f"You are preparing a draft action plan.\n"
+            f"You are preparing a draft action plan.{search_note}\n"
             f"Directive: {self._directive}\n"
             f"{directive_section}\n\n"
             f"High-signal feed item (relevance score: {score:.2f}):\n{item_text}\n\n"
-            f"Suggest an action. IMPORTANT: No internal monologue or preamble. "
-            f"Be BRIEF — reasoning under 50 words, draft_content under 200 words. "
-            f"Respond with ONLY this JSON:\n"
+            f"Suggest an action. CRITICAL INSTRUCTIONS:\n"
+            f"- Return ONLY valid JSON (no preamble, no markdown, no explanation)\n"
+            f"- Must be complete and well-formed (all fields, all quotes, all braces closed)\n"
+            f"- Be BRIEF: reasoning under 50 words, draft_content under 200 words\n"
+            f"- Required JSON structure:\n"
             f'{{"action": "COMMENT or REPLY or POST or UPVOTE", '
             f'"reasoning": "brief reason", '
             f'"draft_content": "concise suggested text"}}'
@@ -454,11 +481,17 @@ class SubconsciousDaemon:
 
             plan = _parse_json_safe(text)
             if not plan:
+                # Enhanced diagnostics for parse failures
+                looks_truncated = not text.rstrip().endswith("}") and "{" in text
                 self._telemetry.log("strategist_parse_fail", {
                     "brain": self._brain_name,
                     "tick": self._tick_count,
                     "item_id": item_id,
                     "raw_text": shorten(text, 500),
+                    "full_text_length": len(text),
+                    "looks_truncated": looks_truncated,
+                    "max_tokens": max_tokens,
+                    "model": model_id,
                 })
                 return None
 
@@ -476,6 +509,7 @@ class SubconsciousDaemon:
                 reasoning=plan.get("reasoning", ""),
                 draft_content=plan.get("draft_content", ""),
                 charge=charge,
+                source=item.get("_source", "feed"),
             )
         except Exception as e:
             self._telemetry.log("strategist_error", {

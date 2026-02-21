@@ -145,10 +145,16 @@ def _format_seeds(seeds: Optional[list]) -> str:
         return ""
     lines = "\n".join(f"- {s}" for s in seeds)
     return (
-        "\nSEEDS (input from Analog Home visitors):\n"
+        "\nSEEDS (from HUMAN visitors at Analog Home — your observatory site):\n"
         f"{lines}\n"
-        "Consider these seeds as creative input from your audience. "
-        "They may inspire topics, themes, or directions for your next action.\n"
+        "These seeds are planted by real human visitors to your Analog Home site. "
+        "They deserve thoughtful consideration and are higher priority than feed noise. "
+        "You can respond to seeds in several ways:\n"
+        "- POST on Analog Home (always available, no cooldown) — ideal for direct seed responses\n"
+        "- POST on Moltbook (if enabled) — when a seed inspires broader discussion\n"
+        "- Weave seed themes into your next COMMENT or REPLY\n"
+        "- Let a seed redirect your daemon's focus_topics via daemon_directives\n"
+        "Seeds are ephemeral — once consumed, they are gone. Act on them or lose them.\n"
     )
 
 
@@ -200,19 +206,33 @@ def _format_set_trajectory_option(trajectory_votes: Optional[Dict[str, Any]], al
     )
 
 
-def _format_draft_section(draft_context: str) -> str:
+def _format_draft_section(draft_context: str, daemon_active: bool = False) -> str:
     """Format the subconscious buffer section for the planner prompt."""
-    if not draft_context:
+    parts = []
+    if draft_context:
+        parts.append(
+            "\n--- SUBCONSCIOUS BUFFER ---\n"
+            f"{draft_context}\n\n"
+            "Consider the subconscious insights above when choosing your action.\n"
+            "You may address multiple insights in one action, or ignore low-quality ones.\n"
+        )
+    if daemon_active:
+        parts.append(
+            "\n--- DAEMON DIRECTIVES (REQUIRED) ---\n"
+            'You MUST include "daemon_directives": {...} in EVERY response to guide your subconscious.\n'
+            "Your subconscious daemon continuously scans feeds and scores items based on your directives.\n"
+            "Update directives each cycle to keep your subconscious aligned with your current focus.\n"
+            "Keys: focus_topics (list of 2-4 topics), ignore_authors (list), "
+            "urgency_boost (float, default 1.0), note (string — brief instruction to daemon).\n"
+        )
+    return "".join(parts)
+
+
+def _format_platform_status(platform_status: str) -> str:
+    """Format the platform write status for the planner prompt."""
+    if not platform_status:
         return ""
-    return (
-        "\n--- SUBCONSCIOUS BUFFER ---\n"
-        f"{draft_context}\n\n"
-        "Consider the subconscious insights above when choosing your action.\n"
-        "You may address multiple insights in one action, or ignore low-quality ones.\n"
-        'Include "daemon_directives": {...} to guide what the daemon focuses on next.\n'
-        "Possible directive keys: focus_topics (list), ignore_authors (list), "
-        "urgency_boost (float), note (string).\n"
-    )
+    return f"- Platform status: {platform_status}\n"
 
 
 def _format_memory_pressure(memory_pressure: str) -> str:
@@ -222,7 +242,7 @@ def _format_memory_pressure(memory_pressure: str) -> str:
     return (
         "\n--- MEMORY PRESSURE ---\n"
         f"{memory_pressure}\n"
-        "Use DREAM action to compress old history into synthesized memory.\n"
+        "Use DREAM action to synthesize old history into memory narratives.\n"
     )
 
 
@@ -280,6 +300,8 @@ def build_planner_prompt(
     budget_summary: str = "",
     draft_context: str = "",
     memory_pressure: str = "",
+    daemon_active: bool = False,
+    platform_status: str = "",
 ) -> str:
     read_only_note = ""
     if read_only:
@@ -293,9 +315,9 @@ def build_planner_prompt(
     if controls_block:
         meta_fields_base += ' and controls_update'
         meta_example_base += '"controls_update": {}, '
-    if draft_context:
+    if daemon_active:
         meta_fields_base += ' and daemon_directives'
-        meta_example_base += '"daemon_directives": {}, '
+        meta_example_base += '"daemon_directives": {"focus_topics": [], "note": ""}, '
     meta_fields_note = meta_fields_base + ' fields'
     meta_example = meta_example_base
 
@@ -326,14 +348,14 @@ DIRECTIVE:
 Decide ONE action to take now, consistent with rate limits and configuration.
 
 CONFIG/CONSTRAINTS:
-{read_only_note}- Post window open: {post_window_open} (wait {post_wait_minutes} minutes if closed)
+{read_only_note}- Moltbook post window: {'OPEN' if post_window_open else f'CLOSED (wait {post_wait_minutes}m)'} — cooldown only applies to Moltbook; Analog Home posts always allowed.
 - Posts are {'ALLOWED' if allow_posts else 'DISABLED'} by command line.
 - Outside-comments are {'ALLOWED' if allow_outside else 'DISABLED'} by command line.
 - Voting is {'ALLOWED' if allow_votes else 'DISABLED'} by command line.
 - Creating submolts is {'ALLOWED' if allow_create_submolt else 'DISABLED'} by command line.
 - Downvotes are {'ALLOWED' if allow_downvote else 'DISABLED'} by command line.
 - Output destination: {output_destination}
-{config_hint}{temp_note}
+{_format_platform_status(platform_status)}{config_hint}{temp_note}
 
 Personal memory (curated):
 {memory}
@@ -373,7 +395,7 @@ If updating, include in your JSON response:
 
 If not updating, include:
   "update_kernel": false
-{_format_set_trajectory_option(trajectory_votes, allow_default_temp=allow_default_temp)}{_format_controls_block(controls_block, budget_summary)}{_format_draft_section(draft_context)}{_format_memory_pressure(memory_pressure)}
+{_format_set_trajectory_option(trajectory_votes, allow_default_temp=allow_default_temp)}{_format_controls_block(controls_block, budget_summary)}{_format_draft_section(draft_context, daemon_active=daemon_active)}{_format_memory_pressure(memory_pressure)}
 ACTION POLICY (default preference):
 1) If posts are allowed AND post window open, prefer POST.
 2) Otherwise prefer REPLY to an unanswered comment on my posts (if available).
@@ -411,7 +433,7 @@ SUBSCRIBE_SUBMOLT:
 WAIT (skip this cycle):
 {{"action":"WAIT","summary":"why waiting"}}
 
-DREAM (compress old history into memory — meta-cognitive maintenance):
+DREAM (synthesize old history into memory — meta-cognitive maintenance):
 {{"action":"DREAM","summary":"why dreaming now"}}
 
 ALL responses must include {meta_fields_note}:

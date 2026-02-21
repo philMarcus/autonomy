@@ -6,7 +6,9 @@
       "Bash(grep:*)",
       "Bash(curl:*)",
       "Bash(powershell:*)",
-      "Bash(git status:*)"
+      "Bash(git status:*)",
+      "Bash(python3:*)",
+      "Bash(git add:*)"
     ]
   }
 }

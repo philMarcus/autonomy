@@ -36,7 +36,9 @@ from .utils import (
     history_context, memory_context, post_url, get_author_name, shorten,
     get_post_comment_count,
     update_kernel_file,
+    aggregate_feeds, format_feed_brief,
 )
+from .buffer import Draft, SAVED_PLAN_MAX_CYCLES
 from .llm import ModelRegistry, DailyBudget
 from .llm.gemini import GeminiBackend
 from .platforms.moltbook import MoltbookClient
@@ -62,15 +64,31 @@ def safe_print(text: str) -> None:
         print(text.encode(errors="replace").decode())
 
 
-def _format_draft_context(drafts: list, wake_potential: float, threshold: float) -> str:
-    """Format subconscious drafts for inclusion in the planner prompt."""
-    lines = [f"Your subconscious noticed {len(drafts)} item(s) of interest:"]
-    for i, d in enumerate(drafts, 1):
-        lines.append(f"\n{i}. [score: {d.signal_score:.2f}] {d.target_summary}")
-        lines.append(f"   Suggested: {d.suggested_action} — {d.reasoning}")
-        if d.draft_content:
-            lines.append(f"   Draft: {d.draft_content[:200]}")
-    lines.append(f"\nWake potential: {wake_potential:.2f} (threshold: {threshold:.1f})")
+def _format_draft_context(drafts: list, saved_plans: list,
+                          wake_potential: float, threshold: float) -> str:
+    """Format subconscious drafts + saved plans for inclusion in the planner prompt."""
+    lines = []
+    if drafts:
+        lines.append(f"Your subconscious noticed {len(drafts)} NEW item(s) of interest:")
+        for i, d in enumerate(drafts, 1):
+            source_tag = " [HUMAN SEED]" if d.source == "seed" else ""
+            lines.append(f"\n{i}. [score: {d.signal_score:.2f}]{source_tag} {d.target_summary}")
+            lines.append(f"   Suggested: {d.suggested_action} — {d.reasoning}")
+            if d.draft_content:
+                lines.append(f"   Draft: {d.draft_content[:200]}")
+        lines.append(f"\nWake potential: {wake_potential:.2f} (threshold: {threshold:.1f})")
+    if saved_plans:
+        lines.append(f"\nSAVED PLANS ({len(saved_plans)} from previous cycles — use or discard):")
+        for i, d in enumerate(saved_plans, 1):
+            source_tag = " [HUMAN SEED]" if d.source == "seed" else ""
+            age = f"saved {d.cycles_saved} cycle(s) ago"
+            lines.append(f"\n  S{i}. [score: {d.signal_score:.2f}]{source_tag} {d.target_summary} ({age})")
+            lines.append(f"      Suggested: {d.suggested_action} — {d.reasoning}")
+            if d.draft_content:
+                lines.append(f"      Draft: {d.draft_content[:200]}")
+    if drafts or saved_plans:
+        lines.append("\nYou may act on any of these, synthesize multiple into one action, or ignore them.")
+        lines.append("Plans you don't act on will be saved for future cycles (up to 5 cycles).")
     return "\n".join(lines)
 
 
@@ -92,7 +110,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     ap.add_argument("--no-kernel-disk-write", action="store_true", help="Kernel updates stay in-memory only (not written to disk).")
     ap.add_argument("--enable-moltbook", dest="moltbook_enabled",
                     action="store_true",
-                    help="Enable Moltbook API calls. Without this flag, output goes to local log + Analog Home only.")
+                    help="Enable Moltbook writes. Without this, posts/comments go to Analog Home only (feeds still readable).")
     ap.add_argument("--interval", type=int, default=5, help="Sleep interval minutes between cycles.")
     ap.add_argument("--post-interval", type=int, default=30, help="Minutes between posts (default 30).")
     ap.add_argument("--reset-post-window", action="store_true", help="Clear the post cooldown timer on startup (allows immediate posting).")
@@ -158,7 +176,7 @@ def main():
     if not gem_key:
         raise SystemExit(f"Missing {prefix}_GEMINI_API_KEY (or GEMINI_API_KEY)")
     if not mb_key and args.moltbook_enabled:
-        raise SystemExit(f"Missing {prefix}_MOLTBOOK_API_KEY (or MOLTBOOK_API_KEY)")
+        print(f"{Fore.YELLOW}[WARN] --enable-moltbook set but no {prefix}_MOLTBOOK_API_KEY found. Writes will go to Analog Home only.")
 
     # Telemetry
     run_id = uuid.uuid4().hex
@@ -240,17 +258,18 @@ def main():
     if cli_overrides:
         print(f"{Fore.YELLOW}    CLI overrides: {', '.join(cli_overrides)}")
 
-    # Platform client (None when Moltbook disabled)
+    # Platform client: always create for reads if API key exists
+    # --enable-moltbook gates WRITES only (via moltbook_disabled flag in actions.py)
     platform = None
     challenge_solver = None
-    if args.moltbook_enabled:
+    if mb_key:
         challenge_solver = MathVerificationSolver(llm_client=llm_client, telemetry=telemetry)
         platform = MoltbookClient(
             api_key=mb_key, telemetry=telemetry, brain_name=brain_name,
             read_only=args.read_only, challenge_solver=challenge_solver,
         )
 
-    output_destination = "local" if not args.moltbook_enabled else "moltbook"
+    output_destination = "analog_home" if not args.moltbook_enabled else "moltbook_and_analog_home"
 
     # --- Subconscious Daemon (Phase 5) ---
     from .buffer import DraftBuffer
@@ -274,7 +293,10 @@ def main():
     else:
         print(f"{Fore.CYAN}    mode: single-loop (--no-subconscious)")
     if not args.moltbook_enabled:
-        print(f"{Fore.MAGENTA}    [MOLTBOOK DISABLED] Output -> local log + Analog Home")
+        if platform is not None:
+            print(f"{Fore.MAGENTA}    [MOLTBOOK WRITES OFF] Reads: ON | Writes: Analog Home only")
+        else:
+            print(f"{Fore.MAGENTA}    [NO MOLTBOOK KEY] Output -> Analog Home only")
     else:
         print(f"{Fore.CYAN}    moltbook_key:*{key_fingerprint(mb_key)}")
     if args.post_interval != 30:
@@ -361,9 +383,9 @@ def main():
 
     post_cooldown_seconds = args.post_interval * 60
 
-    # Moltbook disabled if CLI says so, OR if saved controls say output_destination != moltbook
-    output_dest = ctrl.get("output_destination") if ctrl else "moltbook"
-    moltbook_disabled = (not args.moltbook_enabled) or (output_dest != "moltbook")
+    # Moltbook writes disabled if CLI says so, OR if output_destination doesn't include moltbook
+    output_dest = ctrl.get("output_destination") if ctrl else "analog_home"
+    moltbook_disabled = (not args.moltbook_enabled) or ("moltbook" not in output_dest)
 
     flags: Dict[str, Any] = {
         "allow_posts": allow_posts,
@@ -407,6 +429,19 @@ def main():
             store=store if analog_home_url else None,
             search_tools=daemon_search_tools,
         )
+        # Seed seen_ids from state so daemon doesn't re-score old feed items on restart
+        prior_ids = set(state.get("my_post_ids", []))
+        for h in state.get("history", []):
+            target = h.get("target", "")
+            if "/post/" in target:
+                prior_ids.add(target.rsplit("/post/", 1)[-1])
+        # Also extract post IDs from replied_comment_keys (format: "post_id:comment_id")
+        for key in state.get("replied_comment_keys", []):
+            if ":" in key:
+                prior_ids.add(key.split(":", 1)[0])
+        if prior_ids:
+            daemon.seed_seen_ids(prior_ids)
+            print(f"{Fore.CYAN}    daemon seeded with {len(prior_ids)} known post IDs")
         daemon.start()
         extras = []
         if daemon_search_tools:
@@ -417,6 +452,7 @@ def main():
         print(f"{Fore.CYAN}    subconscious daemon: ACTIVE | model: {ctrl.get('subconscious_model')}{extra_str}")
 
     iteration = 0
+    prev_feed_available = None  # Track feed state transitions
     while True:
         iteration += 1
 
@@ -468,34 +504,64 @@ def main():
             **({"analog_controls": analog_controls} if analog_controls else {}),
         })
 
-        # --- Moltbook context (skipped entirely when disabled) ---
-        feed = []
-        feed_brief = "No feed available (Moltbook disabled)."
+        # --- Feed context (reads decoupled from writes) ---
+        feed_sources = []
+        source_errors: Dict[str, str] = {}
         reply_candidate = None
         outside_candidate = None
 
-        if args.moltbook_enabled:
+        if platform is not None:
             did_add = refresh_my_posts_from_profile(platform, state, username)
             if did_add:
                 store.save_state(state)
 
-            feed = platform.get_feed(limit=FEED_LIMIT, sort=args.feed_sort)
+            try:
+                mb_feed = platform.get_feed(limit=FEED_LIMIT, sort=args.feed_sort)
+                feed_sources.append({"name": "moltbook", "items": mb_feed})
+            except Exception:
+                source_errors["moltbook"] = platform.last_error_type or "error"
 
-            feed_brief = "\n".join(
-                f"- @{get_author_name(p.get('author'))}: {shorten(p.get('content',''), FEED_ITEM_CHARS)} ({post_url(p.get('id',''))})"
-                for p in feed if p.get("id")
-            ) or "No feed available."
+        # Future: add more feed sources here
+        # if reddit_client:
+        #     feed_sources.append({"name": "reddit", "items": reddit_client.get_feed(...)})
 
-            telemetry.log("feed_context", {"text_length": len(feed_brief), "brief": feed_brief[:2000]})
+        feed = aggregate_feeds(feed_sources)
+        feed_available = len(feed) > 0
 
-            reply_candidate = find_unanswered_comment_on_my_posts(platform, state, username, telemetry)
-            outside_candidate = pick_outside_post_for_comment(feed, state, username)
+        # Detect feed state transitions
+        if prev_feed_available is not None and feed_available != prev_feed_available:
+            if feed_available:
+                safe_print(f"{Fore.GREEN}[FEED RESUMED] Feeds available again! ({len(feed)} items)")
+                telemetry.log("feed_resumed", {"cycle": iteration, "items": len(feed)})
+            else:
+                reasons = ", ".join(source_errors.values()) or "unknown"
+                safe_print(f"{Fore.RED}[FEED UNAVAILABLE] Feeds went offline ({reasons})")
+                telemetry.log("feed_unavailable", {"cycle": iteration, "reasons": source_errors})
+        prev_feed_available = feed_available
 
-        # Compute windows
-        post_ok, post_wait = can_post(state)
-        post_window_open = post_ok
-        window = "OPEN" if post_window_open else f"CLOSED ({post_wait}m)"
-        print(f"{Fore.WHITE}Post Window: {window}")
+        feed_brief = format_feed_brief(feed, source_errors=source_errors)
+        if not feed and not source_errors and platform is None:
+            feed_brief = "No feed available (no platform API key)."
+
+        telemetry.log("feed_context", {"text_length": len(feed_brief), "feed_items": len(feed),
+                                       "source_errors": source_errors, "brief": feed_brief[:2000]})
+
+        if platform is not None:
+            reply_candidate = find_unanswered_comment_on_my_posts(
+                platform, state, username, telemetry, ctrl.get("max_item_age_hours")
+            )
+            outside_candidate = pick_outside_post_for_comment(feed, state, username, ctrl.get("max_item_age_hours"))
+
+        # Compute windows — post cooldown only applies to Moltbook writes
+        if flags.get("moltbook_disabled"):
+            post_window_open = True
+            post_wait = 0
+            print(f"{Fore.WHITE}Post Window: OPEN (Analog Home — no cooldown)")
+        else:
+            post_ok, post_wait = can_post(state)
+            post_window_open = post_ok
+            window = "OPEN" if post_window_open else f"CLOSED ({post_wait}m)"
+            print(f"{Fore.WHITE}Post Window: {window}")
 
         # External data
         external_data = ""
@@ -526,13 +592,38 @@ def main():
                 f"Dream depth: {dream_depth} entries"
             )
 
-        # Drain subconscious buffer (if daemon active)
+        # Drain subconscious buffer (if daemon active) + load saved plans
         draft_context = ""
+        fresh_drafts = []
+        saved_plans = []
         if daemon:
-            drafts, wake_pot = draft_buffer.drain(refractory=ctrl.get("wake_refractory"))
-            if drafts:
-                draft_context = _format_draft_context(drafts, wake_pot, ctrl.get("wake_threshold"))
-                safe_print(f"{Fore.MAGENTA}[DAEMON] {len(drafts)} draft(s) from subconscious (wake_potential={wake_pot:.2f})")
+            fresh_drafts, wake_pot = draft_buffer.drain(refractory=ctrl.get("wake_refractory"))
+            if fresh_drafts:
+                safe_print(f"{Fore.MAGENTA}[DAEMON] {len(fresh_drafts)} draft(s) from subconscious (wake_potential={wake_pot:.2f})")
+            # Load saved plans from state (previous cycles' unused drafts)
+            saved_plans = [
+                Draft.from_dict(d) for d in state.get("saved_plans", [])
+                if isinstance(d, dict)
+            ]
+            if saved_plans:
+                safe_print(f"{Fore.MAGENTA}[SAVED] {len(saved_plans)} plan(s) from previous cycles")
+            if fresh_drafts or saved_plans:
+                draft_context = _format_draft_context(
+                    fresh_drafts, saved_plans, wake_pot, ctrl.get("wake_threshold"),
+                )
+
+        # Platform write status for planner awareness
+        if platform is None:
+            platform_status = "No platform API key — feeds and writes unavailable."
+        elif flags.get("write_disabled"):
+            platform_status = (
+                f"READS OK, WRITES BLOCKED ({flags['write_disabled_reason']}). "
+                "POST/COMMENT/REPLY will fail on Moltbook."
+            )
+        elif flags.get("moltbook_disabled"):
+            platform_status = "READS OK, MOLTBOOK WRITES OFF. Posts/comments archived to Analog Home only."
+        else:
+            platform_status = "Moltbook ONLINE (reads + writes active)."
 
         prompt = build_planner_prompt(
             directive=user_directive, knowledge=knowledge, memory=mem_txt,
@@ -554,8 +645,11 @@ def main():
             budget_summary=budget.spend_summary_text() if budget else "",
             draft_context=draft_context,
             memory_pressure=memory_pressure,
+            daemon_active=daemon is not None,
+            platform_status=platform_status,
         )
 
+        plan = None
         try:
             plan = plan_next_action(chat, prompt, telemetry=telemetry, brain_name=brain_name)
 
@@ -739,7 +833,7 @@ def main():
                 # Actuate output_destination change
                 if results.get("output_destination") == "ok":
                     dest = ctrl.get("output_destination")
-                    flags["moltbook_disabled"] = (dest != "moltbook")
+                    flags["moltbook_disabled"] = ("moltbook" not in dest)
                     safe_print(f"{Fore.CYAN}  [CTRL] output_destination -> {dest} "
                                f"(moltbook_disabled={flags['moltbook_disabled']})")
 
@@ -767,7 +861,20 @@ def main():
                 telemetry.log("daemon_directives", {
                     "cycle": iteration, "directives": daemon_directives,
                 })
-                safe_print(f"{Fore.CYAN}  [DAEMON] Directives updated: {list(daemon_directives.keys())}")
+                safe_print(f"{Fore.CYAN}[DAEMON DIRECTIVES]")
+                focus = daemon_directives.get("focus_topics", [])
+                if focus:
+                    safe_print(f"{Fore.GREEN}  Focus: {', '.join(str(t) for t in focus)}")
+                ignore = daemon_directives.get("ignore_authors", [])
+                if ignore:
+                    safe_print(f"{Fore.YELLOW}  Ignore: {', '.join(str(a) for a in ignore)}")
+                urgency = daemon_directives.get("urgency_boost", 1.0)
+                if urgency != 1.0:
+                    safe_print(f"{Fore.MAGENTA}  Urgency: {urgency:.1f}x")
+                note = daemon_directives.get("note", "")
+                if note:
+                    safe_print(f"{Fore.WHITE}  Note: {note}")
+                safe_print(f"{Fore.CYAN}---")
 
             # Fill missing IDs from candidates
             if (plan.get("action") or "").upper() == "REPLY" and reply_candidate:
@@ -789,11 +896,11 @@ def main():
                 else:
                     raise ValueError("POST suggested while post window closed; no comment targets available")
 
-            # --- DREAM action: compress history into memory ---
+            # --- DREAM action: synthesize history into memory ---
             if act == "DREAM":
                 from .utils import compress_memories
                 _dream_depth = ctrl.get("dream_depth")
-                safe_print(f"{Fore.MAGENTA}[DREAM] Compressing {_dream_depth} oldest history entries...")
+                safe_print(f"{Fore.MAGENTA}[DREAM] Synthesizing oldest history entries (depth={_dream_depth})...")
 
                 def _dream_chat_fn(p: str) -> str:
                     return call_text(chat, p, tag="dream_compress", telemetry=telemetry)
@@ -805,7 +912,7 @@ def main():
 
                 if dream_result["success"]:
                     narrative = dream_result.get("narrative", "")
-                    safe_print(f"{Fore.GREEN}[DREAM] Compressed {dream_result['entries_compressed']} entries "
+                    safe_print(f"{Fore.GREEN}[DREAM] Synthesized {dream_result['entries_synthesized']} entries "
                                f"into {dream_result['narrative_length']} char narrative")
                     safe_print(f"{Fore.CYAN}--- DREAM NARRATIVE ---")
                     safe_print(f"{Fore.WHITE}{narrative}")
@@ -817,8 +924,8 @@ def main():
                         "title": shorten(f"Dream \u2014 {plan.get('summary', 'Memory Consolidation')}", 200),
                         "body_markdown": narrative,
                         "monologue_public": (
-                            f"Compressed {dream_result['entries_compressed']} history entries "
-                            f"into synthesized memory."
+                            f"Synthesized {dream_result['entries_synthesized']} history entries "
+                            f"into memory narrative."
                         ),
                         "temperature": cycle_temperature,
                     })
@@ -942,7 +1049,7 @@ def main():
                         source_id = ""
                         source_parent_id = ""
                         source_url_str = ""
-                        src_platform = "local" if not args.moltbook_enabled else "moltbook"
+                        src_platform = "analog_home" if not args.moltbook_enabled else "moltbook"
                         if args.moltbook_enabled:
                             if act_upper == "POST" and state.get("my_post_ids"):
                                 source_id = state["my_post_ids"][-1]
@@ -985,6 +1092,34 @@ def main():
         except Exception as e:
             telemetry.log("error", {"cycle": iteration, "error": str(e)})
             safe_print(f"{Fore.RED}[ERROR] {e}")
+
+        # --- Save unused drafts/plans for future cycles ---
+        if daemon and (fresh_drafts or saved_plans):
+            # Determine which item_id was acted on (if any)
+            acted_id = ""
+            if plan:
+                acted_id = plan.get("post_id") or plan.get("_acted_item_id") or ""
+            # Merge: fresh drafts that weren't acted on + still-valid saved plans
+            next_saved = []
+            for d in fresh_drafts:
+                if d.item_id and d.item_id == acted_id:
+                    continue  # consumed
+                d.cycles_saved = 1
+                next_saved.append(d)
+            for d in saved_plans:
+                if d.item_id and d.item_id == acted_id:
+                    continue  # consumed
+                d.cycles_saved += 1
+                if d.cycles_saved <= SAVED_PLAN_MAX_CYCLES:
+                    next_saved.append(d)
+            # Keep max_drafts worth of saved plans (highest score first)
+            max_saved = ctrl.get("max_drafts")
+            next_saved.sort(key=lambda x: x.signal_score, reverse=True)
+            next_saved = next_saved[:max_saved]
+            state["saved_plans"] = [d.to_dict() for d in next_saved]
+            if next_saved:
+                safe_print(f"{Fore.MAGENTA}[SAVED] {len(next_saved)} plan(s) saved for next cycle")
+            store.save_state(state)
 
         # Persist controls state
         try:

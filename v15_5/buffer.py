@@ -23,10 +23,46 @@ class Draft:
     reasoning: str            # why daemon thinks this matters
     draft_content: str        # rough suggested text
     charge: float             # how much wake_potential this added
+    source: str = "feed"      # "feed" or "seed" — origin of the triggering item
+    cycles_saved: int = 0     # how many cycles this has been saved (0 = fresh)
+
+    def to_dict(self) -> dict:
+        """Serialize for JSON state persistence."""
+        return {
+            "timestamp": self.timestamp,
+            "item_id": self.item_id,
+            "signal_score": self.signal_score,
+            "suggested_action": self.suggested_action,
+            "target_summary": self.target_summary,
+            "reasoning": self.reasoning,
+            "draft_content": self.draft_content,
+            "charge": self.charge,
+            "source": self.source,
+            "cycles_saved": self.cycles_saved,
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "Draft":
+        """Deserialize from JSON state."""
+        return cls(
+            timestamp=d.get("timestamp", 0.0),
+            item_id=d.get("item_id", ""),
+            signal_score=d.get("signal_score", 0.0),
+            suggested_action=d.get("suggested_action", ""),
+            target_summary=d.get("target_summary", ""),
+            reasoning=d.get("reasoning", ""),
+            draft_content=d.get("draft_content", ""),
+            charge=d.get("charge", 0.0),
+            source=d.get("source", "feed"),
+            cycles_saved=d.get("cycles_saved", 0),
+        )
 
 
 # Maximum age (seconds) before a draft is pruned during decay.
 _DRAFT_MAX_AGE = 1800  # 30 minutes
+
+# Maximum cycles a saved plan can survive before being pruned.
+SAVED_PLAN_MAX_CYCLES = 5
 
 
 class DraftBuffer:

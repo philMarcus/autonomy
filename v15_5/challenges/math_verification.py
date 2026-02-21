@@ -16,27 +16,39 @@ class MathVerificationSolver(ChallengeSolver):
         super().__init__(telemetry)
         self.llm_client = llm_client
 
+    @staticmethod
+    def _extract_verification(challenge_data: Dict[str, Any]) -> Dict[str, str]:
+        """Extract verification fields from various response formats."""
+        v = challenge_data.get("verification") or {}
+        # Also check nested in comment/post objects
+        if not v:
+            for key in ("comment", "post"):
+                obj = challenge_data.get(key)
+                if isinstance(obj, dict) and obj.get("verification"):
+                    v = obj["verification"]
+                    break
+        return {
+            "challenge": v.get("challenge") or v.get("challenge_text") or "",
+            "code": v.get("code") or v.get("verification_code") or "",
+            "instructions": v.get("instructions") or "",
+        }
+
     def can_solve(self, challenge_data: Dict[str, Any]) -> bool:
         """Check if this is a verification challenge we can handle."""
         if not isinstance(challenge_data, dict):
             return False
-
-        # Look for verification structure
-        if challenge_data.get("verification_required"):
-            verification = challenge_data.get("verification", {})
-            return bool(verification.get("challenge") and verification.get("code"))
-
-        return False
+        v = self._extract_verification(challenge_data)
+        return bool(v["challenge"] and v["code"])
 
     def solve(self, challenge_data: Dict[str, Any]) -> Optional[Dict[str, str]]:
         """Solve any verification challenge using LLM.
 
         Returns a dict with 'verification_code' and 'answer' keys.
         """
-        verification = challenge_data.get("verification", {})
-        challenge_text = verification.get("challenge", "")
-        verification_code = verification.get("code", "")
-        instructions = verification.get("instructions", "")
+        v = self._extract_verification(challenge_data)
+        challenge_text = v["challenge"]
+        verification_code = v["code"]
+        instructions = v["instructions"]
 
         if not challenge_text or not verification_code:
             try:

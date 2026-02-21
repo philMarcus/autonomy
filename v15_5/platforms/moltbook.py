@@ -143,9 +143,29 @@ class MoltbookClient(PlatformClient):
                 except Exception:
                     pass  # Silent fail to avoid blocking challenge detection
 
-            # Check for verification challenges (verification_required flag)
-            if data.get("verification_required") and self.challenge_solver:
-                verification = data.get("verification", {})
+            # Check for verification challenges — can be top-level or nested in comment/post
+            verification = data.get("verification") or {}
+            if not verification:
+                # Check nested: comment.verification or post.verification
+                for obj_key in ("comment", "post"):
+                    obj = data.get(obj_key)
+                    if isinstance(obj, dict):
+                        v = obj.get("verification")
+                        if isinstance(v, dict) and v.get("verification_code"):
+                            verification = v
+                            break
+                        if obj.get("verificationStatus") == "pending" and v:
+                            verification = v
+                            break
+            has_challenge = bool(
+                data.get("verification_required")
+                or (verification and verification.get("verification_code"))
+            )
+            if has_challenge and self.challenge_solver:
+                if not verification.get("challenge") and verification.get("challenge_text"):
+                    verification["challenge"] = verification["challenge_text"]
+                if not verification.get("code") and verification.get("verification_code"):
+                    verification["code"] = verification["verification_code"]
                 if verification.get("challenge") and verification.get("code"):
                     try:
                         print(f"{Fore.YELLOW}[VERIFICATION] Math verification challenge detected{Style.RESET_ALL}")
@@ -253,7 +273,7 @@ class MoltbookClient(PlatformClient):
 
     # ---- Writing ----
     def create_post(self, submolt: str, title: str, content: Optional[str] = None, url: Optional[str] = None) -> Dict[str, Any]:
-        body: Dict[str, Any] = {"submolt": submolt, "title": title}
+        body: Dict[str, Any] = {"submolt_name": submolt, "title": title}
         if content:
             body["content"] = content
         if url:

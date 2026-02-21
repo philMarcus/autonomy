@@ -11,7 +11,7 @@ if TYPE_CHECKING:
 
 from .config import (
     KNOWLEDGE_MAX_CHARS, MEMORY_MAX_CHARS, HISTORY_KEEP, HISTORY_CONTEXT_N,
-    MOLTBOOK_WEB_BASE,
+    MOLTBOOK_WEB_BASE, FEED_ITEM_CHARS,
 )
 
 
@@ -158,6 +158,27 @@ def now_iso() -> str:
 
 def post_url(post_id: str) -> str:
     return f"{MOLTBOOK_WEB_BASE}/post/{post_id}"
+
+
+def is_item_too_old(item: Dict[str, Any], max_age_hours: int) -> bool:
+    """Check if a feed item is older than the threshold.
+
+    Args:
+        item: Feed item dict (must have 'created_at' timestamp)
+        max_age_hours: Maximum age in hours
+
+    Returns:
+        True if item is too old, False otherwise (or if no timestamp)
+    """
+    created_str = item.get("created_at", "")
+    if not created_str:
+        return False  # No timestamp — let it through
+    try:
+        created = datetime.datetime.fromisoformat(created_str.replace("Z", "+00:00"))
+        age_hours = (datetime.datetime.now(datetime.timezone.utc) - created).total_seconds() / 3600
+        return age_hours > max_age_hours
+    except (ValueError, TypeError):
+        return False  # Can't parse — let it through
 
 
 def safe_json_load(path: str, default: Any) -> Any:
@@ -393,32 +414,35 @@ def memory_context(state: Dict[str, Any]) -> str:
 def compress_memories(
     state: Dict[str, Any],
     chat_fn,
-    depth: int = 20,
+    depth: int = 10,
     telemetry: Optional['TelemetryLogger'] = None,
 ) -> Dict[str, Any]:
-    """Compress oldest `depth` history entries into a narrative prepended to memory.
+    """Synthesize oldest history entries into a narrative appended to memory.
+
+    Dreams are APPEND-ONLY: history entries are NOT consumed. The narrative
+    is prepended to memory, and memory is truncated at MEMORY_MAX_CHARS.
+    History is kept intact and capped by HISTORY_KEEP elsewhere.
 
     Args:
         state: Agent state dict (modified in-place).
         chat_fn: Callable that sends a prompt to the conscious LLM and returns text.
-        depth: Number of oldest history entries to compress.
+        depth: Number of oldest history entries to synthesize.
         telemetry: Optional logger.
 
     Returns:
-        Dict with keys: success, entries_compressed, narrative_length, error
+        Dict with keys: success, entries_synthesized, narrative_length, error
     """
     history = state.get("history", [])
-    if len(history) < depth:
-        depth = len(history)
-    if depth < 3:
-        return {"success": False, "entries_compressed": 0, "narrative_length": 0,
-                "error": "Too few history entries to compress"}
+    # Dream depth: capped at configured depth or available history
+    effective_depth = min(depth, len(history))
+    if effective_depth < 3:
+        return {"success": False, "entries_synthesized": 0, "narrative_length": 0,
+                "error": "Too few history entries to synthesize"}
 
-    to_compress = history[:depth]
-    remaining = history[depth:]
+    to_synthesize = history[:effective_depth]
 
     lines = []
-    for h in to_compress:
+    for h in to_synthesize:
         action = h.get("action", "?")
         target = h.get("target", "")
         summary = h.get("summary", "")
@@ -430,29 +454,30 @@ def compress_memories(
 
     prompt = (
         "You are performing memory consolidation (dreaming).\n"
-        "Compress the following history entries into a concise narrative paragraph.\n"
+        "Synthesize the following history entries into a concise narrative paragraph.\n"
         "Preserve key facts, relationships, recurring themes, and important outcomes.\n"
         "Discard routine/repetitive details. Write in first person past tense.\n"
         "Keep the narrative under 600 characters.\n\n"
-        f"History entries to compress ({len(to_compress)} entries):\n"
+        f"History entries to synthesize ({len(to_synthesize)} entries):\n"
         f"{entries_text}\n\n"
         f"Existing memory (for context, do not repeat):\n"
         f"{existing_memory[:1000] if existing_memory else '(empty)'}\n\n"
-        "Write ONLY the compressed narrative paragraph, nothing else."
+        "Write ONLY the synthesized narrative paragraph, nothing else."
     )
 
     try:
         narrative = chat_fn(prompt).strip()
+        # Prepend narrative to existing memory (append-only, never consume history)
         if existing_memory:
             new_memory = f"{narrative}\n---\n{existing_memory}"
         else:
             new_memory = narrative
         state["memory"] = new_memory[:MEMORY_MAX_CHARS]
-        state["history"] = remaining
+        # History is NOT modified — entries are kept intact
 
         result = {
             "success": True,
-            "entries_compressed": len(to_compress),
+            "entries_synthesized": len(to_synthesize),
             "narrative_length": len(narrative),
             "narrative": narrative,
             "error": None,
@@ -463,13 +488,55 @@ def compress_memories(
     except Exception as e:
         result = {
             "success": False,
-            "entries_compressed": 0,
+            "entries_synthesized": 0,
             "narrative_length": 0,
             "error": str(e),
         }
         if telemetry:
             telemetry.log("dream_compress_failed", result)
         return result
+
+
+# ============================================================
+# Feed aggregation (multi-source)
+# ============================================================
+def aggregate_feeds(sources: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Merge feed items from multiple sources into one list.
+
+    Each source: {"name": str, "items": List[dict]}
+    Returns combined items with "_feed_source" field injected.
+    """
+    combined = []
+    for src in sources:
+        name = src.get("name", "unknown")
+        for item in src.get("items", []):
+            item = dict(item)
+            item.setdefault("_feed_source", name)
+            combined.append(item)
+    return combined
+
+
+def format_feed_brief(
+    feed: List[Dict[str, Any]],
+    source_errors: Optional[Dict[str, str]] = None,
+    max_items: int = 25,
+) -> str:
+    """Format feed items into a brief string for the planner prompt."""
+    lines = []
+    for p in feed[:max_items]:
+        if not p.get("id"):
+            continue
+        source_tag = f" [{p['_feed_source']}]" if p.get("_feed_source") else ""
+        author = get_author_name(p.get("author"))
+        content = shorten(p.get("content", ""), FEED_ITEM_CHARS)
+        url = post_url(p.get("id", ""))
+        lines.append(f"- @{author}: {content} ({url}){source_tag}")
+
+    if source_errors:
+        for name, err in source_errors.items():
+            lines.append(f"- [{name}] Feed unavailable: {err}")
+
+    return "\n".join(lines) if lines else "No feed available."
 
 
 # ============================================================
