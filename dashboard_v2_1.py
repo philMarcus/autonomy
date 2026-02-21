@@ -1,5 +1,5 @@
 # dashboard_v2_1.py
-# Streamlit dashboard: Overview + Cycle Replay + Daemon Monitor + Input/Controls + Controls Manager
+# Streamlit dashboard: Overview + Cycle Replay + Daemon Monitor + Controls
 #
 # Run:
 #   streamlit run dashboard_v2_1.py
@@ -679,7 +679,7 @@ def render_controls_tab(brain_filter: str):
         st.caption(
             "Set values and toggle agent write-access. "
             "Locked controls are visible to the agent but read-only. "
-            "Changes take effect next cycle."
+            "Saved changes take effect next cycle (controls re-read from disk each cycle)."
         )
 
         # Load current controls.json

@@ -483,6 +483,14 @@ def main():
     while True:
         iteration += 1
 
+        # --- Re-read controls from disk (picks up dashboard edits) ---
+        if os.path.exists(controls_file):
+            try:
+                with open(controls_file, "r", encoding="utf-8") as cf:
+                    ctrl.load_from_dict(json.load(cf))
+            except Exception:
+                pass
+
         # --- Analog Home controls (only when API URL is configured) ---
         analog_controls = {}
         analog_seeds = []
