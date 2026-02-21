@@ -877,10 +877,21 @@ def main():
                 safe_print(f"{Fore.CYAN}---")
 
             # Fill missing IDs from candidates
-            if (plan.get("action") or "").upper() == "REPLY" and reply_candidate:
+            # WARNING: If planner chooses REPLY/COMMENT without post_id, we auto-fill from candidates.
+            # This can cause misdirection if planner thinks REPLY works for seeds (it doesn't — seeds have no post_id).
+            act_upper = (plan.get("action") or "").upper()
+            if act_upper == "REPLY" and reply_candidate:
+                if "post_id" not in plan:
+                    safe_print(f"{Fore.YELLOW}[AUTO-FILL] REPLY action missing post_id, using reply_candidate")
+                    if analog_seeds:
+                        safe_print(f"{Fore.RED}  WARNING: Seeds present — planner may think REPLY works for seeds (it doesn't!)")
                 plan.setdefault("post_id", reply_candidate.get("post_id"))
                 plan.setdefault("parent_comment_id", reply_candidate.get("comment_id"))
-            if (plan.get("action") or "").upper() == "COMMENT" and outside_candidate:
+            if act_upper == "COMMENT" and outside_candidate:
+                if "post_id" not in plan:
+                    safe_print(f"{Fore.YELLOW}[AUTO-FILL] COMMENT action missing post_id, using outside_candidate")
+                    if analog_seeds:
+                        safe_print(f"{Fore.RED}  WARNING: Seeds present — use POST to respond directly to seeds!")
                 plan.setdefault("post_id", outside_candidate.get("id"))
 
             # Hard guard: POST when window closed
