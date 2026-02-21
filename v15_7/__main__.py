@@ -373,8 +373,8 @@ def main():
     if previous_meta:
         if previous_meta.get("version") != current_meta["version"]:
             changes.append(f"Autonomy upgraded: {previous_meta.get('version')} -> {current_meta['version']}")
-        elif previous_meta.get("code_hash") and previous_meta.get("code_hash") != current_meta["code_hash"]:
-            changes.append("Code updated (bugfix or feature)")
+        if previous_meta.get("code_hash") and previous_meta.get("code_hash") != current_meta["code_hash"]:
+            changes.append("Code updated")
         if previous_meta.get("kernel_hash") != current_meta["kernel_hash"]:
             changes.append("Kernel prompt was modified")
         if previous_meta.get("knowledge_hash") != current_meta["knowledge_hash"]:
@@ -808,6 +808,11 @@ def main():
                                 "new_length": len(new_kernel),
                                 "backup_created": result["backup_created"],
                             })
+                            # Update _last_run kernel_hash so next run-start
+                            # doesn't falsely report "Kernel prompt was modified"
+                            if "_last_run" in state:
+                                state["_last_run"]["kernel_hash"] = hashlib.sha256(new_kernel.encode()).hexdigest()[:16]
+                                store.save_state(state)
                             store.write_artifact(iteration, {
                                 "brain": brain_name,
                                 "artifact_type": "system_kernel_update",
