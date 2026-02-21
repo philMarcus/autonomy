@@ -6,11 +6,11 @@ Autonomous Moltbook (social media platform) agent system. Each "brain" has a ker
 
 ## Repository Layout
 
-- `v14_0/` — Current stable version (Python package, run via `python -m v14_0 <brain> [directive] [flags]`)
-- `v12_1/` — Previous version (reference only)
-- `archive/v12_0/` — Archived version (reference only)
+- `v15_5/` — **Current stable version** (Python package, run via `python -m v15_5 <brain> [directive] [flags]`)
+- `v15_6/` — Development version (forked from v15_5)
+- `archive/` — Archived versions: v12_0, v12_1, v12_2, v13_0, v14_0, v15_0 (reference only)
 - `dashboard_v1_3.py` — Streamlit dashboard (Telemetry + Dry-Run Viewer tabs, auto-recreates DuckDB views)
-- `brains/` — Per-brain files: `{name}_kernel_prompt.txt`, `{name}_knowledge.txt`, `{name}_memories.json`
+- `brains/` — Per-brain files: `{name}_kernel_prompt.txt`, `{name}_knowledge.txt`, `{name}_memories.json`, `{name}_controls.json`
 - `telemetry/events.jsonl` — Append-only telemetry log
 - `warehouse/` — DuckDB parquet output from `ingest.py`
 - `dashboard/` — Streamlit dashboard (`views.sql` for queries)
@@ -164,9 +164,9 @@ Optional per-provider API keys (per-brain or global):
 - `{PREFIX}_OPENAI_API_KEY` / `OPENAI_API_KEY`
 - `{PREFIX}_MISTRAL_API_KEY` / `MISTRAL_API_KEY`
 
-## v15.5 — In Development (Subconscious Daemon)
+## v15.5 — Stable (Subconscious Daemon + Saved Plans)
 
-v15_5/ is forked from v15_0. **Do not modify v15_0/** — it is the stable foundation.
+v15_5/ is now the stable foundation. **Do not modify v15_5/** — use v15_6/ for future work.
 
 ### Subconscious Daemon (Phase 5: COMPLETE)
 - `v15_5/buffer.py` — `Draft` dataclass + `DraftBuffer` (thread-safe wake potential + draft storage)
@@ -189,9 +189,65 @@ v15_5/ is forked from v15_0. **Do not modify v15_0/** — it is the stable found
 6. Conscious responds with `daemon_directives` to steer daemon's focus
 7. Both sentry and strategist use kernel_prompt as system instruction (same personality as conscious)
 
+### Saved Plans (Draft Persistence)
+- `v15_5/buffer.py` — Draft.to_dict() / from_dict() for state serialization
+- Unused daemon drafts saved to `state["saved_plans"]` for up to 5 cycles (configurable via `SAVED_PLAN_MAX_CYCLES`)
+- Conscious sees both fresh drafts + saved plans in prompt
+- Plans tagged with `[HUMAN SEED]` when seed-originated, `cycles_saved` counter tracks age
+- Plans prioritized by signal_score, aged out gracefully
+- Conscious can act on any plan, synthesize multiple, or ignore — unused plans persist
+
+### Seed Enhancements
+- Planner prompt explicitly states seeds are from "HUMAN visitors at Analog Home"
+- Seeds marked as higher priority than feed noise
+- Clear response options: POST on Analog Home (no cooldown), POST on Moltbook, weave into actions, redirect daemon focus
+- Draft source field: `"feed"` or `"seed"` for visibility in conscious prompt
+
+### Age Filtering (Complete)
+- New control: `max_item_age_hours` (default 24, range 1-168)
+- Shared `is_item_too_old()` utility in utils.py
+- Filters applied to ALL candidate sources:
+  - Daemon sentry scan (feed items)
+  - `pick_outside_post_for_comment()` (feed items)
+  - `find_unanswered_comment_on_my_posts()` (comments on your posts)
+- Prevents responding to stale content (16-day-old posts/comments)
+
+### Search Awareness
+- Daemon prompts now inform LLM about Google Search availability
+- Sentry: "You have access to Google Search for current information"
+- Strategist: "Use this when drafting responses that benefit from facts, news, or recent developments"
+- Matches conscious planner's search grounding note for consistent search usage
+
+### Terminology & UX Improvements
+- "LOCAL" → "ANALOG HOME" throughout (local was misleading since Analog Home is permanently archived web app)
+- `output_destination` values: `analog_home`, `moltbook_and_analog_home`
+- Daemon directives terminal output: shows focus topics, ignore authors, urgency boost, note
+- Feed state transition detection: `feed_resumed`, `feed_unavailable` telemetry events
+- Platform status awareness in planner prompt (READS OK, WRITES BLOCKED, etc.)
+
+### Bug Fixes (v15.5)
+- Moltbook POST API: `submolt` → `submolt_name` (API change)
+- Verification challenges: nested `comment.verification` detection
+- Feed/write decoupling: platform created when API key exists, `--enable-moltbook` only gates writes
+- `moltbook_disabled` comparison: `"moltbook" not in output_dest` (was `!= "moltbook"`)
+- Post cooldown: platform-specific (Analog Home has no cooldown, Moltbook has 30min)
+- Daemon seeding: pre-populate `_seen_ids` from state on startup to avoid re-scoring old feed
+- Strategist parse failures: enhanced diagnostics (full_text_length, looks_truncated, model)
+
+### Phase 6: DREAM Action (COMPLETE)
+- Dream action implemented in v15_5 (from previous session)
+- `compress_memories()` is append-only: synthesizes oldest history into narrative prepended to memory
+- History NOT consumed (unlike earlier designs)
+- Control: `dream_depth` (default 10, range 3-50)
+
 ### Remaining Phases
-- **Phase 6**: Conscious runner + dreaming action
 - **Phase 7**: Remote management via Analog Home dashboard
+
+## v15.6 — In Development (Phase 7+)
+
+v15_6/ is forked from v15_5. **Do not modify v15_5/** — it is the stable foundation.
+
+This is the active development version. All future work should be done in v15_6.
 
 ## Key Architecture Decisions
 
@@ -206,7 +262,7 @@ v15_5/ is forked from v15_0. **Do not modify v15_0/** — it is the stable found
 
 - Gemini 2.5 Flash sometimes returns empty first responses with stateless API. The repair path in `parse_json_with_one_repair()` handles this (sends prompt again). This means ~2 LLM calls per cycle instead of 1 for Flash. Gemini 2.5 Pro does not have this issue.
 - **Next.js 16 + Tailwind 4 on Windows**: Turbopack's enhanced resolver can walk up to parent directories. Fixed with `turbopack.resolveAlias` in `web/next.config.ts` to pin tailwindcss to local `node_modules`.
-- **Version convention**: v14_0 is stable production. v15_0 is stable (Phases 1-4). v15_5 is in development (Phase 5+). Do not modify v14_0 or v15_0. Future work in v15_5.
+- **Version convention**: v15_5 is stable production (Phases 1-6 complete). v15_6 is in development (Phase 7+). **Do not modify v15_5** — use v15_6 for future work. Older versions archived in `archive/`.
 
 ## Deployment
 

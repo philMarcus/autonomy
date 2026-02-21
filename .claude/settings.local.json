@@ -8,7 +8,9 @@
       "Bash(powershell:*)",
       "Bash(git status:*)",
       "Bash(python3:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(ls:*)",
+      "Bash(git mv:*)"
     ]
   }
 }
