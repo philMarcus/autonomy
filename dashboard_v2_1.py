@@ -591,162 +591,198 @@ def render_cycle_replay_tab(brain_filter: str):
 
 
 # ============================================================
-# Tab 3: Input / Controls
+# Tab 3: Controls (merged text editors + controls manager)
 # ============================================================
-def render_input_controls_tab(brain_filter: str):
+def render_controls_tab(brain_filter: str):
     if brain_filter == "(all)":
         st.info("Select a specific brain in the sidebar.")
         return
 
-    st.subheader(f"Controls for {brain_filter}")
+    st.subheader(f"Controls — {brain_filter}")
 
     # File paths
     state_path = os.path.join(BRAINS_DIR, f"{brain_filter}_memories.json")
     kernel_path = os.path.join(BRAINS_DIR, f"{brain_filter}_kernel_prompt.txt")
     knowledge_path = os.path.join(BRAINS_DIR, f"{brain_filter}_knowledge.txt")
+    controls_path = os.path.join(BRAINS_DIR, f"{brain_filter}_controls.json")
 
-    # Also check alternate kernel path
     if not os.path.exists(kernel_path):
         alt = os.path.join(BRAINS_DIR, f"{brain_filter}_kernel.txt")
         if os.path.exists(alt):
             kernel_path = alt
 
-    # ---- A. Directive Editor ----
-    st.markdown("### Directive")
-    st.caption("The directive guides the agent's behavior. Changes take effect on the next cycle.")
+    col_left, col_right = st.columns(2)
 
-    current_state = {}
-    if os.path.exists(state_path):
-        try:
-            with open(state_path, encoding="utf-8") as f:
-                current_state = json.load(f)
-        except (json.JSONDecodeError, OSError):
-            st.warning(f"Could not read {state_path}")
+    # ================================================================
+    # LEFT COLUMN — Text editors
+    # ================================================================
+    with col_left:
+        st.markdown("### Directive")
+        st.caption("Guides the agent's behavior. Takes effect next cycle.")
 
-    current_directive = current_state.get("directive", "Participate on Moltbook.")
-    new_directive = st.text_area("Directive", value=current_directive, height=80, key="directive_editor")
+        current_state = {}
+        if os.path.exists(state_path):
+            try:
+                with open(state_path, encoding="utf-8") as f:
+                    current_state = json.load(f)
+            except (json.JSONDecodeError, OSError):
+                st.warning(f"Could not read {state_path}")
 
-    if st.button("Save directive", key="save_directive"):
-        current_state["directive"] = new_directive
-        with open(state_path, "w", encoding="utf-8") as f:
-            json.dump(current_state, f, indent=2, ensure_ascii=False)
-        st.success("Directive saved. Takes effect next cycle.")
+        current_directive = current_state.get("directive", "Participate on Moltbook.")
+        new_directive = st.text_area("Directive", value=current_directive, height=80, key="directive_editor")
 
-    st.divider()
+        if st.button("Save directive", key="save_directive"):
+            current_state["directive"] = new_directive
+            with open(state_path, "w", encoding="utf-8") as f:
+                json.dump(current_state, f, indent=2, ensure_ascii=False)
+            st.success("Directive saved.")
 
-    # ---- B. Kernel & Knowledge Editor ----
-    st.markdown("### Kernel Prompt")
-    st.caption("The core identity prompt. Changes take effect on next run restart.")
+        st.divider()
 
-    current_kernel = ""
-    if os.path.exists(kernel_path):
-        with open(kernel_path, encoding="utf-8") as f:
-            current_kernel = f.read()
+        st.markdown("### Kernel Prompt")
+        st.caption("Core identity prompt. Takes effect on restart.")
 
-    new_kernel = st.text_area("Kernel prompt", value=current_kernel, height=300, key="kernel_editor")
+        current_kernel = ""
+        if os.path.exists(kernel_path):
+            with open(kernel_path, encoding="utf-8") as f:
+                current_kernel = f.read()
 
-    if st.button("Save kernel", key="save_kernel"):
-        with open(kernel_path, "w", encoding="utf-8") as f:
-            f.write(new_kernel)
-        st.success(f"Kernel saved to {kernel_path}")
+        new_kernel = st.text_area("Kernel prompt", value=current_kernel, height=300, key="kernel_editor")
 
-    st.divider()
+        if st.button("Save kernel", key="save_kernel"):
+            with open(kernel_path, "w", encoding="utf-8") as f:
+                f.write(new_kernel)
+            st.success("Kernel saved.")
 
-    st.markdown("### Knowledge File")
-    st.caption("Reference knowledge injected into the planner context. Changes take effect on next run restart.")
+        st.divider()
 
-    current_knowledge = ""
-    if os.path.exists(knowledge_path):
-        with open(knowledge_path, encoding="utf-8") as f:
-            current_knowledge = f.read()
+        st.markdown("### Knowledge File")
+        st.caption("Reference knowledge for planner context. Takes effect on restart.")
 
-    new_knowledge = st.text_area("Knowledge", value=current_knowledge, height=200, key="knowledge_editor")
+        current_knowledge = ""
+        if os.path.exists(knowledge_path):
+            with open(knowledge_path, encoding="utf-8") as f:
+                current_knowledge = f.read()
 
-    if st.button("Save knowledge", key="save_knowledge"):
-        with open(knowledge_path, "w", encoding="utf-8") as f:
-            f.write(new_knowledge)
-        st.success(f"Knowledge saved to {knowledge_path}")
+        new_knowledge = st.text_area("Knowledge", value=current_knowledge, height=200, key="knowledge_editor")
 
-    st.divider()
+        if st.button("Save knowledge", key="save_knowledge"):
+            with open(knowledge_path, "w", encoding="utf-8") as f:
+                f.write(new_knowledge)
+            st.success("Knowledge saved.")
 
-    # ---- C. CLI Command Builder ----
-    st.markdown("### CLI Command Builder")
-    st.caption("Configure flags and copy the generated command.")
+    # ================================================================
+    # RIGHT COLUMN — Controls Manager
+    # ================================================================
+    with col_right:
+        st.markdown("### Controls Manager")
+        st.caption(
+            "Set values and toggle agent write-access. "
+            "Locked controls are visible to the agent but read-only. "
+            "Changes take effect next cycle."
+        )
 
-    col1, col2 = st.columns(2)
+        # Load current controls.json
+        current_ctrl: dict = {}
+        locked_set: set = set()
+        if os.path.exists(controls_path):
+            try:
+                with open(controls_path, encoding="utf-8") as f:
+                    current_ctrl = json.load(f)
+                locked_set = set(current_ctrl.get("_locked", []))
+            except (json.JSONDecodeError, OSError):
+                st.warning(f"Could not read {controls_path} — using defaults.")
 
-    with col1:
-        cli_brain = st.text_input("Brain name", value=brain_filter, key="cli_brain")
-        cli_model = st.selectbox("Model", [
-            "gemini-2.5-flash",
-            "gemini-2.5-pro",
-            "gemini-2.0-flash",
-            "gemini-2.0-pro",
-        ], key="cli_model")
-        cli_temp = st.slider("Temperature", 0.0, 2.0, 0.7, 0.05, key="cli_temp")
-        cli_interval = st.number_input("Interval (min)", min_value=1, max_value=120, value=5, key="cli_interval")
-        cli_post_interval = st.number_input("Post interval (min)", min_value=1, max_value=360, value=30, key="cli_post_interval")
-        cli_mode = st.selectbox("Mode", ["all", "comment_only", "no_post"], key="cli_mode")
-        cli_priority = st.selectbox("Priority", ["replies_first", "outside_first"], key="cli_priority")
-        cli_feed_sort = st.selectbox("Feed sort", ["hot", "new", "top", "rising"], key="cli_feed_sort")
+        # Group controls by category
+        cat_groups: dict = {}
+        for meta in CONTROLS_META:
+            cat = meta[4]
+            cat_groups.setdefault(cat, []).append(meta)
 
-    with col2:
-        cli_moltbook = st.checkbox("Enable Moltbook", value=False, key="cli_moltbook")
-        cli_search = st.checkbox("Enable search", value=False, key="cli_search")
-        cli_read_only = st.checkbox("Read-only", value=False, key="cli_read_only")
-        cli_kernel_update = st.checkbox("Allow kernel update", value=False, key="cli_kernel_update")
-        cli_no_disk_write = st.checkbox("No kernel disk write", value=False, key="cli_no_disk")
-        cli_votes = st.checkbox("Allow votes", value=False, key="cli_votes")
-        cli_downvote = st.checkbox("Allow downvote", value=False, key="cli_downvote")
-        cli_reset_post = st.checkbox("Reset post window", value=False, key="cli_reset_post")
-        cli_default_temp = st.checkbox("Enable default temp", value=False, key="cli_default_temp")
-        cli_espn = st.checkbox("Inject ESPN", value=False, key="cli_espn")
+        new_values: dict = {}
+        new_locked: set = set()
 
-    cli_directive = st.text_input("Directive override (optional)", value="", key="cli_directive")
+        for cat in CATEGORY_ORDER:
+            if cat not in cat_groups:
+                continue
+            label = CATEGORY_LABELS.get(cat, cat.title())
+            with st.expander(f"**{label}**", expanded=(cat in ("llm", "output", "social"))):
+                for meta in cat_groups[cat]:
+                    key, typ, default, desc, _cat, mn, mx, choices = meta
+                    current_val = current_ctrl.get(key, default)
 
-    # Build command
-    parts = ["python -m v15_7", cli_brain]
+                    # Build help text with CLI flag hint
+                    cli_flag = CLI_FLAGS.get(key)
+                    help_text = desc
+                    if cli_flag:
+                        help_text += f"  \nCLI override: `{cli_flag}`"
 
-    if cli_directive.strip():
-        parts.append(f'"{cli_directive.strip()}"')
+                    col_w, col_l = st.columns([5, 1])
+                    with col_w:
+                        if choices:
+                            safe_val = current_val if current_val in choices else choices[0]
+                            val = st.selectbox(
+                                key, choices, index=choices.index(safe_val),
+                                help=help_text, key=f"ctrl_{key}"
+                            )
+                        elif typ == "bool":
+                            val = st.checkbox(key, value=bool(current_val), help=help_text, key=f"ctrl_{key}")
+                        elif typ == "float":
+                            try:
+                                fval = float(current_val)
+                            except (TypeError, ValueError):
+                                fval = float(default)
+                            val = st.number_input(
+                                key, value=fval,
+                                min_value=float(mn) if mn is not None else None,
+                                max_value=float(mx) if mx is not None else None,
+                                step=0.01, format="%.3f", help=help_text, key=f"ctrl_{key}"
+                            )
+                        elif typ == "int":
+                            try:
+                                ival = int(current_val)
+                            except (TypeError, ValueError):
+                                ival = int(default)
+                            val = st.number_input(
+                                key, value=ival,
+                                min_value=int(mn) if mn is not None else None,
+                                max_value=int(mx) if mx is not None else None,
+                                step=1, help=help_text, key=f"ctrl_{key}"
+                            )
+                        else:
+                            val = st.text_input(key, value=str(current_val), help=help_text, key=f"ctrl_{key}")
+                        new_values[key] = val
 
-    if cli_model != "gemini-2.5-flash":
-        parts.append(f"--gemini-model {cli_model}")
-    if cli_temp != 0.7:
-        parts.append(f"--temperature {cli_temp}")
-    if cli_interval != 5:
-        parts.append(f"--interval {cli_interval}")
-    if cli_post_interval != 30:
-        parts.append(f"--post-interval {cli_post_interval}")
-    if cli_mode != "all":
-        parts.append(f"--mode {cli_mode}")
-    if cli_priority != "replies_first":
-        parts.append(f"--priority {cli_priority}")
-    if cli_feed_sort != "hot":
-        parts.append(f"--feed-sort {cli_feed_sort}")
-    if cli_moltbook:
-        parts.append("--enable-moltbook")
-    if cli_search:
-        parts.append("--enable-search")
-    if cli_read_only:
-        parts.append("--read-only")
-    if cli_kernel_update:
-        parts.append("--allow-kernel-update")
-    if cli_no_disk_write:
-        parts.append("--no-kernel-disk-write")
-    if cli_votes:
-        parts.append("--allow-votes")
-    if cli_downvote:
-        parts.append("--allow-downvote")
-    if cli_reset_post:
-        parts.append("--reset-post-window")
-    if cli_default_temp:
-        parts.append("--enable-default-temp")
-    if cli_espn:
-        parts.append("--inject-espn")
+                    with col_l:
+                        st.write("")  # vertical alignment
+                        agent_writable = st.checkbox(
+                            "Unlocked", value=(key not in locked_set),
+                            key=f"lock_{key}",
+                            help="Uncheck to lock — agent can see but not change."
+                        )
+                        if not agent_writable:
+                            new_locked.add(key)
 
-    cmd = " ".join(parts)
-    st.code(cmd, language="bash")
+        col_save, col_info = st.columns([2, 5])
+        with col_save:
+            if st.button("Save controls", type="primary", key="save_controls_btn"):
+                to_save = dict(new_values)
+                if new_locked:
+                    to_save["_locked"] = sorted(new_locked)
+                with open(controls_path, "w", encoding="utf-8") as f:
+                    json.dump(to_save, f, indent=2, ensure_ascii=False)
+                st.success("Controls saved.")
+                st.rerun()
+        with col_info:
+            if new_locked:
+                st.info(f"Locked: {', '.join(sorted(new_locked))}")
+
+        with st.expander("Raw controls.json", expanded=False):
+            if os.path.exists(controls_path):
+                with open(controls_path, encoding="utf-8") as f:
+                    st.code(f.read(), language="json")
+            else:
+                st.caption("File not yet created — will be written on first Save.")
 
 
 # ============================================================
@@ -972,6 +1008,20 @@ CONTROLS_META = [
     ("dream_depth",              "int",   10,     "History entries to synthesize per dream",        "conscious", 3,   50,    None),
 ]
 
+# CLI flags that override these controls at startup (shown as hints in the UI)
+CLI_FLAGS = {
+    "temperature":              "--temperature",
+    "conscious_model":          "--conscious-model / --gemini-model",
+    "subconscious_model":       "--subconscious-model",
+    "daily_budget_usd":         "--daily-budget",
+    "cycle_interval_minutes":   "--interval",
+    "post_interval_minutes":    "--post-interval",
+    "mode":                     "--mode",
+    "priority":                 "--priority",
+    "allow_downvote":           "--allow-downvote",
+    "sentry_interval_seconds":  "--sentry-interval",
+}
+
 CATEGORY_ORDER = ["llm", "cost", "timing", "output", "social", "daemon", "context", "conscious"]
 CATEGORY_LABELS = {
     "llm": "LLM",
@@ -985,121 +1035,6 @@ CATEGORY_LABELS = {
 }
 
 
-# ============================================================
-# Tab 5: Controls Manager
-# ============================================================
-def render_controls_manager_tab(brain_filter: str):
-    if brain_filter == "(all)":
-        st.info("Select a specific brain in the sidebar to manage its controls.")
-        return
-
-    controls_path = os.path.join(BRAINS_DIR, f"{brain_filter}_controls.json")
-
-    st.subheader(f"Controls Manager — {brain_filter}")
-    st.caption(
-        "Set values and toggle agent write-access per control. "
-        "Locked controls are shown to the agent as read-only (it can see but not change them). "
-        "**Save** writes to `{brain}_controls.json`; changes take effect next cycle."
-    )
-
-    # Load current state
-    current: dict = {}
-    locked_set: set = set()
-    if os.path.exists(controls_path):
-        try:
-            with open(controls_path, encoding="utf-8") as f:
-                current = json.load(f)
-            locked_set = set(current.get("_locked", []))
-        except (json.JSONDecodeError, OSError):
-            st.warning(f"Could not read {controls_path} — starting from defaults.")
-
-    # Group controls by category
-    categories: dict = {}
-    for meta in CONTROLS_META:
-        cat = meta[4]
-        categories.setdefault(cat, []).append(meta)
-
-    new_values: dict = {}
-    new_locked: set = set()
-
-    for cat in CATEGORY_ORDER:
-        if cat not in categories:
-            continue
-        label = CATEGORY_LABELS.get(cat, cat.title())
-        with st.expander(f"**{label}**", expanded=True):
-            for meta in categories[cat]:
-                key, typ, default, desc, _cat, mn, mx, choices = meta
-                current_val = current.get(key, default)
-
-                col_widget, col_lock = st.columns([5, 1])
-                with col_widget:
-                    if choices:
-                        safe_val = current_val if current_val in choices else choices[0]
-                        val = st.selectbox(
-                            key, choices, index=choices.index(safe_val),
-                            help=desc, key=f"ctrl_{key}"
-                        )
-                    elif typ == "bool":
-                        val = st.checkbox(key, value=bool(current_val), help=desc, key=f"ctrl_{key}")
-                    elif typ == "float":
-                        try:
-                            fval = float(current_val)
-                        except (TypeError, ValueError):
-                            fval = float(default)
-                        val = st.number_input(
-                            key, value=fval,
-                            min_value=float(mn) if mn is not None else None,
-                            max_value=float(mx) if mx is not None else None,
-                            step=0.01, format="%.3f", help=desc, key=f"ctrl_{key}"
-                        )
-                    elif typ == "int":
-                        try:
-                            ival = int(current_val)
-                        except (TypeError, ValueError):
-                            ival = int(default)
-                        val = st.number_input(
-                            key, value=ival,
-                            min_value=int(mn) if mn is not None else None,
-                            max_value=int(mx) if mx is not None else None,
-                            step=1, help=desc, key=f"ctrl_{key}"
-                        )
-                    else:
-                        val = st.text_input(key, value=str(current_val), help=desc, key=f"ctrl_{key}")
-                    new_values[key] = val
-
-                with col_lock:
-                    st.write("")  # vertical alignment nudge
-                    agent_writable = st.checkbox(
-                        "Agent editable", value=(key not in locked_set),
-                        key=f"lock_{key}",
-                        help="Uncheck to lock this control — the agent can see it but cannot change it."
-                    )
-                    if not agent_writable:
-                        new_locked.add(key)
-
-    st.divider()
-
-    col_save, col_info = st.columns([2, 5])
-    with col_save:
-        if st.button("Save controls", type="primary", key="save_controls_btn"):
-            to_save = dict(new_values)
-            if new_locked:
-                to_save["_locked"] = sorted(new_locked)
-            with open(controls_path, "w", encoding="utf-8") as f:
-                json.dump(to_save, f, indent=2, ensure_ascii=False)
-            st.success(f"Saved → `{controls_path}` (takes effect next cycle)")
-            st.rerun()
-
-    with col_info:
-        if new_locked:
-            st.info(f"Locked: {', '.join(sorted(new_locked))}")
-
-    with st.expander("Raw controls.json", expanded=False):
-        if os.path.exists(controls_path):
-            with open(controls_path, encoding="utf-8") as f:
-                st.code(f.read(), language="json")
-        else:
-            st.caption("File not yet created — will be written on first Save.")
 
 
 # ============================================================
@@ -1128,7 +1063,7 @@ def main():
     if st.session_state.get("last_ingest"):
         st.sidebar.caption(st.session_state["last_ingest"])
 
-    tab1, tab2, tab3, tab4, tab5 = st.tabs(["Overview", "Cycle Replay", "Daemon Monitor", "Input / Controls", "Controls Manager"])
+    tab1, tab2, tab3, tab4 = st.tabs(["Overview", "Cycle Replay", "Daemon Monitor", "Controls"])
 
     with tab1:
         render_overview_tab(brain_filter)
@@ -1140,10 +1075,7 @@ def main():
         render_daemon_tab(brain_filter)
 
     with tab4:
-        render_input_controls_tab(brain_filter)
-
-    with tab5:
-        render_controls_manager_tab(brain_filter)
+        render_controls_tab(brain_filter)
 
 
 if __name__ == "__main__":
