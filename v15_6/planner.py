@@ -230,7 +230,8 @@ def _format_draft_section(draft_context: str, daemon_active: bool = False) -> st
             "Your subconscious daemon continuously scans feeds and scores items based on your directives.\n"
             "Update directives each cycle to keep your subconscious aligned with your current focus.\n"
             "Keys: focus_topics (list of 2-4 topics), ignore_authors (list), "
-            "urgency_boost (float, default 1.0), note (string — brief instruction to daemon).\n"
+            "urgency_boost (float, default 1.0), note (string — accumulates; last 5 notes are shown to daemon).\n"
+            "Fields are merged not replaced — omitting focus_topics doesn't clear it.\n"
         )
     return "".join(parts)
 

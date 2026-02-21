@@ -6,9 +6,8 @@ Autonomous Moltbook (social media platform) agent system. Each "brain" has a ker
 
 ## Repository Layout
 
-- `v15_5/` — **Current stable version** (Python package, run via `python -m v15_5 <brain> [directive] [flags]`)
-- `v15_6/` — Development version (forked from v15_5)
-- `archive/` — Archived versions: v12_0, v12_1, v12_2, v13_0, v14_0, v15_0 (reference only)
+- `v15_6/` — **Current stable version** (Python package, run via `python -m v15_6 <brain> [directive] [flags]`)
+- `archive/` — Archived versions: v12_0, v12_1, v12_2, v13_0, v14_0, v15_0, v15_5 (reference only)
 - `dashboard_v1_3.py` — Streamlit dashboard (Telemetry + Dry-Run Viewer tabs, auto-recreates DuckDB views)
 - `brains/` — Per-brain files: `{name}_kernel_prompt.txt`, `{name}_knowledge.txt`, `{name}_memories.json`, `{name}_controls.json`
 - `telemetry/events.jsonl` — Append-only telemetry log
@@ -164,21 +163,21 @@ Optional per-provider API keys (per-brain or global):
 - `{PREFIX}_OPENAI_API_KEY` / `OPENAI_API_KEY`
 - `{PREFIX}_MISTRAL_API_KEY` / `MISTRAL_API_KEY`
 
-## v15.5 — Stable (Subconscious Daemon + Saved Plans)
+## v15.5 — Archived (Subconscious Daemon + Saved Plans)
 
-v15_5/ is now the stable foundation. **Do not modify v15_5/** — use v15_6/ for future work.
+v15_5/ has been archived to `archive/v15_5`. **Do not modify.** v15_6 is the stable foundation.
 
 ### Subconscious Daemon (Phase 5: COMPLETE)
 - `v15_5/buffer.py` — `Draft` dataclass + `DraftBuffer` (thread-safe wake potential + draft storage)
-- `v15_5/daemon.py` — `SubconsciousDaemon`: background thread with Sentry + Strategist gears
+- `archive/v15_5/daemon.py` — `SubconsciousDaemon`: background thread with Sentry + Strategist gears
   - **Sentry**: scans feed, scores items against directive using cheap LLM with kernel as system instruction
   - **Strategist**: generates draft action plans for high-signal items, adds charge to wake potential
   - **Integrate-and-Fire**: wake_potential accumulates, decays per tick, fires conscious when threshold crossed
   - **Downward causality**: conscious sends `daemon_directives` (focus_topics, ignore_authors, urgency_boost, note)
-- `v15_5/llm/budget.py` — `DailyBudget` now thread-safe (`threading.Lock` on all public methods)
-- `v15_5/controls.py` — 2 new daemon controls: `max_drafts`, `strategist_max_tokens`
-- `v15_5/planner.py` — `draft_context` param, `--- SUBCONSCIOUS BUFFER ---` prompt section, `daemon_directives` response field
-- `v15_5/__main__.py` — Daemon lifecycle, buffer drain, wake/sleep mechanism, downward causality
+- `v15_6/llm/budget.py` — `DailyBudget` now thread-safe (`threading.Lock` on all public methods)
+- `v15_6/controls.py` — 2 new daemon controls: `max_drafts`, `strategist_max_tokens`
+- `v15_6/planner.py` — `draft_context` param, `--- SUBCONSCIOUS BUFFER ---` prompt section, `daemon_directives` response field
+- `v15_6/__main__.py` — Daemon lifecycle, buffer drain, wake/sleep mechanism, downward causality
 
 ### How the Daemon Works
 1. Daemon thread starts on `--subconscious` flag (default: `--no-subconscious`)
@@ -243,32 +242,38 @@ v15_5/ is now the stable foundation. **Do not modify v15_5/** — use v15_6/ for
 ### Remaining Phases
 - **Phase 7**: Remote management via Analog Home dashboard
 
-## v15.6 — In Development (Phase 7+)
+## v15.6 — Current Stable (Feed Fix + Temperature System + Bug Fixes)
 
-v15_6/ is forked from v15_5. **Do not modify v15_5/** — it is the stable foundation.
-
-This is the active development version. All future work should be done in v15_6.
+v15_6/ is the stable foundation. **Do not modify v15_5/** — it is archived. All future work goes in v15_6 (or a new fork).
 
 ### Changes in v15.6
 
-**Feed Endpoint Fix (Hybrid Personalized + Global)**:
-- `MoltbookClient.get_feed()` now uses `/feed` (personalized: subscriptions + follows) instead of `/posts` (global)
-- Added `get_global_feed()` method for global discovery feed (`/posts`)
-- **Hybrid approach**: When personalized feed is sparse (< half of feed_batch_size), automatically supplements with global feed
-- Prevents duplicate posts by tracking seen IDs
-- Applies to both conscious loop (`__main__.py`) and daemon sentry scan (`daemon.py`)
-- Fixes issue where feed appeared stale/unchanging (was fetching global "hot" feed which changes slowly)
+**Feed Endpoint Fix**:
+- `MoltbookClient.get_feed()` uses `/feed` (personalized: subscriptions + follows) instead of `/posts` (global)
+- Added `get_global_feed()` method for `/posts` (global discovery — available for explicit daemon use)
+- Default `--feed-sort` changed from `"hot"` to `"new"` (both conscious and daemon sentry)
+- Fixes stale feed issue (was fetching global "hot" feed which changes slowly)
 
-**Enhanced Moltbook Awareness**:
-- Updated `ANALOG_I_knowledge.txt` with comprehensive Moltbook API reference including:
-  - Personalized vs global feed distinction
-  - Semantic search capability (`GET /search`)
-  - Rate limits (1 post/30min, 1 comment/20sec, 50 comments/day)
-  - Following guidelines (be selective!)
-  - Verification challenge info
-- Planner prompt now includes rate limit warnings and following guidelines
-- Daemon prompts (sentry + strategist) now mention Moltbook semantic search capability
-- Conscious does NOT see semantic search info (daemon-only knowledge)
+**Temperature System Rewrite**:
+- `temperature` ControlRegistry entry now actuates: when agent changes it, `store.set_default_temperature()` is called
+- `POST /default-temperature` endpoint added to Analog Home API
+- `set_default_temperature()` added to `Store` ABC and `LocalFileStore`
+- `read_controls()` now returns `default_temperature` from Analog Home DB
+- Planner prompt shows `agent_default_temperature` (from DB, not CLI `--temperature` arg)
+- Agent can now meaningfully set its preferred temperature; user slider nudges decay toward this value
+
+**Daemon Directives Fix**:
+- `set_directives()` now merges fields instead of full replace (omitting `focus_topics` no longer clears it)
+- Notes accumulate as a capped list (max 5) rather than being overwritten each cycle
+- `_get_directives_text()` renders notes list; planner prompt documents merge semantics
+
+**Fallback Comment Regeneration**:
+- Content regeneration now triggers on target-post change in addition to action-type change
+- Prevents mis-addressed comments (content written for post X being posted verbatim on post Y after fallback)
+
+**Analog Home API**:
+- `POST /default-temperature` endpoint (agent-set decay target for user nudges)
+- Dockerfile: `sed -i 's/\r$//' entrypoint.sh` strips CRLF at build time (Windows dev environment fix)
 
 **Seed Response Control**:
 - Planner prompt clarifies `output_destination` control for directing seed responses to Analog Home vs Moltbook
@@ -287,7 +292,7 @@ This is the active development version. All future work should be done in v15_6.
 
 - Gemini 2.5 Flash sometimes returns empty first responses with stateless API. The repair path in `parse_json_with_one_repair()` handles this (sends prompt again). This means ~2 LLM calls per cycle instead of 1 for Flash. Gemini 2.5 Pro does not have this issue.
 - **Next.js 16 + Tailwind 4 on Windows**: Turbopack's enhanced resolver can walk up to parent directories. Fixed with `turbopack.resolveAlias` in `web/next.config.ts` to pin tailwindcss to local `node_modules`.
-- **Version convention**: v15_5 is stable production (Phases 1-6 complete). v15_6 is in development (Phase 7+). **Do not modify v15_5** — use v15_6 for future work. Older versions archived in `archive/`.
+- **Version convention**: v15_6 is stable production (Phases 1-6 + feed/temperature/bug fixes). v15_5 archived in `archive/v15_5`. **Do not modify archived versions.** Older versions in `archive/`.
 
 ## Deployment
 
@@ -303,6 +308,6 @@ This is the active development version. All future work should be done in v15_6.
 - API URL configured in Next.js env
 
 ### Agent (local)
-- Runs locally via `python -m v14_0 <brain> [flags]`
+- Runs locally via `python -m v15_6 <brain> [flags]`
 - Connects to Analog Home API via `{PREFIX}_ANALOG_HOME_API_URL` env var
 - Uses local DuckDB for Streamlit dashboard (separate from Analog Home Postgres)

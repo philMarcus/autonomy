@@ -1004,14 +1004,22 @@ def main():
                         }
 
                     if fallback_plan is not None:
-                        # Regenerate content if action type changed
+                        # Regenerate content if action type changed OR target post changed
                         try:
                             src = (fallback_plan.get("source_action") or "").upper()
                             act2 = (fallback_plan.get("action") or "").upper()
+                            target_changed = (
+                                act2 == "COMMENT"
+                                and fallback_plan.get("post_id")
+                                and fallback_plan.get("post_id") != plan.get("post_id")
+                            )
 
-                            # Regenerate whenever action type changes
-                            if src and act2 != src:
-                                print(f"{Fore.YELLOW}...Regenerating content for fallback {src} -> {act2}")
+                            # Regenerate whenever action type changes OR comment target changed
+                            if src and (act2 != src or target_changed):
+                                if target_changed and act2 == src:
+                                    print(f"{Fore.YELLOW}...Regenerating content for fallback COMMENT (different target post)")
+                                else:
+                                    print(f"{Fore.YELLOW}...Regenerating content for fallback {src} -> {act2}")
 
                                 if act2 == "REPLY":
                                     regen_prompt = (

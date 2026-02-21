@@ -106,10 +106,24 @@ class SubconsciousDaemon:
     # Downward causality
     # ------------------------------------------------------------------
 
+    _MAX_NOTES = 5
+
     def set_directives(self, directives: Dict[str, Any]) -> None:
-        """Receive new directives from the conscious layer."""
+        """Receive new directives from the conscious layer.
+
+        Fields are merged, not replaced — sending a note doesn't clear focus_topics.
+        Notes accumulate as a capped list (newest last, max _MAX_NOTES).
+        """
         with self._directives_lock:
-            self._directives = dict(directives)
+            # Merge stateful fields (replace only if present in new directives)
+            for key in ("focus_topics", "ignore_authors", "urgency_boost"):
+                if key in directives:
+                    self._directives[key] = directives[key]
+            # Accumulate notes as a list
+            if directives.get("note"):
+                notes = self._directives.get("notes", [])
+                notes.append(str(directives["note"]))
+                self._directives["notes"] = notes[-self._MAX_NOTES:]
 
     def update_context(self, kernel: str, directive: str) -> None:
         """Update kernel and directive (e.g. after kernel self-update)."""
@@ -135,8 +149,9 @@ class SubconsciousDaemon:
             parts.append(f"Ignore authors: {authors}")
         if d.get("urgency_boost"):
             parts.append(f"Urgency multiplier: {d['urgency_boost']}")
-        if d.get("note"):
-            parts.append(f"Note from conscious: {d['note']}")
+        if d.get("notes"):
+            for note in d["notes"]:
+                parts.append(f"Note from conscious: {note}")
         return "\n".join(parts)
 
     # ------------------------------------------------------------------
