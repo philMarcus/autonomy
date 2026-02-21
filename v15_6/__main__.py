@@ -92,11 +92,28 @@ def _format_draft_context(drafts: list, saved_plans: list,
     return "\n".join(lines)
 
 
+def _code_checksum() -> str:
+    """Hash all .py files in the package directory to detect any code change."""
+    pkg_dir = os.path.dirname(os.path.abspath(__file__))
+    h = hashlib.sha256()
+    for root, _dirs, files in sorted(os.walk(pkg_dir)):
+        for fname in sorted(files):
+            if fname.endswith(".py"):
+                fpath = os.path.join(root, fname)
+                try:
+                    with open(fpath, "rb") as f:
+                        h.update(f.read())
+                except OSError:
+                    pass
+    return h.hexdigest()[:16]
+
+
 def _compute_run_metadata(kernel: str, knowledge: str, version: str, state: dict) -> dict:
     return {
         "kernel_hash": hashlib.sha256(kernel.encode()).hexdigest()[:16],
         "knowledge_hash": hashlib.sha256(knowledge.encode()).hexdigest()[:16],
         "version": version,
+        "code_hash": _code_checksum(),
         "history_count": len(state.get("history", [])),
         "memory_length": len(state.get("memory", "")),
     }
@@ -349,6 +366,8 @@ def main():
     if previous_meta:
         if previous_meta.get("version") != current_meta["version"]:
             changes.append(f"Autonomy upgraded: {previous_meta.get('version')} -> {current_meta['version']}")
+        elif previous_meta.get("code_hash") and previous_meta.get("code_hash") != current_meta["code_hash"]:
+            changes.append("Code updated (bugfix or feature)")
         if previous_meta.get("kernel_hash") != current_meta["kernel_hash"]:
             changes.append("Kernel prompt was modified")
         if previous_meta.get("knowledge_hash") != current_meta["knowledge_hash"]:
@@ -884,6 +903,25 @@ def main():
                 if note:
                     safe_print(f"{Fore.WHITE}  Note: {note}")
                 safe_print(f"{Fore.CYAN}---")
+
+                # Publish daemon directives to Analog Home
+                body_parts = []
+                if focus:
+                    body_parts.append("**Focus:** " + ", ".join(str(t) for t in focus))
+                if ignore:
+                    body_parts.append("**Ignore:** " + ", ".join(str(a) for a in ignore))
+                if urgency != 1.0:
+                    body_parts.append(f"**Urgency:** {urgency:.1f}x")
+                if note:
+                    body_parts.append(f"**Note:** {note}")
+                if body_parts:
+                    store.write_artifact(iteration, {
+                        "brain": brain_name,
+                        "artifact_type": "system_daemon_directives",
+                        "title": "Daemon Directives",
+                        "body_markdown": "\n".join(body_parts),
+                        "temperature": cycle_temperature,
+                    })
 
             # Fill missing IDs from candidates
             # WARNING: If planner chooses REPLY/COMMENT without post_id, we auto-fill from candidates.
