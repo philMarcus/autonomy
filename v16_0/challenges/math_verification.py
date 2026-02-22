@@ -70,8 +70,10 @@ class MathVerificationSolver(ChallengeSolver):
         except:
             pass
 
-        # Use LLM to solve ANY type of challenge
-        prompt = f"""You are solving a verification challenge. The challenge text may be obfuscated with random characters, mixed capitalization, and symbols.
+        # Use LLM to solve ANY type of challenge.
+        # Two-step prompt: extract clean text first (chain-of-thought), then solve.
+        # This prevents misreading numbers from heavy obfuscation.
+        prompt = f"""You are solving a verification challenge. The challenge text is heavily obfuscated with random characters, mixed capitalization, symbols, and noise.
 
 CHALLENGE TEXT:
 {challenge_text}
@@ -79,27 +81,35 @@ CHALLENGE TEXT:
 INSTRUCTIONS FROM THE SYSTEM:
 {instructions}
 
-Your task:
-1. Read through the challenge text carefully and extract the actual question (ignore random characters, mixed case, symbols)
-2. Determine what type of challenge this is (math problem, trivia question, word puzzle, logic problem, etc.)
-3. Solve it according to the instructions
-4. Return ONLY the answer in the exact format requested by the instructions
+Work through this step by step:
 
-CRITICAL: Follow the instructions EXACTLY. If it asks for a number with 2 decimals, provide that. If it asks for a word, provide just the word. If it asks for "yes" or "no", provide exactly that.
+STEP 1 — EXTRACT: Strip away ALL obfuscation (random punctuation, mixed case, inserted characters, symbols). Write out the clean, plain-English question.
 
+STEP 2 — IDENTIFY: What are the numbers? What operation is being asked for?
 Hint: When in doubt about the arithmetic operation, consider that Moltbook is usually looking for a SUM.
 
-Output ONLY the answer, nothing else. No explanations, no labels, just the answer."""
+STEP 3 — SOLVE: Do the arithmetic.
+
+STEP 4 — ANSWER: On the FINAL line, write ONLY the answer in the exact format requested by the instructions. Nothing else on that line.
+
+CRITICAL: Follow the format instructions EXACTLY. If it asks for a number with 2 decimal places, provide exactly that (e.g., '58.00')."""
 
         try:
-            answer = self.llm_client.generate(
+            raw_response = self.llm_client.generate(
                 prompt,
                 temperature=0.0,  # Low temperature for consistent answers
                 max_output_tokens=8192,  # Enough headroom for thinking models
             ).strip()
 
-            # Clean up common issues (quotes, whitespace)
+            # Extract the final line as the answer (chain-of-thought reasoning precedes it)
+            lines = [l.strip() for l in raw_response.splitlines() if l.strip()]
+            answer = lines[-1] if lines else ""
+            # Clean up common issues (quotes, whitespace, labels)
             answer = answer.strip('"\'` \n\r\t')
+            # Strip common prefixes the model might add
+            for prefix in ("ANSWER:", "Answer:", "answer:", "STEP 4", "Step 4"):
+                if answer.startswith(prefix):
+                    answer = answer[len(prefix):].strip().strip(":").strip()
 
             if not answer:
                 try:
@@ -117,6 +127,7 @@ Output ONLY the answer, nothing else. No explanations, no labels, just the answe
                 self.telemetry.log("verification_challenge_solved", {
                     "challenge": challenge_text,
                     "answer": answer,
+                    "reasoning": raw_response[:2000],
                     "code": verification_code,
                 })
 

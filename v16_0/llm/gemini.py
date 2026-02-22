@@ -129,6 +129,13 @@ class GeminiChatSession(ChatSession):
                 contents=contents,
                 config=types.GenerateContentConfig(**config_kwargs),
             )
+        except Exception as exc:
+            # Trigger exponential backoff on 429 / rate-limit errors
+            exc_str = str(exc)
+            if "429" in exc_str or "RESOURCE_EXHAUSTED" in exc_str:
+                wait = BUDGET.note_429()
+                # Re-raise so caller sees the error
+            raise
 
         # Capture grounding metadata if available
         self._last_grounding_metadata = None

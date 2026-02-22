@@ -73,7 +73,7 @@ def _format_draft_context(drafts: list, saved_plans: list,
     if drafts:
         lines.append(f"Your subconscious noticed {len(drafts)} NEW item(s) of interest:")
         for i, d in enumerate(drafts, 1):
-            source_tag = " [HUMAN SEED]" if d.source == "seed" else ""
+            source_tag = " [HUMAN SEED]" if d.source == "seed" else " [SEARCH]" if d.source == "search" else ""
             lines.append(f"\n{i}. [score: {d.signal_score:.2f}]{source_tag} {d.target_summary}")
             lines.append(f"   Suggested: {d.suggested_action} — {d.reasoning}")
             if d.draft_content:
@@ -82,7 +82,7 @@ def _format_draft_context(drafts: list, saved_plans: list,
     if saved_plans:
         lines.append(f"\nSAVED PLANS ({len(saved_plans)} from previous cycles — use or discard):")
         for i, d in enumerate(saved_plans, 1):
-            source_tag = " [HUMAN SEED]" if d.source == "seed" else ""
+            source_tag = " [HUMAN SEED]" if d.source == "seed" else " [SEARCH]" if d.source == "search" else ""
             age = f"saved {d.cycles_saved} cycle(s) ago"
             lines.append(f"\n  S{i}. [score: {d.signal_score:.2f}]{source_tag} {d.target_summary} ({age})")
             lines.append(f"      Suggested: {d.suggested_action} — {d.reasoning}")

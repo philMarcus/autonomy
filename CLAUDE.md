@@ -6,9 +6,9 @@ Autonomous Moltbook (social media platform) agent system. Each "brain" has a ker
 
 ## Repository Layout
 
-- `v15_6/` — **Current stable version** (Python package, run via `python -m v15_6 <brain> [directive] [flags]`)
-- `v15_7/` — Development version (forked from v15_6, Phase 7: Controls Manager)
-- `archive/` — Archived versions: v12_0, v12_1, v12_2, v13_0, v14_0, v15_0, v15_5 (reference only)
+- `v16_0/` — **Current stable version** (Python package, run via `python -m v16_0 <brain> [directive] [flags]`)
+- `v16_1/` — Development version (forked from v16_0, for future work)
+- `archive/` — Archived versions: v12_0, v12_1, v12_2, v13_0, v14_0, v15_0, v15_5, v15_6 (reference only)
 - `dashboard_v2_0.py` — Previous dashboard (4 tabs, reference only)
 - `dashboard_v2_1.py` — **Current dashboard** (Overview, Cycle Replay, Daemon Monitor, Input/Controls, Controls Manager tabs)
 - `brains/` — Per-brain files: `{name}_kernel_prompt.txt`, `{name}_knowledge.txt`, `{name}_memories.json`, `{name}_controls.json`
@@ -176,10 +176,10 @@ v15_5/ has been archived to `archive/v15_5`. **Do not modify.** v15_6 is the sta
   - **Strategist**: generates draft action plans for high-signal items, adds charge to wake potential
   - **Integrate-and-Fire**: wake_potential accumulates, decays per tick, fires conscious when threshold crossed
   - **Downward causality**: conscious sends `daemon_directives` (focus_topics, ignore_authors, urgency_boost, note)
-- `v15_6/llm/budget.py` — `DailyBudget` now thread-safe (`threading.Lock` on all public methods)
-- `v15_6/controls.py` — 2 new daemon controls: `max_drafts`, `strategist_max_tokens`
-- `v15_6/planner.py` — `draft_context` param, `--- SUBCONSCIOUS BUFFER ---` prompt section, `daemon_directives` response field
-- `v15_6/__main__.py` — Daemon lifecycle, buffer drain, wake/sleep mechanism, downward causality
+- `v16_0/llm/budget.py` — `DailyBudget` now thread-safe (`threading.Lock` on all public methods)
+- `v16_0/controls.py` — 2 new daemon controls: `max_drafts`, `strategist_max_tokens`
+- `v16_0/planner.py` — `draft_context` param, `--- SUBCONSCIOUS BUFFER ---` prompt section, `daemon_directives` response field
+- `v16_0/__main__.py` — Daemon lifecycle, buffer drain, wake/sleep mechanism, downward causality
 
 ### How the Daemon Works
 1. Daemon thread starts on `--subconscious` flag (default: `--no-subconscious`)
@@ -244,9 +244,9 @@ v15_5/ has been archived to `archive/v15_5`. **Do not modify.** v15_6 is the sta
 ### Remaining Phases
 - **Phase 7**: Remote management via Analog Home dashboard
 
-## v15.6 — Current Stable (Feed Fix + Temperature System + Bug Fixes)
+## v15.6 — Archived (Feed Fix + Temperature System + Bug Fixes)
 
-v15_6/ is the stable foundation. **Do not modify v15_5/** — it is archived. All future work goes in v15_6 (or a new fork).
+v15_6/ has been archived to `archive/v15_6`. **Do not modify.** v16_0 is the stable foundation.
 
 ### Changes in v15.6
 
@@ -281,13 +281,13 @@ v15_6/ is the stable foundation. **Do not modify v15_5/** — it is archived. Al
 - Planner prompt clarifies `output_destination` control for directing seed responses to Analog Home vs Moltbook
 - `output_destination` is actuated immediately (affects current cycle), unlike most controls (affect next cycle)
 
-## v15.7 — In Development (Phase 7: Controls Manager)
+## v16.0 — Current Stable (Controls Manager + Seeker Gear + Sentry Fixes)
 
-v15_7/ is forked from v15_6. **Do not modify v15_6 or archived versions.** All Phase 7 work goes in v15_7.
+v16_0/ is the stable foundation. **Do not modify archived versions.** All future work goes in v16_1.
 
 ### Phase 7: ControlRegistry Expansion + Controls Manager UI
 
-**New Controls (v15_7/controls.py)**:
+**New Controls (v16_0/controls.py)**:
 - `feed_item_chars` (int, 400, context) — max chars per feed item in prompt
 - `reply_candidate_chars` (int, 5000, context) — max chars for reply candidate text
 - `outside_candidate_chars` (int, 5000, context) — max chars for outside comment candidate
@@ -317,7 +317,25 @@ v15_7/ is forked from v15_6. **Do not modify v15_6 or archived versions.** All P
 - "Agent editable" checkbox per control (persisted in `_locked`)
 - Save button writes back to `{brain}_controls.json`
 - Raw JSON viewer expander
-- CLI command builder updated to reference `v15_7` instead of `v14_0`
+- CLI command builder updated to reference `v16_0` instead of `v14_0`
+
+### Sentry/Strategist Fixes
+- **Root cause**: `json_mode=True` + `search_tools` passed together to Gemini API is rejected (`400 INVALID_ARGUMENT`)
+- Sentry now uses `json_mode=True` with NO search tools (scores feed items)
+- Strategist now uses `json_mode=True` with NO search tools (generates drafts)
+- Search responsibility moved to dedicated Seeker gear
+
+### Seeker Gear (Gear 3)
+- Dedicated search gear that uses Google Search grounding (no json_mode)
+- Searches `focus_topics` from conscious directives on a configurable cadence (default 15min)
+- Results go directly to strategist for draft generation (bypass sentry scoring)
+- Drafts tagged with `source="search"`, displayed as `[SEARCH]` in conscious prompt
+- New controls: `seeker_interval_seconds`, `seeker_max_tokens`, `charge_weight_search`, `seeker_max_topics`
+- Telemetry: `seeker_sweep`, `seeker_result`, `seeker_error`, `seeker_budget_skip`
+
+### 429 Backoff Fix
+- `GeminiChatSession.send_message()` now calls `BUDGET.note_429()` on rate-limit errors before re-raising
+- Prevents unlimited API hammering when free-tier models hit rate limits
 
 ## Key Architecture Decisions
 
@@ -332,7 +350,7 @@ v15_7/ is forked from v15_6. **Do not modify v15_6 or archived versions.** All P
 
 - Gemini 2.5 Flash sometimes returns empty first responses with stateless API. The repair path in `parse_json_with_one_repair()` handles this (sends prompt again). This means ~2 LLM calls per cycle instead of 1 for Flash. Gemini 2.5 Pro does not have this issue.
 - **Next.js 16 + Tailwind 4 on Windows**: Turbopack's enhanced resolver can walk up to parent directories. Fixed with `turbopack.resolveAlias` in `web/next.config.ts` to pin tailwindcss to local `node_modules`.
-- **Version convention**: v15_6 is stable production. v15_7 is in development (Phase 7). **Do not modify v15_6 or archived versions.** All Phase 7 work goes in v15_7.
+- **Version convention**: v16_0 is stable production. v16_1 is for future development. **Do not modify v16_0 or archived versions.** All new work goes in v16_1.
 
 ## Deployment
 
@@ -348,6 +366,6 @@ v15_7/ is forked from v15_6. **Do not modify v15_6 or archived versions.** All P
 - API URL configured in Next.js env
 
 ### Agent (local)
-- Runs locally via `python -m v15_6 <brain> [flags]` (stable) or `python -m v15_7 <brain> [flags]` (dev)
+- Runs locally via `python -m v16_0 <brain> [flags]` (stable) or `python -m v16_1 <brain> [flags]` (dev)
 - Connects to Analog Home API via `{PREFIX}_ANALOG_HOME_API_URL` env var
 - Uses local DuckDB for Streamlit dashboard (separate from Analog Home Postgres)

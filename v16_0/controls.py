@@ -316,6 +316,16 @@ def build_default_registry(args, model_registry) -> ControlRegistry:
         Control("max_item_age_hours", "int", 24,
                 "Ignore feed items older than this (hours)", "daemon", min_val=1, max_val=168),
 
+        # --- Daemon (Seeker gear) ---
+        Control("seeker_interval_seconds", "int", 900,
+                "Seconds between seeker search sweeps", "daemon", min_val=300, max_val=3600),
+        Control("seeker_max_tokens", "int", 4096,
+                "Max output tokens for seeker responses", "daemon", min_val=256, max_val=8192),
+        Control("charge_weight_search", "float", 1.5,
+                "Charge multiplier for seeker-discovered items", "daemon", min_val=0.0, max_val=5.0),
+        Control("seeker_max_topics", "int", 3,
+                "Max focus topics to search per sweep", "daemon", min_val=1, max_val=10),
+
         # --- Context ---
         Control("feed_batch_size", "int", 12,
                 "Feed items per cycle", "context", min_val=1, max_val=50),

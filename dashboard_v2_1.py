@@ -794,6 +794,8 @@ _DAEMON_EVENT_TYPES = {
     "sentry_signal", "sentry_score_error",
     "strategist_draft", "strategist_error", "strategist_parse_fail",
     "strategist_budget_skip",
+    # Seeker gear
+    "seeker_sweep", "seeker_result", "seeker_error", "seeker_budget_skip",
 }
 
 
@@ -845,13 +847,18 @@ def render_daemon_tab(brain_filter: str):
     errors = df[df["event_type"] == "daemon_error"]
     starts = df[df["event_type"] == "daemon_start"]
 
-    c1, c2, c3, c4, c5, c6 = st.columns(6)
+    sweeps = df[df["event_type"] == "seeker_sweep"]
+    seeker_results = df[df["event_type"] == "seeker_result"]
+
+    c1, c2, c3, c4, c5, c6, c7, c8 = st.columns(8)
     c1.metric("Ticks", len(ticks))
     c2.metric("Scanned", int(ticks["items_scanned"].sum()) if "items_scanned" in ticks.columns and len(ticks) > 0 else 0)
     c3.metric("Signals", len(signals))
     c4.metric("Drafts", len(drafts))
     c5.metric("Wakes", len(wakes))
     c6.metric("Errors", len(errors))
+    c7.metric("Sweeps", len(sweeps))
+    c8.metric("Searches", len(seeker_results))
 
     # Model + interval caption
     if len(starts) > 0:
@@ -934,6 +941,40 @@ def render_daemon_tab(brain_filter: str):
         fail_display = fail_display.sort_values("ts", ascending=False)
         st.dataframe(fail_display, use_container_width=True, hide_index=True, height=200)
 
+    # --- Seeker Sweeps ---
+    st.divider()
+    st.caption("Seeker sweeps (search)")
+    if len(sweeps) > 0:
+        sweep_cols = ["ts", "topics_searched", "results_found", "drafts_created", "model"]
+        available = [c for c in sweep_cols if c in sweeps.columns]
+        sweep_display = sweeps[available].copy()
+        if "ts" in sweep_display.columns:
+            sweep_display["ts"] = sweep_display["ts"].dt.strftime("%H:%M:%S")
+        sweep_display = sweep_display.sort_values("ts", ascending=False)
+        st.dataframe(sweep_display, use_container_width=True, hide_index=True, height=200)
+
+        if len(seeker_results) > 0:
+            st.caption("Seeker results (per-topic)")
+            result_cols = ["ts", "topic", "summary_length", "search_query_count"]
+            available = [c for c in result_cols if c in seeker_results.columns]
+            result_display = seeker_results[available].copy()
+            if "ts" in result_display.columns:
+                result_display["ts"] = result_display["ts"].dt.strftime("%H:%M:%S")
+            result_display = result_display.sort_values("ts", ascending=False)
+            st.dataframe(result_display, use_container_width=True, hide_index=True, height=200)
+    else:
+        st.info("No seeker sweeps yet. Enable `--enable-search` and `--subconscious`.")
+
+    seeker_errors = df[df["event_type"].isin(["seeker_error", "seeker_budget_skip"])]
+    if len(seeker_errors) > 0:
+        st.caption(f"Seeker failures ({len(seeker_errors)})")
+        se_cols = ["ts", "event_type", "topic", "error", "error_type"]
+        available = [c for c in se_cols if c in seeker_errors.columns]
+        se_display = seeker_errors[available].copy()
+        if "ts" in se_display.columns:
+            se_display["ts"] = se_display["ts"].dt.strftime("%H:%M:%S")
+        st.dataframe(se_display, use_container_width=True, hide_index=True, height=150)
+
     # --- Errors ---
     if len(errors) > 0:
         st.divider()
@@ -958,7 +999,7 @@ def render_daemon_tab(brain_filter: str):
 
 
 # ============================================================
-# Controls metadata (mirrors v15_7/controls.py)
+# Controls metadata (mirrors v16_0/controls.py)
 # Format: (key, type, default, description, category, min, max, choices)
 # ============================================================
 CONTROLS_META = [
@@ -1001,6 +1042,10 @@ CONTROLS_META = [
     ("sentry_max_tokens",        "int",   256,    "Max output tokens for sentry scoring",           "daemon",   64,   1024,  None),
     ("strategist_max_tokens",    "int",   4096,   "Max output tokens for strategist drafts",        "daemon",   128,  8192,  None),
     ("max_item_age_hours",       "int",   24,     "Ignore feed items older than this (hours)",      "daemon",   1,    168,   None),
+    ("seeker_interval_seconds",  "int",   900,    "Seconds between seeker search sweeps",           "daemon",   300,  3600,  None),
+    ("seeker_max_tokens",        "int",   4096,   "Max output tokens for seeker responses",         "daemon",   256,  8192,  None),
+    ("charge_weight_search",     "float", 1.5,    "Charge multiplier for search items",             "daemon",   0.0,  5.0,   None),
+    ("seeker_max_topics",        "int",   3,      "Max focus topics to search per sweep",           "daemon",   1,    10,    None),
     ("saved_plan_max_cycles",    "int",   5,      "Cycles a daemon draft persists before expiring", "daemon",   1,    20,    None),
     ("daemon_notes_max",         "int",   5,      "Max directive notes retained",                   "daemon",   1,    20,    None),
     ("daemon_can_upvote",        "bool",  True,   "Daemon can upvote posts/comments",               "daemon",   None, None,  None),

@@ -71,23 +71,23 @@ Only Gemini models support native Google Search grounding via `--enable-search`.
 
 ```bash
 # Default (Gemini 2.5 Flash, v14-compatible mode)
-python -m v15_7 ANALOG_I
+python -m v16_0 ANALOG_I
 
 # Use Gemini 3 Pro Preview as conscious model
-python -m v15_7 ANALOG_I --conscious-model gemini-3-pro-preview
+python -m v16_0 ANALOG_I --conscious-model gemini-3-pro-preview
 
 # Use Claude Sonnet as conscious model
-python -m v15_7 ANALOG_I --conscious-model claude-sonnet-4-5
+python -m v16_0 ANALOG_I --conscious-model claude-sonnet-4-5
 
 # Tight budget: $0.50/day with cheapest models
-python -m v15_7 ANALOG_I --conscious-model gemini-2.5-flash --daily-budget 0.50
+python -m v16_0 ANALOG_I --conscious-model gemini-2.5-flash --daily-budget 0.50
 
 # Premium: Claude Opus conscious, higher budget
-python -m v15_7 ANALOG_I --conscious-model claude-opus-4-6 --daily-budget 10.00
+python -m v16_0 ANALOG_I --conscious-model claude-opus-4-6 --daily-budget 10.00
 
 # Local model as daemon (free, uses GPU)
-python -m v15_7 ANALOG_I --subconscious --subconscious-model local:qwen2.5-1.5b
+python -m v16_0 ANALOG_I --subconscious --subconscious-model local:qwen2.5-1.5b
 
 # Full local: both conscious and daemon on GPU
-python -m v15_7 ANALOG_I --conscious-model local:qwen2.5-7b --subconscious --subconscious-model local:qwen2.5-1.5b --daily-budget 0
+python -m v16_0 ANALOG_I --conscious-model local:qwen2.5-7b --subconscious --subconscious-model local:qwen2.5-1.5b --daily-budget 0
 ```

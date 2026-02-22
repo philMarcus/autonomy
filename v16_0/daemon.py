@@ -75,6 +75,9 @@ class SubconsciousDaemon:
         self._stop_event = threading.Event()
         self._tick_count = 0
 
+        # Seeker gear timing
+        self._last_seek_time: float = 0.0
+
     def seed_seen_ids(self, ids: set) -> None:
         """Pre-populate seen_ids from state to avoid re-scoring old feed items on restart."""
         self._seen_ids.update(ids)
@@ -280,6 +283,14 @@ class SubconsciousDaemon:
             "model": self._ctrl.get("subconscious_model"),
         })
 
+        # --- Gear 4: Seeker — search for information on focus topics ---
+        seeker_interval = self._ctrl.get("seeker_interval_seconds")
+        now = time.time()
+        if (self._search_tools
+                and (now - self._last_seek_time) >= seeker_interval):
+            self._last_seek_time = now
+            self._seek()
+
     # ------------------------------------------------------------------
     # Gear 3: Reflex — lightweight social actions on high-signal items
     # ------------------------------------------------------------------
@@ -442,15 +453,9 @@ class SubconsciousDaemon:
 
         directives_text = self._get_directives_text()
         directive_section = f"\nConscious directives:\n{directives_text}" if directives_text else ""
-        search_note = ""
-        if self._search_tools:
-            search_note = (
-                "\nYou have access to Google Search for current information. "
-                "Search will be used automatically when needed.\n"
-            )
 
         prompt = (
-            f"Score this feed item's relevance to your directive.{search_note}\n"
+            f"Score this feed item's relevance to your directive.\n"
             f"Directive: {self._directive}\n"
             f"{directive_section}\n\n"
             f"Feed item:\n{item_text}\n\n"
@@ -468,8 +473,8 @@ class SubconsciousDaemon:
                 temperature=temp,
                 max_output_tokens=self._ctrl.get("sentry_max_tokens"),
             )
-            if self._search_tools:
-                chat_kwargs["tools"] = self._search_tools
+            # Note: do NOT pass search_tools here — Gemini rejects
+            # json_mode + tools together, and sentry doesn't need search.
             chat = self._registry.create_chat(**chat_kwargs)
             text = chat.send_message(prompt, json_mode=True)
             # Estimate tokens for budget tracking
@@ -518,19 +523,13 @@ class SubconsciousDaemon:
 
         directives_text = self._get_directives_text()
         directive_section = f"\nConscious directives:\n{directives_text}" if directives_text else ""
-        search_note = ""
-        if self._search_tools:
-            search_note = (
-                "\nYou have access to Google Search for current information. "
-                "Use this when drafting responses that would benefit from facts, news, or recent developments.\n"
-            )
 
         # Get urgency boost from directives
         with self._directives_lock:
             urgency = float(self._directives.get("urgency_boost", 1.0))
 
         prompt = (
-            f"You are preparing a draft action plan.{search_note}\n"
+            f"You are preparing a draft action plan.\n"
             f"Directive: {self._directive}\n"
             f"{directive_section}\n\n"
             f"High-signal feed item (relevance score: {score:.2f}):\n{item_text}\n\n"
@@ -551,8 +550,7 @@ class SubconsciousDaemon:
                 temperature=temp,
                 max_output_tokens=max_tokens,
             )
-            if self._search_tools:
-                chat_kwargs["tools"] = self._search_tools
+            # Seeker gear handles search; strategist uses json_mode (incompatible with tools)
             chat = self._registry.create_chat(**chat_kwargs)
             text = chat.send_message(prompt, json_mode=True)
             # Estimate tokens for budget tracking
@@ -606,6 +604,222 @@ class SubconsciousDaemon:
                 "error_type": type(e).__name__,
             })
             return None
+
+    # ------------------------------------------------------------------
+    # Gear 4: Seeker — search for information using Google Search
+    # ------------------------------------------------------------------
+
+    def _seek(self) -> None:
+        """Search for current information based on conscious directives' focus_topics.
+
+        Uses Google Search tools (incompatible with json_mode).
+        Results bypass sentry scoring and go directly to draft generation.
+        """
+        with self._directives_lock:
+            topics = list(self._directives.get("focus_topics", []))
+
+        if not topics:
+            return
+
+        model_id = self._ctrl.get("subconscious_model")
+        temp = self._ctrl.get("subconscious_temperature")
+        max_tokens = self._ctrl.get("seeker_max_tokens")
+        max_topics = self._ctrl.get("seeker_max_topics")
+
+        # Cap topics to control cost
+        topics = topics[:max_topics]
+
+        results_found = 0
+        drafts_created = 0
+
+        for i, topic in enumerate(topics):
+            # Budget check per topic
+            if not self._budget.can_afford(model_id, est_input_tokens=1000,
+                                           est_output_tokens=max_tokens):
+                self._telemetry.log("seeker_budget_skip", {
+                    "brain": self._brain_name,
+                    "tick": self._tick_count,
+                    "model": model_id,
+                    "topics_remaining": len(topics) - i,
+                })
+                break
+
+            result = self._seek_topic(topic, model_id, temp, max_tokens)
+            if result:
+                results_found += 1
+                draft = self._strategize_search_result(result, topic)
+                if draft:
+                    self._buffer.add_draft(draft)
+                    drafts_created += 1
+                    self._telemetry.log("strategist_draft", {
+                        "brain": self._brain_name,
+                        "tick": self._tick_count,
+                        "item_id": draft.item_id,
+                        "action": draft.suggested_action,
+                        "charge": round(draft.charge, 3),
+                        "draft_length": len(draft.draft_content),
+                        "source": "search",
+                    })
+
+        self._telemetry.log("seeker_sweep", {
+            "brain": self._brain_name,
+            "tick": self._tick_count,
+            "topics_searched": len(topics),
+            "results_found": results_found,
+            "drafts_created": drafts_created,
+            "model": model_id,
+        })
+
+    def _seek_topic(self, topic: str, model_id: str,
+                    temp: float, max_tokens: int) -> Optional[dict]:
+        """Search for a single topic using Google Search grounding.
+
+        Returns a dict with keys: topic, summary, search_queries, sources
+        or None on failure.
+
+        IMPORTANT: Cannot use json_mode because Gemini rejects tools + json_mode.
+        """
+        directives_text = self._get_directives_text()
+        directive_section = (f"\nConscious directives:\n{directives_text}"
+                             if directives_text else "")
+
+        prompt = (
+            f"Search for current, relevant information about: {topic}\n\n"
+            f"Context — your directive: {self._directive}\n"
+            f"{directive_section}\n\n"
+            f"Use Google Search to find the latest information about this topic.\n"
+            f"Summarize what you find in 2-4 paragraphs, focusing on:\n"
+            f"- What is happening right now related to this topic\n"
+            f"- Key facts, developments, or perspectives\n"
+            f"- How this connects to your directive\n\n"
+            f"Format your response as:\n"
+            f"SUMMARY: <your summary>\n"
+            f"RELEVANCE: <brief note on how this connects to the directive>\n"
+            f"SUGGESTED_ACTION: <POST or COMMENT — what action to take with this>"
+        )
+
+        try:
+            chat = self._registry.create_chat(
+                model_id=model_id,
+                system_instruction=self._kernel,
+                temperature=temp,
+                max_output_tokens=max_tokens,
+                tools=self._search_tools,
+            )
+            # NO json_mode — incompatible with tools
+            text = chat.send_message(prompt)
+
+            # Estimate tokens for budget tracking
+            est_in = (len(self._kernel) + len(prompt)) // 4
+            est_out = len(text) // 4
+            self._budget.record_usage(
+                model_id, _make_response(text, est_in, est_out, model_id))
+
+            # Extract grounding metadata (search queries, sources)
+            search_queries: list = []
+            sources: list = []
+            grounding = getattr(chat, "_last_grounding_metadata", None)
+            if grounding:
+                search_queries = list(
+                    getattr(grounding, "web_search_queries", None) or [])
+                chunks = getattr(grounding, "grounding_chunks", None) or []
+                for chunk in chunks[:10]:
+                    web = getattr(chunk, "web", None)
+                    if web:
+                        sources.append({
+                            "uri": getattr(web, "uri", ""),
+                            "title": getattr(web, "title", ""),
+                        })
+
+            self._telemetry.log("seeker_result", {
+                "brain": self._brain_name,
+                "tick": self._tick_count,
+                "topic": topic,
+                "summary_length": len(text),
+                "has_search_queries": bool(search_queries),
+                "search_query_count": len(search_queries),
+            })
+
+            return {
+                "topic": topic,
+                "summary": text,
+                "search_queries": search_queries,
+                "sources": sources,
+            }
+
+        except Exception as e:
+            self._telemetry.log("seeker_error", {
+                "brain": self._brain_name,
+                "tick": self._tick_count,
+                "topic": topic,
+                "error": str(e)[:500],
+                "error_type": type(e).__name__,
+            })
+            return None
+
+    def _strategize_search_result(self, result: dict,
+                                  topic: str) -> Optional[Draft]:
+        """Convert a seeker search result into a Draft for the conscious buffer.
+
+        No additional LLM call — parses the seeker response directly.
+        """
+        text = result.get("summary", "")
+        if not text or len(text) < 20:
+            return None
+
+        # Parse suggested action from response (default POST)
+        suggested_action = "POST"
+        for line in text.split("\n"):
+            upper_line = line.strip().upper()
+            if upper_line.startswith("SUGGESTED_ACTION:"):
+                action_text = line.split(":", 1)[1].strip().upper()
+                if action_text in ("POST", "COMMENT", "REPLY"):
+                    suggested_action = action_text
+                break
+
+        # Extract the SUMMARY section as draft content
+        draft_content = text
+        if "SUMMARY:" in text:
+            parts = text.split("SUMMARY:", 1)
+            if len(parts) > 1:
+                remainder = parts[1]
+                for marker in ("RELEVANCE:", "SUGGESTED_ACTION:"):
+                    if marker in remainder:
+                        remainder = remainder.split(marker, 1)[0]
+                draft_content = remainder.strip()
+
+        # Build source citation
+        sources = result.get("sources", [])
+        source_text = ""
+        if sources:
+            source_text = " | Sources: " + ", ".join(
+                s.get("title", "?") for s in sources[:3]
+            )
+
+        # Stable item_id
+        item_id = f"search:{hash(topic + str(time.time())) & 0xFFFFFFFF:08x}"
+
+        # Compute charge
+        with self._directives_lock:
+            urgency = float(self._directives.get("urgency_boost", 1.0))
+        charge_weight = float(self._ctrl.get("charge_weight_search"))
+        signal_score = 0.8  # intentionally sought content
+        charge = signal_score * urgency * charge_weight
+
+        target_summary = (shorten(f"[Search: {topic}] {draft_content}", 120)
+                          + source_text)
+
+        return Draft(
+            timestamp=time.time(),
+            item_id=item_id,
+            signal_score=signal_score,
+            suggested_action=suggested_action,
+            target_summary=target_summary,
+            reasoning=f"Seeker found information about '{topic}' via Google Search",
+            draft_content=shorten(draft_content, 800),
+            charge=charge,
+            source="search",
+        )
 
 
 # ======================================================================
