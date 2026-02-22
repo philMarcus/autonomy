@@ -293,7 +293,7 @@ def build_default_registry(args, model_registry) -> ControlRegistry:
         Control("sentry_interval_seconds", "int",
                 getattr(args, "sentry_interval", 60),
                 "Seconds between sentry scans", "daemon", min_val=10, max_val=600),
-        Control("signal_threshold", "float", 0.5,
+        Control("signal_threshold", "float", 0.6,
                 "Score to trigger strategist", "daemon", min_val=0.0, max_val=1.0),
         Control("wake_threshold", "float", 2.0,
                 "Charge to fire conscious", "daemon", min_val=0.5, max_val=10.0),
@@ -301,6 +301,10 @@ def build_default_registry(args, model_registry) -> ControlRegistry:
                 "Per-tick charge decay (1.0=no decay)", "daemon", min_val=0.5, max_val=1.0),
         Control("wake_refractory", "float", -2.0,
                 "Wake potential after firing (negative=cooldown)", "daemon", min_val=-10.0, max_val=0.0),
+        Control("charge_weight_feed", "float", 0.5,
+                "Charge multiplier for Moltbook feed items", "daemon", min_val=0.0, max_val=5.0),
+        Control("charge_weight_seed", "float", 2.0,
+                "Charge multiplier for human seeds", "daemon", min_val=0.0, max_val=5.0),
         Control("dream_depth", "int", 10,
                 "History entries to synthesize per dream", "conscious", min_val=3, max_val=50),
         Control("max_drafts", "int", 10,
@@ -347,6 +351,8 @@ def build_default_registry(args, model_registry) -> ControlRegistry:
                 "Cooldown after a failed post attempt", "timing", min_val=60, max_val=7200),
 
         # --- Per-action cooldown controls ---
+        Control("cooldown_comment_seconds", "int", 180,
+                "Seconds between comment/reply actions", "timing", min_val=20, max_val=3600),
         Control("cooldown_upvote_seconds", "int", 60,
                 "Seconds between upvote actions", "timing", min_val=10, max_val=3600),
         Control("cooldown_follow_seconds", "int", 3600,

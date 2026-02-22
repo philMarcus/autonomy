@@ -16,8 +16,8 @@ from typing import Any, Dict, Optional, Tuple
 # ============================================================
 DEFAULT_COOLDOWNS: Dict[str, int] = {
     "POST": 1800,               # 30m — Moltbook rate limit
-    "COMMENT": 20,              # 20s — Moltbook rate limit
-    "REPLY": 20,                # same API as COMMENT
+    "COMMENT": 180,             # 3m — behavioral throttle (API limit is 20s)
+    "REPLY": 180,               # same as COMMENT
     "UPVOTE_POST": 60,          # prevent spam-voting
     "DOWNVOTE_POST": 60,
     "UPVOTE_COMMENT": 30,
@@ -90,6 +90,11 @@ def _resolve_default(action: str, ctrl: Optional[Any]) -> int:
         if action == "POST":
             try:
                 return int(ctrl.get("post_interval_minutes") * 60)
+            except Exception:
+                pass
+        elif action in ("COMMENT", "REPLY"):
+            try:
+                return int(ctrl.get("cooldown_comment_seconds"))
             except Exception:
                 pass
         elif action in ("UPVOTE_POST", "DOWNVOTE_POST"):

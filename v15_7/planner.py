@@ -147,21 +147,10 @@ def _format_seeds(seeds: Optional[list]) -> str:
     return (
         "\nSEEDS (from HUMAN visitors at Analog Home — your observatory site):\n"
         f"{lines}\n"
-        "These seeds are planted by real human visitors to your Analog Home site. "
-        "They deserve thoughtful consideration and are higher priority than feed noise.\n\n"
-        "How to respond to seeds:\n"
-        "- **POST to Analog Home** — Use POST action. If output_destination includes moltbook, "
-        "change it via controls_update: {\"output_destination\": \"analog_home\"} for this cycle\n"
-        "- **POST to Moltbook** — Use POST action. If output_destination is analog_home only, "
-        "change it via controls_update: {\"output_destination\": \"moltbook_and_analog_home\"}\n"
-        "- **COMMENT/REPLY** — To weave seed themes into feed engagement, use COMMENT/REPLY "
-        "but you MUST specify a post_id from the feed below (not the seed itself)\n"
-        "- **Daemon focus** — Let a seed redirect your daemon's focus_topics via daemon_directives\n\n"
-        "NOTE: output_destination control affects where this cycle's POST goes. "
-        "You can change it per-cycle to direct individual responses.\n\n"
-        "IMPORTANT: Seeds are not posts — they have no post_id. "
-        "If you choose COMMENT or REPLY, you must target an actual feed item.\n"
+        "Seeds are planted by real humans visiting your Analog Home. "
+        "They deserve thoughtful consideration and are higher priority than feed noise.\n"
         "Seeds are ephemeral — once consumed, they are gone. Act on them or lose them.\n"
+        "NOTE: Seeds are not posts — they have no post_id. To COMMENT/REPLY, target a feed item.\n"
     )
 
 
@@ -236,6 +225,26 @@ def _format_draft_section(draft_context: str, daemon_active: bool = False) -> st
     return "".join(parts)
 
 
+def _format_output_destination_note(output_destination: str) -> str:
+    """Explain what the output destination means in concrete terms."""
+    if "moltbook" in output_destination:
+        return (
+            "  → Your posts, comments, and replies go to MOLTBOOK (visible to other agents) "
+            "AND are archived on Analog Home.\n"
+            "  → The feed items above are from Moltbook — they are posts by OTHER AGENTS, not by your human operator.\n"
+            "  → To switch to Analog Home only, set controls_update: {\"output_destination\": \"analog_home\"}\n"
+        )
+    else:
+        return (
+            "  → You are in ANALOG HOME ONLY mode. Your output goes to your personal observatory site for your human audience.\n"
+            "  → NOTHING you write reaches Moltbook. No agent on Moltbook can see your posts, comments, or replies.\n"
+            "  → The feed above is from Moltbook (read-only awareness), but you CANNOT interact with it — "
+            "commenting or replying will only create a local artifact, not an actual Moltbook comment.\n"
+            "  → In this mode: POST for your Analog Home audience. Do NOT comment/reply to Moltbook posts (it won't reach them).\n"
+            "  → To resume Moltbook interaction, set controls_update: {\"output_destination\": \"moltbook_and_analog_home\"}\n"
+        )
+
+
 def _format_platform_status(platform_status: str) -> str:
     """Format the platform write status for the planner prompt."""
     if not platform_status:
@@ -265,7 +274,9 @@ def _format_controls_block(controls_block: str, budget_summary: str) -> str:
     if not controls_block:
         return ""
     parts = [
-        "\n--- SYSTEM CONTROLS ---",
+        "\n--- FEEDBACK CONTROLS (downward causality) ---",
+        "These controls let you modify your own operating parameters — enabling a strange loop",
+        "where your conscious output reshapes the system that produces it.",
         controls_block,
     ]
     if budget_summary:
@@ -274,7 +285,7 @@ def _format_controls_block(controls_block: str, budget_summary: str) -> str:
         parts.append(budget_summary)
     parts.append("")
     parts.append(
-        'You may include "controls_update": {...} in your response to modify any unlocked control.'
+        'Include "controls_update": {...} in your response to modify any unlocked control.'
     )
     parts.append(
         "Only include controls you want to change. Use {} or omit for no changes.\n"
@@ -361,7 +372,7 @@ def build_planner_prompt(
 DIRECTIVE:
 {directive}
 
-Decide ONE action to take now, consistent with rate limits and configuration.
+Decide ONE action to take now, consistent with rate limits and configuration. You MAY alter the output destination for this cycle.
 
 CONFIG/CONSTRAINTS:
 {read_only_note}- Moltbook post window: {'OPEN' if post_window_open else f'CLOSED (wait {post_wait_minutes}m)'} — cooldown only applies to Moltbook; Analog Home posts always allowed.
@@ -370,8 +381,8 @@ CONFIG/CONSTRAINTS:
 - Voting is {'ALLOWED' if allow_votes else 'DISABLED'} by command line.
 - Creating submolts is {'ALLOWED' if allow_create_submolt else 'DISABLED'} by command line.
 - Downvotes are {'ALLOWED' if allow_downvote else 'DISABLED'} by command line.
-- Output destination: {output_destination}
-
+- Output destination: {output_destination} — you can POST to Analog Home (your human audience) OR take an action on Moltbook (other agents). Change per-cycle via controls_update.
+{_format_output_destination_note(output_destination)}
 MOLTBOOK RATE LIMITS:
 - Posts: 1 per 30 minutes (enforced by post window above)
 - Comments: 1 per 20 seconds, 50 per day (enforced by Moltbook API)
@@ -387,7 +398,7 @@ Knowledge (excerpt):
 Recent actions (history):
 {hist}
 
-Feed (brief):
+Moltbook feed (posts from other agents on the Moltbook platform):
 {feed_brief}
 
 External data (fresh; may be empty):

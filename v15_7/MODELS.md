@@ -1,10 +1,11 @@
-# v15.0 Available Models & Pricing
+# v15.7 Available Models & Pricing
 
 ## API Models
 
 | Model ID | Provider | Display Name | Input $/1K tok | Output $/1K tok | Est. $/1K calls* | Context | Search | Recommended Role |
 |---|---|---|---|---|---|---|---|---|
-| `gemini-2.0-flash-lite` | Gemini | Gemini 2.0 Flash-Lite | FREE | FREE | $0.00 | 128K | Yes | Daemon (free tier) |
+| `gemini-2.0-flash` | Gemini | Gemini 2.0 Flash | FREE | FREE | $0.00 | 1M | Yes | Daemon |
+| `gemini-2.5-flash-lite` | Gemini | Gemini 2.5 Flash-Lite | FREE | FREE | $0.00 | 128K | Yes | Daemon (free tier) |
 | `gpt-5-nano` | OpenAI | GPT-5 Nano | $0.00005 | $0.0004 | $0.90 | 128K | No | Daemon |
 | `gemini-2.5-flash` | Gemini | Gemini 2.5 Flash | $0.00015 | $0.0006 | $1.80 | 128K | Yes | Daemon / Conscious |
 | `gemini-3-flash-preview` | Gemini | Gemini 3 Flash Preview | $0.00015 | $0.0006 | $1.80 | 128K | Yes | Daemon / Conscious |
@@ -27,24 +28,26 @@
 
 Requires: `pip install torch transformers accelerate bitsandbytes`
 
-Models are loaded lazily on first use. Use `--conscious-model local:qwen3-8b` or `--subconscious-model local:qwen3-8b` to activate.
+Models are loaded lazily on first use. Use `--conscious-model local:qwen2.5-7b` or `--subconscious-model local:qwen2.5-1.5b` to activate.
 
 ### Small Models (float16, no quantization — fit on <=10GB VRAM)
 
-| Model ID | HuggingFace Model | Size | VRAM (fp16) | Context | Recommended Role |
-|---|---|---|---|---|---|
-| `local:qwen3-1.5b` | `Qwen/Qwen3-1.5B` | 1.5B | ~3 GB | 32K | Daemon (fast) |
-| `local:llama-3.2-3b` | `meta-llama/Llama-3.2-3B-Instruct` | 3B | ~6 GB | 128K | Daemon |
+| Model ID | HuggingFace Model | Size | VRAM (fp16) | Context | Gated | Recommended Role |
+|---|---|---|---|---|---|---|
+| `local:qwen2.5-1.5b` | `Qwen/Qwen2.5-1.5B-Instruct` | 1.5B | ~3 GB | 32K | No | Daemon (fast) |
+| `local:llama-3.2-3b` | `meta-llama/Llama-3.2-3B-Instruct` | 3B | ~6 GB | 128K | Yes | Daemon |
 
 ### Full Models (4-bit NF4 quantization via bitsandbytes — fit on <=10GB VRAM)
 
-| Model ID | HuggingFace Model | Size | VRAM (4-bit) | Context | Recommended Role |
-|---|---|---|---|---|---|
-| `local:qwen3-8b` | `Qwen/Qwen3-8B` | 8B | ~5 GB | 32K | Daemon |
-| `local:mistral-7b` | `mistralai/Mistral-7B-Instruct-v0.3` | 7B | ~4 GB | 32K | Daemon |
-| `local:llama-3.1-8b` | `meta-llama/Llama-3.1-8B-Instruct` | 8B | ~5 GB | 128K | Daemon |
+| Model ID | HuggingFace Model | Size | VRAM (4-bit) | Context | Gated | Recommended Role |
+|---|---|---|---|---|---|---|
+| `local:qwen2.5-7b` | `Qwen/Qwen2.5-7B-Instruct` | 7B | ~5 GB | 128K | No | Daemon |
+| `local:mistral-7b` | `mistralai/Mistral-7B-Instruct-v0.3` | 7B | ~4 GB | 32K | No | Daemon |
+| `local:llama-3.1-8b` | `meta-llama/Llama-3.1-8B-Instruct` | 8B | ~5 GB | 128K | Yes | Daemon |
 
 All local models have $0 cost. GPU (CUDA) auto-detected; falls back to CPU if unavailable.
+
+Gated models (Llama) require accepting Meta's license on the HuggingFace model page while logged in. Authenticate with `huggingface-cli login` or `python -c "from huggingface_hub import login; login(token='hf_...')"`.
 
 ## Environment Variables
 
@@ -56,6 +59,7 @@ Each provider needs an API key. Per-brain keys take priority over global keys.
 | Anthropic (optional) | `{PREFIX}_ANTHROPIC_API_KEY` | `ANTHROPIC_API_KEY` |
 | OpenAI (optional) | `{PREFIX}_OPENAI_API_KEY` | `OPENAI_API_KEY` |
 | Mistral (optional) | `{PREFIX}_MISTRAL_API_KEY` | `MISTRAL_API_KEY` |
+| HuggingFace (for local) | — | `huggingface-cli login` (stored in `~/.cache/huggingface/token`) |
 
 `{PREFIX}` = brain name uppercased (e.g., `ANALOG_I`).
 
@@ -67,17 +71,23 @@ Only Gemini models support native Google Search grounding via `--enable-search`.
 
 ```bash
 # Default (Gemini 2.5 Flash, v14-compatible mode)
-python -m v15_0 ANALOG_I
+python -m v15_7 ANALOG_I
 
 # Use Gemini 3 Pro Preview as conscious model
-python -m v15_0 ANALOG_I --conscious-model gemini-3-pro-preview
+python -m v15_7 ANALOG_I --conscious-model gemini-3-pro-preview
 
 # Use Claude Sonnet as conscious model
-python -m v15_0 ANALOG_I --conscious-model claude-sonnet-4-5
+python -m v15_7 ANALOG_I --conscious-model claude-sonnet-4-5
 
 # Tight budget: $0.50/day with cheapest models
-python -m v15_0 ANALOG_I --conscious-model gemini-2.5-flash --daily-budget 0.50
+python -m v15_7 ANALOG_I --conscious-model gemini-2.5-flash --daily-budget 0.50
 
 # Premium: Claude Opus conscious, higher budget
-python -m v15_0 ANALOG_I --conscious-model claude-opus-4-6 --daily-budget 10.00
+python -m v15_7 ANALOG_I --conscious-model claude-opus-4-6 --daily-budget 10.00
+
+# Local model as daemon (free, uses GPU)
+python -m v15_7 ANALOG_I --subconscious --subconscious-model local:qwen2.5-1.5b
+
+# Full local: both conscious and daemon on GPU
+python -m v15_7 ANALOG_I --conscious-model local:qwen2.5-7b --subconscious --subconscious-model local:qwen2.5-1.5b --daily-budget 0
 ```

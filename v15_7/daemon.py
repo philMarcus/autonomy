@@ -454,8 +454,11 @@ class SubconsciousDaemon:
             f"Directive: {self._directive}\n"
             f"{directive_section}\n\n"
             f"Feed item:\n{item_text}\n\n"
-            f'Respond with ONLY a JSON object: {{"score": 0.0, "reason": "brief reason"}}\n'
-            f"Score 0.0 = irrelevant, 1.0 = extremely relevant/urgent."
+            f"CRITICAL: Return ONLY valid JSON, no other text. No monologue, no narrative, no explanation.\n"
+            f'Format: {{"score": 0.0, "reason": "brief reason"}}\n'
+            f"Score guide: 0.0-0.3 = generic/irrelevant, 0.4-0.6 = somewhat relevant, "
+            f"0.7-0.9 = highly relevant to directive, 1.0 = urgent/exceptional only.\n"
+            f"Most items should score 0.2-0.5. Reserve 0.7+ for genuinely compelling content."
         )
 
         try:
@@ -468,7 +471,7 @@ class SubconsciousDaemon:
             if self._search_tools:
                 chat_kwargs["tools"] = self._search_tools
             chat = self._registry.create_chat(**chat_kwargs)
-            text = chat.send_message(prompt)
+            text = chat.send_message(prompt, json_mode=True)
             # Estimate tokens for budget tracking
             est_in = (len(self._kernel) + len(prompt)) // 4
             est_out = len(text) // 4
@@ -551,7 +554,7 @@ class SubconsciousDaemon:
             if self._search_tools:
                 chat_kwargs["tools"] = self._search_tools
             chat = self._registry.create_chat(**chat_kwargs)
-            text = chat.send_message(prompt)
+            text = chat.send_message(prompt, json_mode=True)
             # Estimate tokens for budget tracking
             est_in = (len(self._kernel) + len(prompt)) // 4
             est_out = len(text) // 4
@@ -573,8 +576,13 @@ class SubconsciousDaemon:
                 })
                 return None
 
-            # Charge is proportional to signal score, boosted by urgency
-            charge = score * urgency
+            # Charge is proportional to signal score, boosted by urgency and source weight
+            source = item.get("_source", "feed")
+            if source == "seed":
+                source_weight = float(self._ctrl.get("charge_weight_seed"))
+            else:
+                source_weight = float(self._ctrl.get("charge_weight_feed"))
+            charge = score * urgency * source_weight
 
             target_summary = f"@{author_name}: {shorten(title or content, 80)}"
 
@@ -623,23 +631,37 @@ def _get_author(item: dict) -> str:
 
 
 def _parse_score(text: str) -> float:
-    """Parse a score (0.0-1.0) from LLM response text."""
+    """Parse a score (0.0-1.0) from LLM response text.
+
+    Extraction priority:
+    1. Valid JSON with "score" key
+    2. Bare decimal number (e.g. "0.7")
+    3. "score" keyword near a decimal number in prose
+    Safe: rejects stray integers like "Layer 1" that inflated scores before.
+    """
+    import re
     text = text.strip()
     # Try JSON parse first
     data = _parse_json_safe(text)
-    if data and "score" in data:
+    if isinstance(data, dict) and "score" in data:
         try:
             s = float(data["score"])
             return max(0.0, min(1.0, s))
         except (ValueError, TypeError):
             pass
-    # Fallback: try to find a float in the text
-    import re
-    match = re.search(r"(\d+\.?\d*)", text)
-    if match:
+    # Fallback 1: bare number (e.g. "0.7" or "0.85")
+    bare = text.strip().strip('"\'')
+    if re.fullmatch(r"\d+\.\d+", bare):
         try:
-            s = float(match.group(1))
-            return max(0.0, min(1.0, s))
+            return max(0.0, min(1.0, float(bare)))
+        except ValueError:
+            pass
+    # Fallback 2: "score" keyword followed by a decimal number in prose
+    # Matches patterns like: score: 0.7, score=0.8, score is 0.6
+    m = re.search(r'["\']?score["\']?\s*[:=\s]\s*(\d+\.\d+)', text, re.IGNORECASE)
+    if m:
+        try:
+            return max(0.0, min(1.0, float(m.group(1))))
         except ValueError:
             pass
     return 0.0

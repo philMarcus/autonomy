@@ -208,8 +208,14 @@ class MoltbookClient(PlatformClient):
                                     if "message" in data:
                                         data["message"] = "Published successfully after verification"
                                 else:
+                                    fail_msg = (
+                                        verify_result.get("error")
+                                        or verify_result.get("message")
+                                        or verify_result.get("hint")
+                                        or "Unknown"
+                                    )
                                     try:
-                                        print(f"{Fore.RED}[VERIFICATION] Verification failed: {verify_result.get('error', 'Unknown')}{Style.RESET_ALL}")
+                                        print(f"{Fore.RED}[VERIFICATION] Verification failed: {fail_msg}{Style.RESET_ALL}")
                                     except:
                                         pass
                             else:

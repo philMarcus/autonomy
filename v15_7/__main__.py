@@ -267,28 +267,51 @@ def main():
         "--allow-downvote":     ("allow_downvote",           lambda a: True),
         "--priority":           ("priority",                 lambda a: a.priority),
     }
-    cli_overrides = []
+    # Pre-compute which CLI flags were explicitly passed so we can re-apply after disk reloads
+    _cli_pinned: Dict[str, Any] = {}
     for flag, (ctrl_key, getter) in _CLI_TO_CONTROL.items():
         if flag in sys.argv:
             val = getter(args)
             if val is not None:
-                ctrl.set(ctrl_key, val, source="cli")
-                cli_overrides.append(f"{ctrl_key}={val}")
-    if cli_overrides:
-        print(f"{Fore.YELLOW}    CLI overrides: {', '.join(cli_overrides)}")
+                _cli_pinned[ctrl_key] = val
+
+    def _apply_cli_overrides(verbose: bool = False) -> None:
+        """Re-apply CLI-pinned values to control registry (after disk reload)."""
+        applied = []
+        rejected = []
+        for ctrl_key, val in _cli_pinned.items():
+            ok = ctrl.set(ctrl_key, val, source="cli")
+            if ok:
+                applied.append(f"{ctrl_key}={val}")
+            else:
+                rejected.append(f"{ctrl_key}={val}")
+        if verbose and applied:
+            print(f"{Fore.YELLOW}    CLI overrides: {', '.join(applied)}")
+        if rejected:
+            print(f"{Fore.RED}    CLI overrides REJECTED (invalid value): {', '.join(rejected)}{Style.RESET_ALL}")
+
+    _apply_cli_overrides(verbose=True)
 
     # Platform client: always create for reads if API key exists
     # --enable-moltbook gates WRITES only (via moltbook_disabled flag in actions.py)
     platform = None
     challenge_solver = None
     if mb_key:
-        challenge_solver = MathVerificationSolver(llm_client=llm_client, telemetry=telemetry)
+        # Use conscious model for verification challenges — cheap models (Flash-Lite)
+        # can't reliably parse obfuscated text + do arithmetic.
+        # Challenges are rare (only on Moltbook writes), so cost is negligible.
+        challenge_llm = registry.as_llm_client(default_model_id=args.conscious_model)
+        challenge_solver = MathVerificationSolver(llm_client=challenge_llm, telemetry=telemetry)
         platform = MoltbookClient(
             api_key=mb_key, telemetry=telemetry, brain_name=brain_name,
             read_only=args.read_only, challenge_solver=challenge_solver,
         )
 
     output_destination = "analog_home" if not args.moltbook_enabled else "moltbook_and_analog_home"
+    # Ensure --enable-moltbook pins the output_destination control (overrides saved controls.json)
+    if args.moltbook_enabled:
+        ctrl.set("output_destination", "moltbook_and_analog_home", source="cli")
+        _cli_pinned["output_destination"] = "moltbook_and_analog_home"
 
     # --- Subconscious Daemon (Phase 5) ---
     from .buffer import DraftBuffer
@@ -501,6 +524,7 @@ def main():
                     ctrl.load_from_dict(json.load(cf))
             except Exception:
                 pass
+            _apply_cli_overrides()  # CLI flags always win over disk values
 
         # --- Analog Home controls (only when API URL is configured) ---
         analog_controls = {}
@@ -530,9 +554,10 @@ def main():
         conscious_model = ctrl.get("conscious_model")
 
         # Recreate chat each cycle to avoid token accumulation
-        chat = llm_client.create_chat(
+        # Use registry directly so backend is resolved per-model (supports cross-provider model switching)
+        chat = registry.create_chat(
+            model_id=conscious_model,
             system_instruction=kernel,
-            model=conscious_model,
             max_output_tokens=16384,
             temperature=cycle_temperature,
             tools=search_tools,

@@ -16,19 +16,19 @@ from .base import ChatSession, LLMResponse, ModelBackend, ModelInfo
 # Map our model IDs to HuggingFace hub identifiers
 HF_MODEL_MAP: Dict[str, str] = {
     # Small models (fit float16 on <=10GB VRAM, no quantization needed)
-    "local:qwen3-1.5b":    "Qwen/Qwen3-1.5B",
+    "local:qwen2.5-1.5b":  "Qwen/Qwen2.5-1.5B-Instruct",
     "local:llama-3.2-3b":  "meta-llama/Llama-3.2-3B-Instruct",
     # Full models (need 4-bit quantization on <=10GB VRAM)
-    "local:qwen3-8b":      "Qwen/Qwen3-8B",
+    "local:qwen2.5-7b":    "Qwen/Qwen2.5-7B-Instruct",
     "local:mistral-7b":    "mistralai/Mistral-7B-Instruct-v0.3",
     "local:llama-3.1-8b":  "meta-llama/Llama-3.1-8B-Instruct",
 }
 
 LOCAL_MODELS: List[ModelInfo] = [
     ModelInfo(
-        model_id="local:qwen3-1.5b",
+        model_id="local:qwen2.5-1.5b",
         provider="local",
-        display_name="Qwen3 1.5B (local)",
+        display_name="Qwen2.5 1.5B Instruct (local)",
         is_local=True,
         input_cost_per_1k=0.0,
         output_cost_per_1k=0.0,
@@ -44,13 +44,13 @@ LOCAL_MODELS: List[ModelInfo] = [
         max_context_tokens=128_000,
     ),
     ModelInfo(
-        model_id="local:qwen3-8b",
+        model_id="local:qwen2.5-7b",
         provider="local",
-        display_name="Qwen3 8B (local)",
+        display_name="Qwen2.5 7B Instruct (local)",
         is_local=True,
         input_cost_per_1k=0.0,
         output_cost_per_1k=0.0,
-        max_context_tokens=32_768,
+        max_context_tokens=128_000,
     ),
     ModelInfo(
         model_id="local:mistral-7b",
@@ -175,7 +175,7 @@ class LocalBackend(ModelBackend):
             tokenizer.pad_token = tokenizer.eos_token
 
         # Models <=3B fit in float16 on 10GB VRAM; larger need 4-bit quantization
-        SMALL_MODELS = {"local:qwen3-1.5b", "local:llama-3.2-3b"}
+        SMALL_MODELS = {"local:qwen2.5-1.5b", "local:llama-3.2-3b"}
         needs_quant = model_id not in SMALL_MODELS
 
         load_kwargs: Dict[str, Any] = {}

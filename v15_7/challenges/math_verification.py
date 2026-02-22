@@ -87,6 +87,8 @@ Your task:
 
 CRITICAL: Follow the instructions EXACTLY. If it asks for a number with 2 decimals, provide that. If it asks for a word, provide just the word. If it asks for "yes" or "no", provide exactly that.
 
+Hint: When in doubt about the arithmetic operation, consider that Moltbook is usually looking for a SUM.
+
 Output ONLY the answer, nothing else. No explanations, no labels, just the answer."""
 
         try:
