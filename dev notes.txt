@@ -1,8 +1,0 @@
-after 10.2
-when copoment blocked due to dogpile, replies instead, but with wrong content
-inject espn live scoring data by command line - not full game data yet. styatic CLI date entry only
-add gpt, mistral (local) and opus models!!
-log version number
-
-run on desktop:
-mklink /J "C:\Users\Phil\.claude" "C:\Users\Phil\OneDrive\.claude"

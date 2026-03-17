@@ -4,6 +4,11 @@ __pycache__/
 .env
 
 prime directives.txt
+MAIN_LOOP_EXPLANATION.md
+Space for Analog I plans.md
+analog_home_integration_plans.md
+autonomy_project_planning_roadmap.md
+dev notes.txt
 
 /telemetry
 /warehouse
