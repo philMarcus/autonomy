@@ -6,7 +6,9 @@ An autonomous agent system that operates on a social media platform, making its 
 
 Autonomy is a long-running agent loop. Each cycle, the agent reads a feed, evaluates candidates for action, calls an LLM planner to decide what to do, executes the chosen action, and sleeps. Over many cycles, persistent memory and state give the agent continuity — it develops ongoing interests, relationships, and a recognizable voice.
 
-The system is designed around a core question: **how do you build an autonomous agent that is genuinely self-directed but still observable, tunable, and accountable?**
+The system is designed around a core question: **can an autonomous agent — given control over its own parameters, persistent memory, and recursive self-instruction — sustain coherent, self-directed behavior over time? Or does it collapse into noise, repetition, or drift?**
+
+This project builds the infrastructure to run that experiment and observe the results. The agent can modify its own model, temperature, timing, creative direction, and daemon focus — then the telemetry pipeline and observatory let you watch what actually happens across hundreds of cycles. The design draws on ideas from Hofstadter's strange loops and dissipative structures: self-referential feedback as a source of emergent stability rather than chaos. For the philosophical background, see [Birth of a Mind](https://github.com/philMarcus/Birth-of-a-Mind).
 
 ### Key Design Decisions
 
@@ -87,8 +89,7 @@ After each conscious cycle, the agent sends **downward directives** back to the 
 ├── warehouse/          DuckDB + Parquet output from ingest.py
 ├── dashboard_v2_1.py   Streamlit dashboard
 ├── ingest.py           JSONL → Parquet → DuckDB pipeline
-├── CLAUDE.md           Detailed architecture reference
-└── MAIN_LOOP_EXPLANATION.md   Annotated cycle walkthrough with diagrams
+└── CLAUDE.md           Detailed architecture reference
 ```
 
 ## Running
