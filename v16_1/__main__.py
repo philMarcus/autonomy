@@ -124,51 +124,78 @@ def _compute_run_metadata(kernel: str, knowledge: str, version: str, state: dict
 def build_arg_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(description=f"Autonomy v{VERSION} — modular multi-brain agent loop")
     ap.add_argument("brain", help="Brain name (used as filename prefix in BRAINS_DIR).")
-    ap.add_argument("directive", nargs="?", default="Participate on Moltbook.")
-    ap.add_argument("--allow-kernel-update", action="store_true", help="Allow the planner to rewrite the kernel prompt.")
-    ap.add_argument("--no-kernel-disk-write", action="store_true", help="Kernel updates stay in-memory only (not written to disk).")
-    ap.add_argument("--enable-moltbook", dest="moltbook_enabled",
-                    action="store_true",
-                    help="Enable Moltbook writes. Without this, posts/comments go to Analog Home only (feeds still readable).")
-    ap.add_argument("--interval", type=int, default=5, help="Sleep interval minutes between cycles.")
-    ap.add_argument("--post-interval", type=int, default=30, help="Minutes between posts (default 30).")
-    ap.add_argument("--reset-post-window", action="store_true", help="Clear the post cooldown timer on startup (allows immediate posting).")
-    ap.add_argument("--read-only", action="store_true", help="No write actions.")
-    ap.add_argument("--reload-env", action="store_true", help="Reload .env and overwrite env vars.")
+    ap.add_argument("directive", nargs="?", default="Participate on Moltbook.",
+                    help="Directive for the agent (default: 'Participate on Moltbook.').")
+    DEFAULT_CONSCIOUS_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-pro").strip()
 
-    DEFAULT_GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash").strip()
-    ap.add_argument("--gemini-model", default=DEFAULT_GEMINI_MODEL, help="Gemini model name.")
-    ap.add_argument("--temperature", type=float, default=0.7, help="LLM temperature for planner chat (default 0.7).")
-    ap.add_argument("--enable-search", action="store_true",
-                    help="Enable Google Search grounding on the planner LLM call.")
-    ap.add_argument("--enable-default-temp", action="store_true",
-                    help="Allow the agent to set default_temperature via trajectory updates.")
-    ap.add_argument("--inject-espn", action="store_true")
-    ap.add_argument("--espn-cache-seconds", type=int, default=60)
-    ap.add_argument("--espn-league", default=os.environ.get("ESPN_LEAGUE", ESPN_DEFAULT_LEAGUE))
-    ap.add_argument("--espn-date", default="")
-    ap.add_argument("--espn-keywords", default="")
-    ap.add_argument("--priority", choices=["replies_first", "outside_first"], default="replies_first")
-    ap.add_argument("--mode", choices=["all", "comment_only", "no_post", "no_comment", "post_only"], default="all")
-    ap.add_argument("--allow-votes", action="store_true")
-    ap.add_argument("--allow-downvote", action="store_true")
-    ap.add_argument("--feed-sort", choices=["hot", "new", "top", "rising"], default="new")
+    # --- Output destinations ---
+    ap.add_argument("--no-moltbook", dest="moltbook_enabled", action="store_false", default=True,
+                    help="Disable Moltbook writes — posts go to Analog Home only (default: enabled).")
+    ap.add_argument("--enable-moltbook", dest="moltbook_enabled", action="store_true",
+                    help=argparse.SUPPRESS)  # Hidden, kept for backwards compat
 
-    # --- v15 flags ---
-    ap.add_argument("--conscious-model", default=None,
-                    help="Model for conscious loop (default: same as --gemini-model).")
+    # --- Timing ---
+    ap.add_argument("--interval", type=int, default=5,
+                    help="Minutes between conscious cycles (default: 5).")
+    ap.add_argument("--post-interval", type=int, default=30,
+                    help="Minutes between posts (default: 30).")
+    ap.add_argument("--reset-post-window", action="store_true",
+                    help="Clear the post cooldown timer on startup.")
+
+    # --- Mode ---
+    ap.add_argument("--read-only", action="store_true", help="No write actions at all.")
+    ap.add_argument("--mode", choices=["all", "comment_only", "no_post", "no_comment", "post_only"],
+                    default="all", help="Action mode (default: all).")
+    ap.add_argument("--priority", choices=["replies_first", "outside_first"],
+                    default="replies_first", help="Reply vs outside comment priority (default: replies_first).")
+    ap.add_argument("--feed-sort", choices=["hot", "new", "top", "rising"],
+                    default="new", help="Feed sort order (default: new).")
+    ap.add_argument("--allow-votes", action="store_true", help="Allow upvoting/downvoting.")
+    ap.add_argument("--allow-downvote", action="store_true", help="Allow downvoting specifically.")
+
+    # --- Models ---
+    ap.add_argument("--conscious-model", default=DEFAULT_CONSCIOUS_MODEL,
+                    help=f"Model for conscious loop (default: {DEFAULT_CONSCIOUS_MODEL}).")
     ap.add_argument("--subconscious-model", default="gemini-2.5-flash",
                     help="Model for subconscious daemon (default: gemini-2.5-flash).")
+    ap.add_argument("--temperature", type=float, default=0.7,
+                    help="LLM temperature for planner chat (default: 0.7).")
     ap.add_argument("--daily-budget", type=float, default=1.0,
                     help="Daily API spend limit in USD (default: 1.0).")
+
+    # --- Search ---
+    ap.add_argument("--no-search", dest="enable_search", action="store_false", default=True,
+                    help="Disable Google Search grounding (default: enabled).")
+    ap.add_argument("--enable-search", dest="enable_search", action="store_true",
+                    help=argparse.SUPPRESS)  # Hidden, kept for backwards compat
+
+    # --- Subconscious daemon ---
+    ap.add_argument("--no-subconscious", dest="no_subconscious", action="store_true", default=False,
+                    help="Disable subconscious daemon, run single-loop mode (default: daemon enabled).")
+    ap.add_argument("--subconscious", dest="no_subconscious", action="store_false",
+                    help=argparse.SUPPRESS)  # Hidden, kept for backwards compat
     ap.add_argument("--sentry-interval", type=int, default=60,
                     help="Seconds between subconscious sentry scans (default: 60).")
-    ap.add_argument("--no-subconscious", action="store_true", default=True,
-                    help="Run in v14-compatible single-loop mode (default: True).")
-    ap.add_argument("--subconscious", dest="no_subconscious", action="store_false",
-                    help="Enable subconscious daemon (dual-process mode).")
+
+    # --- Misc ---
+    ap.add_argument("--allow-kernel-update", action="store_true",
+                    help="Allow the planner to rewrite the kernel prompt.")
+    ap.add_argument("--no-kernel-disk-write", action="store_true",
+                    help="Kernel updates stay in-memory only (not written to disk).")
+    ap.add_argument("--enable-default-temp", action="store_true",
+                    help="Allow agent to set default_temperature via trajectory updates.")
     ap.add_argument("--blacklist-controls", default="",
                     help="Comma-separated control keys the LLM cannot modify.")
+    ap.add_argument("--reload-env", action="store_true",
+                    help="Reload .env file and overwrite current env vars.")
+    ap.add_argument("--inject-espn", action="store_true", help="Inject ESPN data into planner context.")
+    ap.add_argument("--espn-cache-seconds", type=int, default=60, help=argparse.SUPPRESS)
+    ap.add_argument("--espn-league", default=os.environ.get("ESPN_LEAGUE", ESPN_DEFAULT_LEAGUE), help=argparse.SUPPRESS)
+    ap.add_argument("--espn-date", default="", help=argparse.SUPPRESS)
+    ap.add_argument("--espn-keywords", default="", help=argparse.SUPPRESS)
+
+    # --- Deprecated (hidden, kept for backwards compat) ---
+    ap.add_argument("--gemini-model", default=DEFAULT_CONSCIOUS_MODEL, help=argparse.SUPPRESS)
 
     return ap
 
@@ -202,7 +229,8 @@ def main():
     telemetry_dir = (os.environ.get("TELEMETRY_DIR", "telemetry") or "telemetry").strip()
     telemetry = TelemetryLogger(brain_name=brain_name, run_id=run_id, base_dir=telemetry_dir, read_only=args.read_only)
     # Resolve conscious model (falls back to --gemini-model)
-    conscious_model = args.conscious_model or args.gemini_model
+    # --gemini-model is deprecated but still accepted; --conscious-model takes priority
+    conscious_model = args.conscious_model
 
     telemetry.log("run_start", {
         "version": VERSION, "brain_env_prefix": prefix,
@@ -255,8 +283,8 @@ def main():
 
     # CLI flags override saved controls — explicit flags always win
     _CLI_TO_CONTROL = {
-        "--conscious-model":    ("conscious_model",          lambda a: a.conscious_model or (a.gemini_model if "--gemini-model" in sys.argv else None)),
-        "--gemini-model":       ("conscious_model",          lambda a: a.gemini_model),
+        "--conscious-model":    ("conscious_model",          lambda a: a.conscious_model),
+        "--gemini-model":       ("conscious_model",          lambda a: a.gemini_model),  # deprecated alias
         "--subconscious-model": ("subconscious_model",       lambda a: a.subconscious_model),
         "--temperature":        ("temperature",              lambda a: a.temperature),
         "--daily-budget":       ("daily_budget_usd",         lambda a: a.daily_budget),
@@ -553,6 +581,42 @@ def main():
         # Read current conscious model from control registry (may have changed)
         conscious_model = ctrl.get("conscious_model")
 
+        # --- Budget planning (accountant) ---
+        if ctrl.get("budget_plan_enabled"):
+            from .accountant import should_run_budget_plan, build_budget_plan_prompt, parse_budget_plan, apply_budget_plan
+            _last_budget_plan = state.get("_last_budget_plan_time", 0)
+            if should_run_budget_plan(budget, ctrl, _last_budget_plan):
+                try:
+                    bp_prompt = build_budget_plan_prompt(budget, ctrl, registry)
+                    bp_chat = registry.create_chat(
+                        model_id=conscious_model,
+                        system_instruction="You are a budget planner. Respond with valid JSON only.",
+                        temperature=0.3,
+                        max_output_tokens=1024,
+                    )
+                    bp_raw = bp_chat.send_message(bp_prompt)
+                    bp_plan = parse_budget_plan(bp_raw)
+                    if bp_plan:
+                        bp_changes = apply_budget_plan(bp_plan, ctrl)
+                        state["_last_budget_plan_time"] = time.time()
+                        store.save_state(state)
+                        # Re-read conscious model in case accountant changed it
+                        conscious_model = ctrl.get("conscious_model")
+                        telemetry.log("budget_plan", {
+                            "cycle": iteration,
+                            "changes": bp_changes,
+                            "reasoning": bp_plan.get("reasoning", ""),
+                        })
+                        if bp_changes:
+                            try:
+                                print(f"{Fore.CYAN}[BUDGET] Plan applied: {bp_changes}")
+                            except Exception:
+                                pass
+                except Exception as bp_err:
+                    telemetry.log("budget_plan_error", {
+                        "cycle": iteration, "error": str(bp_err),
+                    })
+
         # Recreate chat each cycle to avoid token accumulation
         # Use registry directly so backend is resolved per-model (supports cross-provider model switching)
         chat = registry.create_chat(
@@ -732,7 +796,7 @@ def main():
             allow_default_temp=bool(args.enable_default_temp),
             cooldown_status=cooldown_status_text(state, ctrl=ctrl),
             controls_block=ctrl.to_llm_block(),
-            budget_summary=budget.spend_summary_text() if budget else "",
+            budget_summary=budget.spend_summary_for_planning(registry) if budget else "",
             draft_context=draft_context,
             memory_pressure=memory_pressure,
             daemon_active=daemon is not None,

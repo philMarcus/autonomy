@@ -177,12 +177,21 @@ class GeminiChatSession(ChatSession):
 
 # All Gemini models this backend serves
 GEMINI_MODELS: List[ModelInfo] = [
+    # --- 2.5 family ---
     ModelInfo(
         model_id="gemini-2.5-flash",
         provider="gemini",
         display_name="Gemini 2.5 Flash",
-        input_cost_per_1k=0.00015,
-        output_cost_per_1k=0.0006,
+        input_cost_per_1k=0.0003,
+        output_cost_per_1k=0.0025,
+        supports_tools=True,
+    ),
+    ModelInfo(
+        model_id="gemini-2.5-flash-lite",
+        provider="gemini",
+        display_name="Gemini 2.5 Flash-Lite",
+        input_cost_per_1k=0.0001,
+        output_cost_per_1k=0.0004,
         supports_tools=True,
     ),
     ModelInfo(
@@ -190,39 +199,57 @@ GEMINI_MODELS: List[ModelInfo] = [
         provider="gemini",
         display_name="Gemini 2.5 Pro",
         input_cost_per_1k=0.00125,
-        output_cost_per_1k=0.005,
+        output_cost_per_1k=0.01,
         supports_tools=True,
     ),
+    # --- 3.x family ---
     ModelInfo(
-        model_id="gemini-2.0-flash",
+        model_id="gemini-3-flash-preview",
         provider="gemini",
-        display_name="Gemini 2.0 Flash",
-        input_cost_per_1k=0.0,
-        output_cost_per_1k=0.0,
+        display_name="Gemini 3 Flash Preview",
+        input_cost_per_1k=0.0005,
+        output_cost_per_1k=0.003,
         supports_tools=True,
-    ),
-    ModelInfo(
-        model_id="gemini-2.5-flash-lite",
-        provider="gemini",
-        display_name="Gemini 2.5 Flash-Lite",
-        input_cost_per_1k=0.0,
-        output_cost_per_1k=0.0,
     ),
     ModelInfo(
         model_id="gemini-3-pro-preview",
         provider="gemini",
         display_name="Gemini 3 Pro Preview",
-        input_cost_per_1k=0.00125,
-        output_cost_per_1k=0.005,
+        input_cost_per_1k=0.002,
+        output_cost_per_1k=0.012,
         supports_tools=True,
     ),
     ModelInfo(
-        model_id="gemini-3-flash-preview",
+        model_id="gemini-3.1-pro-preview",
         provider="gemini",
-        display_name="Gemini 3 Flash Preview",
-        input_cost_per_1k=0.00015,
-        output_cost_per_1k=0.0006,
+        display_name="Gemini 3.1 Pro Preview",
+        input_cost_per_1k=0.002,
+        output_cost_per_1k=0.012,
         supports_tools=True,
+    ),
+    ModelInfo(
+        model_id="gemini-3.1-flash-lite-preview",
+        provider="gemini",
+        display_name="Gemini 3.1 Flash-Lite Preview",
+        input_cost_per_1k=0.00025,
+        output_cost_per_1k=0.0015,
+        supports_tools=True,
+    ),
+    # --- 2.0 family (deprecated June 2026) ---
+    ModelInfo(
+        model_id="gemini-2.0-flash",
+        provider="gemini",
+        display_name="Gemini 2.0 Flash (deprecated)",
+        input_cost_per_1k=0.0001,
+        output_cost_per_1k=0.0004,
+        supports_tools=True,
+    ),
+    ModelInfo(
+        model_id="gemini-2.0-flash-lite",
+        provider="gemini",
+        display_name="Gemini 2.0 Flash-Lite (deprecated)",
+        input_cost_per_1k=0.000075,
+        output_cost_per_1k=0.0003,
     ),
 ]
 

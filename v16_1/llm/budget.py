@@ -2,9 +2,13 @@
 
 Tracks per-model USD spend and provides can_afford() checks for the
 subconscious gate and conscious loop.  Resets at midnight UTC.
+
+Pricing is loaded from pricing.json (easy to update separately).
 """
 
 import datetime
+import json
+import os
 import threading
 from dataclasses import dataclass, field
 from typing import Any, Dict
@@ -12,30 +16,32 @@ from typing import Any, Dict
 from .base import LLMResponse, ModelInfo
 
 
-# Built-in cost table (USD per 1K tokens).  Updated as prices change.
-COST_TABLE: Dict[str, Dict[str, float]] = {
-    # Gemini
-    "gemini-2.5-flash":          {"input": 0.00015,  "output": 0.0006},
-    "gemini-2.5-pro":            {"input": 0.00125,  "output": 0.005},
-    "gemini-2.0-flash-lite":     {"input": 0.0,      "output": 0.0},
-    "gemini-3-pro-preview":      {"input": 0.00125,  "output": 0.005},
-    "gemini-3-flash-preview":    {"input": 0.00015,  "output": 0.0006},
-    # Anthropic
-    "claude-haiku-4-5":          {"input": 0.001,    "output": 0.005},
-    "claude-sonnet-4-5":         {"input": 0.003,    "output": 0.015},
-    "claude-opus-4-6":           {"input": 0.005,    "output": 0.025},
-    # OpenAI
-    "gpt-5-nano":                {"input": 0.00005,  "output": 0.0004},
-    "gpt-5-mini":                {"input": 0.00025,  "output": 0.002},
-    "gpt-5.1":                   {"input": 0.00125,  "output": 0.01},
-    "gpt-5.2":                   {"input": 0.00175,  "output": 0.014},
-    "gpt-5-pro":                 {"input": 0.015,    "output": 0.12},
-    "gpt-5.2-pro":               {"input": 0.021,    "output": 0.168},
-    # Mistral
-    "mistral-small-latest":      {"input": 0.0002,   "output": 0.0006},
-    "mistral-large-latest":      {"input": 0.002,    "output": 0.006},
-    # Local (free)
-}
+# ---------------------------------------------------------------------------
+# Pricing
+# ---------------------------------------------------------------------------
+
+def _load_pricing() -> Dict[str, Dict[str, float]]:
+    """Load pricing from pricing.json next to this file."""
+    pricing_path = os.path.join(os.path.dirname(__file__), "pricing.json")
+    try:
+        with open(pricing_path, "r") as f:
+            data = json.load(f)
+        # Filter out _note / _url keys, and strip _deprecated from model entries
+        result = {}
+        for k, v in data.items():
+            if k.startswith("_"):
+                continue
+            if isinstance(v, dict):
+                result[k] = {ck: cv for ck, cv in v.items() if not ck.startswith("_")}
+            else:
+                result[k] = v
+        return result
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+
+# USD per 1K tokens.  Loaded from pricing.json at import time.
+COST_TABLE: Dict[str, Dict[str, float]] = _load_pricing()
 
 
 def estimate_cost(model_id: str, input_tokens: int, output_tokens: int) -> float:
@@ -44,6 +50,17 @@ def estimate_cost(model_id: str, input_tokens: int, output_tokens: int) -> float
     if not costs:
         return 0.0
     return (input_tokens / 1000) * costs["input"] + (output_tokens / 1000) * costs["output"]
+
+
+def pricing_age_days() -> int:
+    """Days since pricing.json was last modified. -1 if file not found."""
+    pricing_path = os.path.join(os.path.dirname(__file__), "pricing.json")
+    try:
+        mtime = os.path.getmtime(pricing_path)
+        age = datetime.datetime.now().timestamp() - mtime
+        return int(age / 86400)
+    except FileNotFoundError:
+        return -1
 
 
 @dataclass
@@ -81,6 +98,15 @@ class DailyBudget:
             self._ensure_today()
             spent = sum(self._spend_by_model.values())
             return max(0.0, self.daily_limit_usd - spent)
+
+    def remaining_fraction(self) -> float:
+        """Fraction of daily budget remaining (0.0-1.0)."""
+        with self._lock:
+            self._ensure_today()
+            spent = sum(self._spend_by_model.values())
+            if self.daily_limit_usd <= 0:
+                return 0.0
+            return max(0.0, min(1.0, 1.0 - spent / self.daily_limit_usd))
 
     def spent_today_usd(self) -> float:
         with self._lock:
@@ -120,4 +146,42 @@ class DailyBudget:
         ]
         for model, cost in sorted(s.get("by_model", {}).items()):
             lines.append(f"  {model}: ${cost:.4f}")
+        return "\n".join(lines)
+
+    def spend_summary_for_planning(self, registry=None) -> str:
+        """Extended budget summary with cost projections for budget planning.
+
+        Includes hours remaining in UTC day, model cost table, and
+        projected spend extrapolation.
+        """
+        s = self.spend_summary()
+        now = datetime.datetime.now(datetime.timezone.utc)
+        hours_left = max(0.0, 24.0 - (now.hour + now.minute / 60))
+
+        lines = [
+            f"Daily limit: ${s['daily_limit_usd']:.2f} | "
+            f"Spent: ${s['spent_usd']:.4f} | "
+            f"Remaining: ${s['remaining_usd']:.4f}",
+            f"Hours remaining today (UTC): {hours_left:.1f}",
+        ]
+
+        # Per-model spend
+        if s.get("by_model"):
+            lines.append("Spend by model:")
+            for model, cost in sorted(s["by_model"].items()):
+                lines.append(f"  {model}: ${cost:.4f}")
+
+        # Available model costs
+        if COST_TABLE:
+            lines.append("")
+            lines.append("Available model costs (per 1K tokens):")
+            for model_id, costs in sorted(COST_TABLE.items()):
+                if costs["input"] == 0 and costs["output"] == 0:
+                    lines.append(f"  {model_id}: FREE")
+                else:
+                    lines.append(
+                        f"  {model_id}: "
+                        f"${costs['input']:.5f} in / ${costs['output']:.5f} out"
+                    )
+
         return "\n".join(lines)

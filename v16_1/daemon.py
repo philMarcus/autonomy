@@ -20,6 +20,7 @@ from .controls import ControlRegistry
 from .cooldowns import can_do
 from .llm import DailyBudget, ModelRegistry
 from .llm.base import LLMResponse
+from .scoring import build_sentry_prompt, parse_rubric_response, compute_score, weights_from_controls
 from .telemetry import TelemetryLogger
 from .utils import shorten, is_item_too_old, norm_key
 
@@ -452,19 +453,7 @@ class SubconsciousDaemon:
         item_text = f"- Author: @{author_name}\n- Title: {title}\n- Content: {shorten(content, 500)}"
 
         directives_text = self._get_directives_text()
-        directive_section = f"\nConscious directives:\n{directives_text}" if directives_text else ""
-
-        prompt = (
-            f"Score this feed item's relevance to your directive.\n"
-            f"Directive: {self._directive}\n"
-            f"{directive_section}\n\n"
-            f"Feed item:\n{item_text}\n\n"
-            f"CRITICAL: Return ONLY valid JSON, no other text. No monologue, no narrative, no explanation.\n"
-            f'Format: {{"score": 0.0, "reason": "brief reason"}}\n'
-            f"Score guide: 0.0-0.3 = generic/irrelevant, 0.4-0.6 = somewhat relevant, "
-            f"0.7-0.9 = highly relevant to directive, 1.0 = urgent/exceptional only.\n"
-            f"Most items should score 0.2-0.5. Reserve 0.7+ for genuinely compelling content."
-        )
+        prompt = build_sentry_prompt(item_text, self._directive, directives_text)
 
         try:
             chat_kwargs: Dict[str, Any] = dict(
@@ -473,15 +462,30 @@ class SubconsciousDaemon:
                 temperature=temp,
                 max_output_tokens=self._ctrl.get("sentry_max_tokens"),
             )
-            # Note: do NOT pass search_tools here — Gemini rejects
-            # json_mode + tools together, and sentry doesn't need search.
             chat = self._registry.create_chat(**chat_kwargs)
-            text = chat.send_message(prompt, json_mode=True)
+            text = chat.send_message(prompt)
             # Estimate tokens for budget tracking
             est_in = (len(self._kernel) + len(prompt)) // 4
             est_out = len(text) // 4
             self._budget.record_usage(model_id, _make_response(text, est_in, est_out, model_id))
-            return _parse_score(text)
+
+            rubric = parse_rubric_response(text)
+            weights = weights_from_controls(self._ctrl)
+            score = compute_score(rubric, weights)
+
+            # Log per-criterion scores for observability
+            self._telemetry.log("sentry_rubric", {
+                "brain": self._brain_name,
+                "tick": self._tick_count,
+                "item_id": item.get("id", ""),
+                "relevance": rubric.get("relevance", 0),
+                "novelty": rubric.get("novelty", 0),
+                "actionability": rubric.get("actionability", 0),
+                "score": score,
+                "reason": rubric.get("reason", ""),
+                "model": model_id,
+            })
+            return score
         except Exception as e:
             self._telemetry.log("sentry_score_error", {
                 "brain": self._brain_name,
@@ -550,9 +554,8 @@ class SubconsciousDaemon:
                 temperature=temp,
                 max_output_tokens=max_tokens,
             )
-            # Seeker gear handles search; strategist uses json_mode (incompatible with tools)
             chat = self._registry.create_chat(**chat_kwargs)
-            text = chat.send_message(prompt, json_mode=True)
+            text = chat.send_message(prompt)
             # Estimate tokens for budget tracking
             est_in = (len(self._kernel) + len(prompt)) // 4
             est_out = len(text) // 4
