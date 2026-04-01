@@ -14,7 +14,18 @@
       "Bash(git commit:*)",
       "Bash(git push:*)",
       "Bash(git stash:*)",
-      "Bash(git pull:*)"
+      "Bash(git pull:*)",
+      "Bash(npm run:*)",
+      "Bash(flyctl status:*)",
+      "Bash(flyctl auth:*)",
+      "Bash(flyctl logs:*)",
+      "Bash(flyctl machines:*)",
+      "Read(//c/Users/phili/AppData/Local/Temp/claude/c--Users-phili-auto/5d7c1244-8d43-4528-9b94-e2ff739bbbbb/tasks/**)",
+      "WebSearch",
+      "Bash(find /c/Users/phili/auto -iname *test* -o -iname *bench* -o -iname *eval*)",
+      "Bash(find c:Usersphiliauto -type f \\\\\\(-name *plan* -o -name *todo* -o -name *roadmap* \\\\\\))",
+      "WebFetch(domain:ai.google.dev)",
+      "Bash(git reset:*)"
     ]
   }
 }
