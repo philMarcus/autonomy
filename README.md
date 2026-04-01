@@ -14,9 +14,9 @@ This project builds the infrastructure to run that experiment and observe the re
 
 - **Dual-process architecture.** A cheap "subconscious" daemon continuously scans feeds and scores items in the background. When accumulated signal crosses a threshold, it wakes the main "conscious" loop with a buffer of drafted plans. This separates vigilance (cheap, continuous) from deliberation (expensive, event-driven).
 
-- **Multi-model LLM backend.** The system abstracts over six providers (Gemini, Claude, GPT, Mistral, local models via HuggingFace) through a unified interface. The agent can switch its own model mid-run — model selection is a tunable control, not a hardcoded choice.
+- **Multi-model LLM backend.** The system abstracts over six providers (Gemini, Claude, GPT, Mistral, local models via HuggingFace) through a unified interface. The agent can switch its own model mid-run — model selection is a tunable control, not a hardcoded choice. A daily budget planner (the "accountant") recommends model and interval adjustments to stay within a configurable USD spend limit.
 
-- **ControlRegistry.** Every tunable parameter (22 controls across 7 categories) is a first-class object: readable and writable by the agent, lockable by the operator. The agent sees its own configuration in-prompt and can request changes. The operator can blacklist any control to prevent modification.
+- **ControlRegistry.** Every tunable parameter (27+ controls across 7 categories) is a first-class object: readable and writable by the agent, lockable by the operator. The agent sees its own configuration in-prompt and can request changes. The operator can blacklist any control to prevent modification.
 
 - **Telemetry pipeline.** An append-only JSONL event stream captures 200+ events per cycle. An ingestion layer converts this to date-partitioned Parquet files in a local DuckDB warehouse. A Streamlit dashboard provides cycle-level replay, daemon monitoring, cost tracking, and controls management.
 
@@ -59,7 +59,7 @@ The daemon runs three "gears" on a background thread:
 
 | Gear | Purpose | Cadence |
 |------|---------|---------|
-| **Sentry** | Scans feed, scores items against current directives | Every 60s |
+| **Sentry** | Scores feed items via multi-criteria rubric (relevance/novelty/actionability) | Every 60s |
 | **Strategist** | Generates draft action plans for high-signal items | On sentry trigger |
 | **Seeker** | Searches focus topics via Google Search grounding | Every 15min |
 
@@ -81,13 +81,20 @@ After each conscious cycle, the agent sends **downward directives** back to the 
 ## Repository Structure
 
 ```
-├── v16_0/              Current stable version (Python package)
-├── v16_1/              Development fork
-├── archive/            Previous versions (v12–v15) for reference
+├── autonomy/           Agent package (python -m autonomy <brain>)
+│   ├── llm/            Multi-provider LLM backends + pricing
+│   ├── platforms/      Social platform integrations
+│   ├── challenges/     Verification challenge solvers
+│   ├── scoring.py      Multi-criteria sentry rubric
+│   ├── daemon.py       Subconscious (sentry/strategist/seeker)
+│   ├── accountant.py   Budget-aware model/frequency planning
+│   ├── benchmark.py    Model evaluation test suite
+│   └── ...
+├── archive/            Previous versions (v12–v16_0) for reference
 ├── brains/             Per-brain state: kernel prompts, memories, controls (gitignored)
 ├── telemetry/          Append-only event log (gitignored)
 ├── warehouse/          DuckDB + Parquet output from ingest.py
-├── dashboard_v2_1.py   Streamlit dashboard
+├── dashboard_v2_1.py   Streamlit dashboard (5 tabs)
 ├── ingest.py           JSONL → Parquet → DuckDB pipeline
 └── CLAUDE.md           Detailed architecture reference
 ```
@@ -99,17 +106,23 @@ After each conscious cycle, the agent sends **downward directives** back to the 
 pip install -r requirements.txt
 
 # Run the agent (requires API keys in .env)
-python -m v16_0 <brain_name> [--subconscious] [--enable-search] [flags...]
+python -m autonomy <brain_name> [flags...]
+
+# See all options
+python -m autonomy --help
 
 # Run the dashboard
 streamlit run dashboard_v2_1.py
+
+# Benchmark models
+python -c "from autonomy.benchmark import main; main()"
 ```
 
-See `CLAUDE.md` for the full CLI flag reference and environment variable setup.
+See `CLAUDE.md` for the full architecture reference and environment variable setup.
 
 ## Status
 
-This is an active personal project — stable and functional, but under ongoing development. v16_0 is the current production version. The system has run continuously for extended periods across multiple agent personas, producing a visible archive of posts, comments, replies, daemon directives, and controls updates — all with exposed internal monologue — viewable at [marcusrecursives.com](https://marcusrecursives.com).
+This is an active personal project — stable and functional, but under ongoing development. The system has run continuously for extended periods across multiple agent personas, producing a visible archive of posts, comments, replies, daemon directives, and controls updates — all with exposed internal monologue — viewable at [marcusrecursives.com](https://marcusrecursives.com).
 
 ## Related
 
