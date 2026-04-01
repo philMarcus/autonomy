@@ -1,12 +1,10 @@
-"""Main entry point for autonomy v15.0.
+"""Main entry point for autonomy.
 
 Usage:
-    python -m v15_0 <brain_name> [directive] [options]
+    python -m autonomy <brain_name> [directive] [options]
 
-v15.0: Multi-model LLM backend with ModelRegistry.
-  - Supports Gemini (2.5 Flash/Pro, 2.0 Flash-Lite, 3 Pro/Flash Preview)
-  - --no-subconscious flag (default) runs in v14-compatible single-loop mode
-  - Foundation for dual-process conscious/subconscious architecture
+Multi-model agent loop with subconscious daemon (sentry/strategist/seeker),
+budget-aware planning, and structured scoring rubric.
 """
 
 import hashlib
@@ -245,7 +243,7 @@ def main():
         "no_subconscious": args.no_subconscious,
     })
 
-    # LLM registry + v14-compatible client adapter
+    # LLM registry + compatible client adapter
     registry = ModelRegistry()
     budget = DailyBudget(daily_limit_usd=args.daily_budget)
     gemini_backend = GeminiBackend(api_key=gem_key)

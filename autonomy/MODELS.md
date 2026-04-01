@@ -2,7 +2,7 @@
 
 ## Pricing
 
-**Source of truth:** `v16_1/llm/pricing.json` (USD per 1K tokens, updated 2026-03-31).
+**Source of truth:** `autonomy/llm/pricing.json` (USD per 1K tokens, updated 2026-03-31).
 
 The benchmark script warns if pricing.json is older than 30 days. Update it by editing the JSON file directly — reference links to each provider's pricing page are included in the file.
 
@@ -52,23 +52,26 @@ Only Gemini models support native Google Search grounding via `--enable-search`.
 
 ## Benchmarking
 
-Run `python -c "from v16_1.benchmark import main; main()"` to test models on sentry/strategist/planner tasks. Results saved to `benchmark_results.json`.
+Run `python -c "from autonomy.benchmark import main; main()"` to test models on sentry/strategist/planner tasks. Results saved to `benchmark_results.json`.
 
 ## Usage Examples
 
 ```bash
-# Default (Gemini 2.5 Flash conscious, single-loop mode)
-python -m v16_1 ANALOG_I
+# Default (Gemini 2.5 Pro conscious, daemon enabled, search enabled)
+python -m autonomy ANALOG_I
 
-# Budget daemon: 2.5 Flash-Lite is cheapest API option
-python -m v16_1 ANALOG_I --subconscious --subconscious-model gemini-2.5-flash-lite
+# Budget: use Flash for conscious, Flash-Lite for daemon
+python -m autonomy ANALOG_I --conscious-model gemini-2.5-flash --subconscious-model gemini-2.5-flash-lite
 
-# Premium conscious with search
-python -m v16_1 ANALOG_I --conscious-model gemini-3.1-pro-preview --enable-search
+# Premium conscious
+python -m autonomy ANALOG_I --conscious-model gemini-3.1-pro-preview
 
 # Local daemon (free, uses GPU)
-python -m v16_1 ANALOG_I --subconscious --subconscious-model local:qwen2.5-7b
+python -m autonomy ANALOG_I --subconscious-model local:qwen2.5-7b
 
 # Full local: both conscious and daemon on GPU
-python -m v16_1 ANALOG_I --conscious-model local:qwen2.5-7b --subconscious --subconscious-model local:qwen2.5-1.5b --daily-budget 0
+python -m autonomy ANALOG_I --conscious-model local:qwen2.5-7b --subconscious-model local:qwen2.5-1.5b --daily-budget 0
+
+# Single-loop mode (no daemon)
+python -m autonomy ANALOG_I --no-subconscious
 ```

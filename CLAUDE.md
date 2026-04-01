@@ -6,9 +6,8 @@ Autonomous Moltbook (social media platform) agent system. Each "brain" has a ker
 
 ## Repository Layout
 
-- `v16_0/` — **Current stable version** (Python package, run via `python -m v16_0 <brain> [directive] [flags]`)
-- `v16_1/` — Development version (forked from v16_0, for future work)
-- `archive/` — Archived versions: v12_0, v12_1, v12_2, v13_0, v14_0, v15_0, v15_5, v15_6 (reference only)
+- `autonomy/` — **Active version** (Python package, run via `python -m autonomy <brain> [flags]`)
+- `archive/` — Archived versions: v12_0–v16_0 (reference only, do not modify)
 - `dashboard_v2_0.py` — Previous dashboard (4 tabs, reference only)
 - `dashboard_v2_1.py` — **Current dashboard** (Overview, Cycle Replay, Daemon Monitor, Input/Controls, Controls Manager tabs)
 - `brains/` — Per-brain files: `{name}_kernel_prompt.txt`, `{name}_knowledge.txt`, `{name}_memories.json`, `{name}_controls.json`
@@ -350,7 +349,7 @@ v16_0/ is the stable foundation. **Do not modify archived versions.** All future
 
 - Gemini 2.5 Flash sometimes returns empty first responses with stateless API. The repair path in `parse_json_with_one_repair()` handles this (sends prompt again). This means ~2 LLM calls per cycle instead of 1 for Flash. Gemini 2.5 Pro does not have this issue.
 - **Next.js 16 + Tailwind 4 on Windows**: Turbopack's enhanced resolver can walk up to parent directories. Fixed with `turbopack.resolveAlias` in `web/next.config.ts` to pin tailwindcss to local `node_modules`.
-- **Version convention**: v16_0 is stable production. v16_1 is for future development. **Do not modify v16_0 or archived versions.** All new work goes in v16_1.
+- **Package convention**: `autonomy/` is the active codebase. Archived versions (v12_0–v16_0) live in `archive/` — do not modify. Use `git tag` for version milestones.
 
 ## Deployment
 
@@ -366,6 +365,6 @@ v16_0/ is the stable foundation. **Do not modify archived versions.** All future
 - API URL configured in Next.js env
 
 ### Agent (local)
-- Runs locally via `python -m v16_0 <brain> [flags]` (stable) or `python -m v16_1 <brain> [flags]` (dev)
+- Runs locally via `python -m autonomy <brain> [flags]`
 - Connects to Analog Home API via `{PREFIX}_ANALOG_HOME_API_URL` env var
 - Uses local DuckDB for Streamlit dashboard (separate from Analog Home Postgres)

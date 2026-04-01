@@ -6,8 +6,8 @@ Exercises each available model on the core daemon/planner tasks:
 3. Planner JSON compliance (action format)
 
 Usage:
-    python -m v16_1.benchmark [--models MODEL1,MODEL2] [--tasks sentry,strategist,planner]
-                              [--output benchmark_results.json] [--verbose]
+    python -m autonomy.benchmark [--models MODEL1,MODEL2] [--tasks sentry,strategist,planner]
+                                [--output benchmark_results.json] [--verbose]
 
 Requires API keys in environment (same as the main agent).
 Local models require torch + transformers installed.
@@ -605,7 +605,7 @@ def main():
     # Check pricing freshness
     age = pricing_age_days()
     if age > 30:
-        print(f"[WARN] pricing.json is {age} days old — consider updating (v16_1/llm/pricing.json)")
+        print(f"[WARN] pricing.json is {age} days old — consider updating (autonomy/llm/pricing.json)")
     elif age < 0:
         print("[WARN] pricing.json not found — cost estimates will be $0")
 
@@ -653,14 +653,12 @@ def main():
 
 
 def cli():
-    """Entry point for: python -c 'from v16_1.benchmark import cli; cli()'
-    or simply: python v16_1/benchmark.py
-    """
+    """Entry point for: python -c 'from autonomy.benchmark import cli; cli()'"""
     main()
 
 
 if __name__ == "__main__":
-    # Support direct execution: python v16_1/benchmark.py
+    # Support direct execution: python autonomy/benchmark.py
     # Need to fix imports for direct execution
     import sys
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))

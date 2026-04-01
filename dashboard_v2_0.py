@@ -705,7 +705,7 @@ def render_input_controls_tab(brain_filter: str):
     cli_directive = st.text_input("Directive override (optional)", value="", key="cli_directive")
 
     # Build command
-    parts = ["python -m v14_0", cli_brain]
+    parts = ["python -m autonomy", cli_brain]
 
     if cli_directive.strip():
         parts.append(f'"{cli_directive.strip()}"')

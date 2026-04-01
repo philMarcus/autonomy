@@ -999,7 +999,7 @@ def render_daemon_tab(brain_filter: str):
 
 
 # ============================================================
-# Controls metadata (mirrors v16_0/controls.py)
+# Controls metadata (mirrors autonomy/controls.py)
 # Format: (key, type, default, description, category, min, max, choices)
 # ============================================================
 CONTROLS_META = [
