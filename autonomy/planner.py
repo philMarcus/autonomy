@@ -11,7 +11,8 @@ from .config import (
     LLM_BACKOFF_INITIAL_SECONDS, LLM_BACKOFF_MAX_SECONDS,
     brain_env_prefix,
 )
-from .llm.base import ChatSession
+from .llm.base import ChatSession, LLMResponse
+from .llm.budget import DailyBudget, estimate_cost
 from .llm.gemini import BUDGET
 from .telemetry import TelemetryLogger
 from .utils import parse_json_strict
@@ -27,6 +28,7 @@ def parse_json_with_one_repair(
     telemetry: Optional[TelemetryLogger] = None,
     brain_name: str = "",
     call_tag: str = "llm",
+    budget: Optional[DailyBudget] = None,
 ) -> Dict[str, Any]:
     if default is None:
         default = {}
@@ -69,12 +71,26 @@ def parse_json_with_one_repair(
             raw = chat.send_message(p)
 
         dt_ms = int((time.time() - t0) * 1000)
+
+        # Extract token counts from chat session (set by GeminiChatSession)
+        in_tok = getattr(chat, "_last_input_tokens", 0) or (len(p) // 4)
+        out_tok = getattr(chat, "_last_output_tokens", 0) or (len(raw) // 4)
+        cost_usd = estimate_cost(model_name, in_tok, out_tok)
+
+        # Record spend on the DailyBudget
+        if budget:
+            budget.record_usage(model_name, LLMResponse(
+                text=raw, input_tokens=in_tok, output_tokens=out_tok,
+                model_id=model_name,
+            ))
+
         if telemetry:
             telemetry.log("llm_call", {
                 "tag": call_tag, "cycle": cycle, "model": model_name,
                 "prompt_chars": len(p or ""), "response_chars": len(raw), "latency_ms": dt_ms,
+                "input_tokens": in_tok, "output_tokens": out_tok, "cost_usd": round(cost_usd, 6),
             })
-        # Note: BUDGET.record / reset_backoff are handled inside
+        # Note: BUDGET.record / reset_backoff (TPM tracking) are handled inside
         # GeminiChatSession.send_message — no need to duplicate here.
         chat._last_raw_response = raw
         return raw
@@ -572,12 +588,14 @@ def _extract_preamble(raw: str) -> str:
 
 def plan_next_action(chat: ChatSession, prompt: str,
                      telemetry: Optional[TelemetryLogger] = None,
-                     brain_name: str = "") -> Dict[str, Any]:
+                     brain_name: str = "",
+                     budget: Optional[DailyBudget] = None) -> Dict[str, Any]:
     plan = parse_json_with_one_repair(
         chat, prompt,
         telemetry=telemetry,
         brain_name=brain_name,
         call_tag='planner',
+        budget=budget,
     )
     if not isinstance(plan, dict):
         plan = {}

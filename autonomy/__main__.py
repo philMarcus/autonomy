@@ -133,8 +133,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
                     help=argparse.SUPPRESS)  # Hidden, kept for backwards compat
 
     # --- Timing ---
-    ap.add_argument("--interval", type=int, default=5,
-                    help="Minutes between conscious cycles (default: 5).")
+    ap.add_argument("--interval", type=int, default=60,
+                    help="Minutes between conscious cycles (default: 60).")
     ap.add_argument("--post-interval", type=int, default=30,
                     help="Minutes between posts (default: 30).")
     ap.add_argument("--reset-post-window", action="store_true",
@@ -154,8 +154,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
     # --- Models ---
     ap.add_argument("--conscious-model", default=DEFAULT_CONSCIOUS_MODEL,
                     help=f"Model for conscious loop (default: {DEFAULT_CONSCIOUS_MODEL}).")
-    ap.add_argument("--subconscious-model", default="gemini-2.5-flash",
-                    help="Model for subconscious daemon (default: gemini-2.5-flash).")
+    ap.add_argument("--subconscious-model", default="gemini-2.5-flash-lite",
+                    help="Model for subconscious daemon (default: gemini-2.5-flash-lite).")
     ap.add_argument("--temperature", type=float, default=0.7,
                     help="LLM temperature for planner chat (default: 0.7).")
     ap.add_argument("--daily-budget", type=float, default=1.0,
@@ -172,8 +172,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
                     help="Disable subconscious daemon, run single-loop mode (default: daemon enabled).")
     ap.add_argument("--subconscious", dest="no_subconscious", action="store_false",
                     help=argparse.SUPPRESS)  # Hidden, kept for backwards compat
-    ap.add_argument("--sentry-interval", type=int, default=60,
-                    help="Seconds between subconscious sentry scans (default: 60).")
+    ap.add_argument("--sentry-interval", type=int, default=300,
+                    help="Seconds between subconscious sentry scans (default: 300).")
 
     # --- Misc ---
     ap.add_argument("--allow-kernel-update", action="store_true",
@@ -593,6 +593,14 @@ def main():
                         max_output_tokens=1024,
                     )
                     bp_raw = bp_chat.send_message(bp_prompt)
+                    # Record accountant spend
+                    from .llm.base import LLMResponse as _LLMResp
+                    from .llm.budget import estimate_cost as _est_cost
+                    _bp_in = getattr(bp_chat, "_last_input_tokens", 0) or (len(bp_prompt) // 4)
+                    _bp_out = getattr(bp_chat, "_last_output_tokens", 0) or (len(bp_raw) // 4)
+                    budget.record_usage(conscious_model, _LLMResp(
+                        text=bp_raw, input_tokens=_bp_in, output_tokens=_bp_out,
+                        model_id=conscious_model))
                     bp_plan = parse_budget_plan(bp_raw)
                     if bp_plan:
                         bp_changes = apply_budget_plan(bp_plan, ctrl)
@@ -803,7 +811,7 @@ def main():
 
         plan = None
         try:
-            plan = plan_next_action(chat, prompt, telemetry=telemetry, brain_name=brain_name)
+            plan = plan_next_action(chat, prompt, telemetry=telemetry, brain_name=brain_name, budget=budget)
 
             # Display any non-JSON LLM output (reasoning, preamble, etc.)
             preamble = plan.pop("_preamble", "")

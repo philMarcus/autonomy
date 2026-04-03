@@ -144,6 +144,16 @@ class GeminiChatSession(ChatSession):
         except (IndexError, AttributeError):
             pass
 
+        # Capture token usage for cost tracking
+        self._last_input_tokens = 0
+        self._last_output_tokens = 0
+        try:
+            usage = resp.usage_metadata
+            self._last_input_tokens = getattr(usage, "prompt_token_count", 0) or 0
+            self._last_output_tokens = getattr(usage, "candidates_token_count", 0) or 0
+        except (AttributeError, TypeError):
+            pass
+
         raw = self._extract_text(resp)
 
         # Append exchange to history for multi-turn support

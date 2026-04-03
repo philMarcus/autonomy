@@ -85,8 +85,7 @@ Work through this step by step:
 
 STEP 1 — EXTRACT: Strip away ALL obfuscation (random punctuation, mixed case, inserted characters, symbols). Write out the clean, plain-English question.
 
-STEP 2 — IDENTIFY: What are the numbers? What operation is being asked for?
-Hint: When in doubt about the arithmetic operation, consider that Moltbook is usually looking for a SUM.
+STEP 2 — IDENTIFY: What are the numbers? What operation is being asked for? Read the question carefully — "how many total" with "each" usually means MULTIPLY, not add.
 
 STEP 3 — SOLVE: Do the arithmetic.
 

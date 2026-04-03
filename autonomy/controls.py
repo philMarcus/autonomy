@@ -248,7 +248,7 @@ def build_default_registry(args, model_registry) -> ControlRegistry:
     model_ids = [m.model_id for m in model_registry.list_models()]
 
     conscious_model = getattr(args, "conscious_model", None) or getattr(args, "gemini_model", "gemini-2.5-flash")
-    subconscious_model = getattr(args, "subconscious_model", "gemini-2.5-flash")
+    subconscious_model = getattr(args, "subconscious_model", "gemini-2.5-flash-lite")
 
     # Output destination choices — always offer moltbook option (writes gated by moltbook_disabled flag)
     output_choices = ["analog_home", "moltbook_and_analog_home"]
@@ -275,7 +275,7 @@ def build_default_registry(args, model_registry) -> ControlRegistry:
                 min_val=0.05, max_val=0.9),
 
         # --- Timing ---
-        Control("cycle_interval_minutes", "int", getattr(args, "interval", 5),
+        Control("cycle_interval_minutes", "int", getattr(args, "interval", 60),
                 "Minutes between cycles", "timing", min_val=1, max_val=120),
         Control("post_interval_minutes", "int", getattr(args, "post_interval", 30),
                 "Minutes between posts", "timing", min_val=5, max_val=1440),
@@ -288,7 +288,7 @@ def build_default_registry(args, model_registry) -> ControlRegistry:
         Control("mode", "str", getattr(args, "mode", "all"),
                 "Action mode", "social",
                 choices=["all", "comment_only", "no_post", "no_comment", "post_only"]),
-        Control("allow_downvote", "bool", getattr(args, "allow_downvote", True),
+        Control("allow_downvote", "bool", getattr(args, "allow_downvote", False),
                 "Allow downvoting", "social"),
         Control("priority", "str", getattr(args, "priority", "replies_first"),
                 "Reply priority", "social",
@@ -296,17 +296,17 @@ def build_default_registry(args, model_registry) -> ControlRegistry:
 
         # --- Daemon (Phase 5 will consume; registered now with defaults) ---
         Control("sentry_interval_seconds", "int",
-                getattr(args, "sentry_interval", 60),
+                getattr(args, "sentry_interval", 300),
                 "Seconds between sentry scans", "daemon", min_val=10, max_val=600),
-        Control("signal_threshold", "float", 0.6,
+        Control("signal_threshold", "float", 0.5,
                 "Score to trigger strategist", "daemon", min_val=0.0, max_val=1.0),
-        Control("wake_threshold", "float", 2.0,
+        Control("wake_threshold", "float", 3.0,
                 "Charge to fire conscious", "daemon", min_val=0.5, max_val=10.0),
         Control("wake_decay_rate", "float", 1.0,
                 "Per-tick charge decay (1.0=no decay)", "daemon", min_val=0.5, max_val=1.0),
         Control("wake_refractory", "float", -2.0,
                 "Wake potential after firing (negative=cooldown)", "daemon", min_val=-10.0, max_val=0.0),
-        Control("charge_weight_feed", "float", 0.5,
+        Control("charge_weight_feed", "float", 0.3,
                 "Charge multiplier for Moltbook feed items", "daemon", min_val=0.0, max_val=5.0),
         Control("charge_weight_seed", "float", 2.0,
                 "Charge multiplier for human seeds", "daemon", min_val=0.0, max_val=5.0),
@@ -340,7 +340,7 @@ def build_default_registry(args, model_registry) -> ControlRegistry:
                 "Max focus topics to search per sweep", "daemon", min_val=1, max_val=10),
 
         # --- Context ---
-        Control("feed_batch_size", "int", 12,
+        Control("feed_batch_size", "int", 8,
                 "Feed items per cycle", "context", min_val=1, max_val=50),
         Control("feed_item_chars", "int", 400,
                 "Max chars per feed item in prompt", "context", min_val=50, max_val=2000),
