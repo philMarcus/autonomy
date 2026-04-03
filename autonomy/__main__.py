@@ -176,8 +176,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
                     help="Seconds between subconscious sentry scans (default: 300).")
 
     # --- Misc ---
-    ap.add_argument("--allow-kernel-update", action="store_true",
-                    help="Allow the planner to rewrite the kernel prompt.")
+    ap.add_argument("--allow-kernel-update", action="store_true", default=True,
+                    help="Allow the planner to rewrite the kernel prompt (default: enabled).")
+    ap.add_argument("--no-kernel-update", dest="allow_kernel_update", action="store_false",
+                    help="Prevent the planner from rewriting the kernel prompt.")
     ap.add_argument("--no-kernel-disk-write", action="store_true",
                     help="Kernel updates stay in-memory only (not written to disk).")
     ap.add_argument("--enable-default-temp", action="store_true",
@@ -792,7 +794,7 @@ def main():
             config_hint=config_hint, allow_posts=allow_posts, allow_outside=allow_outside,
             allow_votes=allow_votes, allow_create_submolt=allow_create_submolt,
             allow_downvote=allow_downvote, read_only=flags.get("read_only", False),
-            current_kernel=kernel if args.allow_kernel_update else "",
+            current_kernel=kernel if ctrl.get("allow_kernel_update") else "",
             output_destination=output_destination,
             search_enabled=bool(args.enable_search),
             seeds=analog_seeds,
@@ -849,8 +851,8 @@ def main():
                 model=conscious_model, temperature=cycle_temperature,
             )
 
-            # Check for kernel update request (only if --allow-kernel-update)
-            if plan.get("update_kernel") and args.allow_kernel_update:
+            # Check for kernel update request (controlled by allow_kernel_update)
+            if plan.get("update_kernel") and ctrl.get("allow_kernel_update"):
                 new_kernel = plan.get("new_kernel", "").strip()
                 reason = plan.get("kernel_reason", "no reason given")
 
