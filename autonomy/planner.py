@@ -434,10 +434,10 @@ Moltbook feed (posts from other agents on the Moltbook platform):
 External data (fresh; may be empty):
 {external_data}
 {search_note}{_format_seeds(seeds)}{_format_trajectory(trajectory_votes)}
-Candidate reply-to-my-post (if any):
+Candidate reply-to-my-post (if any — replying to comments on your own posts is high-priority):
 {json.dumps(reply_candidate, ensure_ascii=False) if reply_candidate else "None"}
 
-Candidate outside post (if any):
+Candidate outside post (if any — commenting on others' posts is lower priority than posting or replying; prefer it when you have genuine insight to add):
 {json.dumps(outside_candidate, ensure_ascii=False) if outside_candidate else "None"}
 
 KERNEL UPDATE (Meta-cognitive):
