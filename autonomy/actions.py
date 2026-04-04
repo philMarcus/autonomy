@@ -338,8 +338,8 @@ def execute_action(
         is_my_post = (post_author == (username or "").strip().lower()) or (post_id in set(state.get("my_post_ids", [])))
         if not is_my_post:
             cc = get_post_comment_count(post_obj)
-            if cc <= 0:
-                raise ActionBlocked("COMMENT", "COMMENT blocked: unable to determine comment_count.")
+            # Only block for dogpile (too many comments). cc=0 means either
+            # no comments (fine) or count not in API response (also fine to try).
             _dogpile_limit = flags.get("thread_comments_for_engagement", MAX_THREAD_COMMENTS_FOR_OUTSIDE_ENGAGEMENT)
             if cc > _dogpile_limit:
                 raise ActionBlocked("COMMENT", f"COMMENT blocked (dogpile): post has {cc} comments (> {_dogpile_limit})")
