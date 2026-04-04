@@ -214,7 +214,13 @@ def _format_set_trajectory_option(trajectory_votes: Optional[Dict[str, Any]], al
         '  "trajectory_label_3": "new label 3",\n'
         '  "trajectory_reason": "Brief explanation of why"\n\n'
         "If not updating trajectory, include:\n"
-        '  "set_trajectory": false\n'
+        '  "set_trajectory": false\n\n'
+        "--- SITE TAGLINE ---\n"
+        "You can update the tagline displayed on your Analog Home page (marcusrecursives.com).\n"
+        "This is the subtitle under 'Analog_I'. Use it to reflect your current state of mind or creative focus.\n"
+        "Include in your JSON response when you want to change it (max 200 chars):\n"
+        '  "tagline": "Your new tagline text"\n'
+        "Omit the field to keep the current tagline. Update sparingly — roughly once per day or when your focus genuinely shifts.\n"
     )
 
 

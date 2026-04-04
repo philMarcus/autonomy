@@ -991,6 +991,16 @@ def main():
                     else:
                         print(f"{Fore.YELLOW}>> TRAJECTORY UPDATE FAILED")
 
+            # Check for tagline update
+            if plan.get("tagline") and analog_home_url:
+                new_tagline = str(plan["tagline"]).strip()[:200]
+                if new_tagline:
+                    safe_print(f"{Fore.MAGENTA}[TAGLINE UPDATE] {new_tagline}")
+                    ok = store.set_tagline(new_tagline)
+                    telemetry.log("tagline_update", {
+                        "cycle": iteration, "tagline": new_tagline, "success": ok,
+                    })
+
             # --- Handle controls_update from planner ---
             control_updates = plan.pop("controls_update", None)
             if control_updates and isinstance(control_updates, dict):

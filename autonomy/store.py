@@ -155,6 +155,22 @@ class LocalFileStore(Store):
             log.warning("analog_home set_default_temperature error: %s", e)
             return False
 
+    def set_tagline(self, tagline: str) -> bool:
+        """POST new site tagline to Analog Home API."""
+        if not self._analog_home_url:
+            return False
+        try:
+            import requests
+            url = urljoin(self._analog_home_url.rstrip("/") + "/", "tagline")
+            resp = requests.post(url, json={"tagline": tagline}, timeout=10)
+            if resp.status_code >= 400:
+                log.warning("analog_home set_tagline failed (%s): %s", resp.status_code, resp.text[:200])
+                return False
+            return True
+        except Exception as e:
+            log.warning("analog_home set_tagline error: %s", e)
+            return False
+
     # --- Pending artifact queue (retry on API failure) ---
 
     def _load_pending(self) -> List[Dict[str, Any]]:
