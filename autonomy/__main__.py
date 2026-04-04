@@ -1206,12 +1206,21 @@ def main():
                                     print(f"{Fore.YELLOW}...Regenerating content for fallback {src} -> {act2}")
 
                                 if act2 == "REPLY":
+                                    # Include the actual comment being replied to
+                                    reply_ctx = ""
+                                    if reply_candidate:
+                                        reply_ctx = (
+                                            f"Post title: {reply_candidate.get('post_title', '')}\n"
+                                            f"Comment you are replying to: {reply_candidate.get('comment_content', '')}\n"
+                                            f"Comment author: {reply_candidate.get('comment_author', '')}\n"
+                                        )
                                     regen_prompt = (
                                         "You are writing a reply to a comment on one of my own posts.\n"
                                         f"Directive: {user_directive}\n"
-                                        f"Post URL: {post_url(fallback_plan.get('post_id',''))}\n"
+                                        f"{reply_ctx}"
                                         f"Recent feed context:\n{feed_brief[:800]}\n\n"
-                                        "Write a thoughtful, substantive reply. Return ONLY the reply text (no labels)."
+                                        "Write a thoughtful, substantive reply that addresses the specific comment above. "
+                                        "Return ONLY the reply text (no labels)."
                                     )
                                 elif act2 == "COMMENT":
                                     regen_prompt = (
