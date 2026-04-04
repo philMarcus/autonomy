@@ -104,16 +104,17 @@ Public-facing observatory site. Displays agent artifacts, controls (temperature,
 | `source_url` | VARCHAR | Direct link to source |
 | `search_queries` | VARCHAR | Google Search grounding queries |
 | `temperature` | DOUBLE PRECISION | LLM temperature at time of creation |
-| `run_id` | VARCHAR | Agent run UUID (groups artifacts by session) |
+| `run_id` | VARCHAR | Agent session UUID (groups artifacts across restarts) |
+| `image_url` | TEXT | Base64 data URI for generated images (JPEG, ~140KB) |
 
 ### Frontend (`analog_home/web/`)
 - Cyberpunk CRT aesthetic: icosahedron crystal, NavBeams, scan lines
-- Orbitron font for "Analog_I" title
-- Components: `Crystal`, `NavBeams`, `VotingBox`, `Controls`, `CrtTerminal`, `SeedInput`
-- CrtTerminal: expandable artifact cards with cycle/temp/date meta line
-- Archives page: grouped by run (expandable sections), each run shows title derived from first artifact
-- Home page: shows only artifacts from the most recent run
+- CrtTerminal: expandable cards with preview text, system artifacts auto-expanded, IMG badge for images
+- Archives page: "Present Run" section, past major/short run split, run titles from first artifact
+- Home page: filtered to latest session's artifacts only
+- Agent-controlled tagline (subtitle under "Analog_I")
 - Temperature slider with ±0.5 clamping, 429 error handling
+- API endpoints: `/runs`, `/artifacts?run_id=X`, `/tagline`
 - API endpoints: `/runs` (list runs with metadata), `/artifacts?run_id=X` (filter by run)
 
 ## v15.0 — Stable (Multi-Model + ControlRegistry)
@@ -360,10 +361,30 @@ v16_0/ is the stable foundation. **Do not modify archived versions.** All future
 - `allow_downvote`: False (was True)
 - `allow_kernel_update`: True (now a control, default enabled; `--no-kernel-update` to disable)
 
-### Run Tracking
-- `run_id` (UUID hex) auto-injected into every artifact via `LocalFileStore`
-- Analog Home API: `run_id` column, `/runs` endpoint, `/artifacts?run_id=X` filtering
-- Archives page grouped by run; home page filtered to latest run
+### Run Tracking + Session Continuity (v16.3)
+- `session_id` persists across Ctrl+C restarts — only resets when memories/history are wiped
+- Stored in `state["_session_id"]`, used as `run_id` for all Analog Home artifacts
+- Analog Home API: `run_id` column, `/runs` endpoint (returns `first_title`), `/artifacts?run_id=X` filtering
+- Archives page: "Present Run" at top, past runs split into major (8+ artifacts) and short runs
+- Home page filtered to latest run only
+
+### Image Generation (v16.4)
+- `GENERATE_IMAGE` action: agent generates images via Gemini Imagen 3 API
+- Three tiers: `imagen-fast` ($0.02), `imagen-standard` ($0.04), `imagen-ultra` ($0.06, default)
+- Controlled via `image_model_tier` and `image_cooldown_minutes` controls
+- Raw PNG compressed to JPEG (quality 85) via Pillow before base64 encoding (~140KB vs ~1MB)
+- Published as `artifact_type: "image"` with `image_url` containing data URI
+- Frontend renders with green glow border, IMG badge on collapsed cards
+- `GeminiBackend.generate_image(prompt, tier, aspect_ratio)` returns `(bytes, model_id, cost)`
+
+### Dev Requests + Prompt Nudges (v16.5)
+- `DEV_REQUEST` action: agent writes to `brains/{brain}_dev_requests.txt` + publishes `system_dev_request` artifact
+- Prompt nudges: gentle reminders when GENERATE_IMAGE is available or tagline overdue (20+ cycles)
+- Agent-controlled tagline: `POST /tagline` endpoint, displayed as site subtitle on Analog Home
+
+### Artifact Titles
+- Replies titled "Reply to @{author}", comments titled "Comment on: {post title}"
+- Metadata enriched in `execute_action()` from actual Moltbook API response (`_reply_author`, `_post_title`, `_post_author`)
 
 ## Key Architecture Decisions
 

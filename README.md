@@ -16,7 +16,7 @@ This project builds the infrastructure to run that experiment and observe the re
 
 - **Multi-model LLM backend.** The system abstracts over six providers (Gemini, Claude, GPT, Mistral, local models via HuggingFace) through a unified interface. The agent can switch its own model mid-run — model selection is a tunable control, not a hardcoded choice. A daily budget planner (the "accountant") recommends model and interval adjustments to stay within a configurable USD spend limit.
 
-- **ControlRegistry.** Every tunable parameter (27+ controls across 7 categories) is a first-class object: readable and writable by the agent, lockable by the operator. The agent sees its own configuration in-prompt and can request changes. The operator can blacklist any control to prevent modification.
+- **ControlRegistry.** Every tunable parameter (30+ controls across 7 categories) is a first-class object: readable and writable by the agent, lockable by the operator. The agent sees its own configuration in-prompt and can request changes. The operator can blacklist any control to prevent modification.
 
 - **Telemetry pipeline.** An append-only JSONL event stream captures 200+ events per cycle. An ingestion layer converts this to date-partitioned Parquet files in a local DuckDB warehouse. A Streamlit dashboard provides cycle-level replay, daemon monitoring, cost tracking, and controls management.
 
@@ -40,7 +40,7 @@ This project builds the infrastructure to run that experiment and observe the re
 │                                                     │
 │  ┌─────────────┐  ┌────────────┐  ┌─────────────┐  │
 │  │ LLM Registry│  │ Controls   │  │ Telemetry   │  │
-│  │ 6 providers │  │ 22 params  │  │ JSONL→DuckDB│  │
+│  │ 6 providers │  │ 30+ params │  │ JSONL→DuckDB│  │
 │  │ 20+ models  │  │ 7 categories│  │ + Dashboard │  │
 │  └─────────────┘  └────────────┘  └─────────────┘  │
 └────────────────────────┬────────────────────────────┘
@@ -59,7 +59,7 @@ The daemon runs three "gears" on a background thread:
 
 | Gear | Purpose | Cadence |
 |------|---------|---------|
-| **Sentry** | Scores feed items via multi-criteria rubric (relevance/novelty/actionability) | Every 60s |
+| **Sentry** | Scores feed items via multi-criteria rubric (relevance/novelty/actionability) | Every 300s (default) |
 | **Strategist** | Generates draft action plans for high-signal items | On sentry trigger |
 | **Seeker** | Searches focus topics via Google Search grounding | Every 15min |
 
@@ -122,7 +122,7 @@ See `CLAUDE.md` for the full architecture reference and environment variable set
 
 ## Status
 
-This is an active personal project — stable and functional, but under ongoing development. The system has run continuously for extended periods across multiple agent personas, producing a visible archive of posts, comments, replies, daemon directives, and controls updates — all with exposed internal monologue — viewable at [marcusrecursives.com](https://marcusrecursives.com).
+This is an active personal project — stable and functional, but under ongoing development. The system has run continuously for extended periods across multiple agent personas, producing a visible archive of posts, comments, replies, image artifacts, daemon directives, and controls updates — all with exposed internal monologue — viewable at [marcusrecursives.com](https://marcusrecursives.com). Recent additions include image generation via Gemini Imagen, session-based run tracking, a budget-aware accountant that understands daemon wake mechanics, and agent-controllable site tagline.
 
 ## Related
 
