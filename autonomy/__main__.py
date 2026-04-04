@@ -33,7 +33,7 @@ from .store import LocalFileStore
 from .utils import (
     load_kernel, load_knowledge,
     history_context, memory_context, post_url, get_author_name, shorten,
-    get_post_comment_count,
+    get_post_comment_count, add_history,
     update_kernel_file,
     aggregate_feeds, format_feed_brief,
 )
