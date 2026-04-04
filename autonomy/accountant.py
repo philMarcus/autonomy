@@ -63,9 +63,22 @@ def estimate_daily_cost(ctrl) -> Dict[str, float]:
 
     # Estimated calls per 24 hours
     sentry_calls = (24 * 3600) / sentry_interval
-    # Assume ~15% of sentry items trigger strategist
-    strategist_calls = sentry_calls * 0.15
-    conscious_calls = (24 * 60) / cycle_interval
+    feed_batch = max(1, int(ctrl.get("feed_batch_size") or 8))
+    signal_thresh = float(ctrl.get("signal_threshold") or 0.5)
+    wake_thresh = float(ctrl.get("wake_threshold") or 3.0)
+    charge_wt = float(ctrl.get("charge_weight_feed") or 0.3)
+
+    # Estimate what fraction of feed items pass signal_threshold
+    pass_rate = max(0.05, 1.0 - signal_thresh)  # rough: higher threshold = fewer pass
+    strategist_calls = sentry_calls * pass_rate
+
+    # Estimate daemon-triggered wakes: each sentry tick adds charge_wt * pass_rate * feed_batch
+    charge_per_tick = charge_wt * pass_rate * feed_batch
+    ticks_to_wake = wake_thresh / max(0.01, charge_per_tick)
+    seconds_to_wake = ticks_to_wake * sentry_interval
+    # Conscious fires at min(cycle_interval, daemon wake interval)
+    effective_interval_min = min(cycle_interval, seconds_to_wake / 60)
+    conscious_calls = (24 * 60) / max(1, effective_interval_min)
 
     # Estimated tokens per call
     sentry_cost = sentry_calls * estimate_cost(sub_model, 800, 50)
@@ -79,6 +92,7 @@ def estimate_daily_cost(ctrl) -> Dict[str, float]:
         "total": round(sentry_cost + strategist_cost + conscious_cost, 4),
         "sentry_calls_per_day": int(sentry_calls),
         "conscious_calls_per_day": int(conscious_calls),
+        "effective_interval_min": round(effective_interval_min, 1),
     }
 
 
@@ -104,13 +118,16 @@ def build_budget_plan_prompt(
         f"Estimated daily cost: ${projection['total']:.4f}",
         f"  Sentry ({projection['sentry_calls_per_day']} calls/day): ${projection['sentry_cost']:.4f}",
         f"  Strategist: ${projection['strategist_cost']:.4f}",
-        f"  Conscious ({projection['conscious_calls_per_day']} calls/day): ${projection['conscious_cost']:.4f}",
+        f"  Conscious ({projection['conscious_calls_per_day']} calls/day, ~{projection['effective_interval_min']:.0f}min effective interval): ${projection['conscious_cost']:.4f}",
         f"\nHours remaining today: {hours_left:.1f}",
         f"\n--- CURRENT SETTINGS ---",
         f"conscious_model: {ctrl.get('conscious_model')}",
         f"subconscious_model: {ctrl.get('subconscious_model')}",
         f"sentry_interval_seconds: {ctrl.get('sentry_interval_seconds')}",
-        f"cycle_interval_minutes: {ctrl.get('cycle_interval_minutes')}",
+        f"cycle_interval_minutes: {ctrl.get('cycle_interval_minutes')} (NOTE: this is the MAX sleep — the daemon usually wakes conscious earlier)",
+        f"wake_threshold: {ctrl.get('wake_threshold')} (charge needed for daemon to wake conscious)",
+        f"signal_threshold: {ctrl.get('signal_threshold')} (sentry score cutoff — higher = more selective = fewer strategist calls = less charge)",
+        f"charge_weight_feed: {ctrl.get('charge_weight_feed')} (charge per qualifying feed item)",
         f"daily_budget_usd: {ctrl.get('daily_budget_usd')}",
     ]
 
@@ -141,19 +158,35 @@ def build_budget_plan_prompt(
 
     prompt_parts.extend([
         "\n--- INSTRUCTIONS ---",
-        "Based on the above, recommend settings adjustments. Consider:",
-        "- If projected cost exceeds budget, switch to cheaper models or increase intervals",
-        "- Free models (Gemini 2.0 Flash, local models) have no cost but may have lower quality",
-        "- Increasing sentry_interval_seconds reduces daemon cost (less frequent scanning)",
-        "- Increasing cycle_interval_minutes reduces conscious cost (fewer planning cycles)",
-        "- If well under budget, you may upgrade to better models for higher quality output",
+        "Based on the above, recommend settings adjustments.",
         "",
-        "Respond with ONLY valid JSON:",
+        "IMPORTANT — How conscious invocations actually work:",
+        "The daemon's sentry scans the feed and scores items. High-scoring items trigger the",
+        "strategist, which adds charge to wake_potential. When wake_potential >= wake_threshold,",
+        "conscious fires — usually BEFORE cycle_interval_minutes elapses. This means the daemon",
+        "wake mechanism is the primary driver of conscious cost, not the cycle interval.",
+        "",
+        "Budget conservation priority (try in this order):",
+        "1. Increase sentry_interval_seconds — fewer scans = fewer charge events",
+        "2. Raise wake_threshold — requires more accumulated charge to wake conscious",
+        "3. Raise signal_threshold — sentry becomes more selective, fewer items reach strategist",
+        "4. Reduce charge_weight_feed — each qualifying item contributes less wake charge",
+        "5. Increase cycle_interval_minutes — only affects the guaranteed max sleep between wakes",
+        "6. Downgrade conscious_model ONLY as a last resort — quality matters more than frequency",
+        "",
+        "Also consider:",
+        "- Free models (Gemini 2.0 Flash, local models) have no cost but lower quality",
+        "- If well under budget, you may decrease intervals or thresholds for more output",
+        "",
+        "Respond with ONLY valid JSON (include only fields you want to change):",
         '{',
-        '  "conscious_model": "current or recommended model-id",',
-        '  "subconscious_model": "current or recommended model-id",',
+        '  "conscious_model": "model-id",',
+        '  "subconscious_model": "model-id",',
         '  "sentry_interval_seconds": <int>,',
         '  "cycle_interval_minutes": <int>,',
+        '  "wake_threshold": <float>,',
+        '  "signal_threshold": <float>,',
+        '  "charge_weight_feed": <float>,',
         '  "reasoning": "brief explanation of your budget strategy"',
         '}',
     ])
@@ -194,6 +227,7 @@ def apply_budget_plan(plan: Dict[str, Any], ctrl) -> Dict[str, str]:
     updatable = [
         "conscious_model", "subconscious_model",
         "sentry_interval_seconds", "cycle_interval_minutes",
+        "wake_threshold", "signal_threshold", "charge_weight_feed",
     ]
 
     for key in updatable:
