@@ -1183,18 +1183,20 @@ def main():
                     if not image_prompt:
                         safe_print(f"{Fore.RED}[IMAGE] No image_prompt in plan, skipping.")
                     else:
-                        safe_print(f"{Fore.MAGENTA}[IMAGE] Generating: {image_prompt[:120]}...")
+                        img_tier = ctrl.get("image_model_tier") or "imagen-ultra"
+                        safe_print(f"{Fore.MAGENTA}[IMAGE] Generating ({img_tier}): {image_prompt[:120]}...")
                         try:
                             import base64
-                            image_bytes = gemini_backend.generate_image(prompt=image_prompt)
+                            image_bytes, img_model_id, img_cost = gemini_backend.generate_image(
+                                prompt=image_prompt, tier=img_tier,
+                            )
                             image_b64 = base64.b64encode(image_bytes).decode("ascii")
                             image_data_uri = f"data:image/png;base64,{image_b64}"
 
-                            # Budget: ~$0.04 per Imagen call
                             from .llm.base import LLMResponse as _ImgResp
-                            budget.record_usage("imagen-3.0-generate-002", _ImgResp(
+                            budget.record_usage(img_model_id, _ImgResp(
                                 text="", input_tokens=0, output_tokens=0,
-                                cost_usd=0.04, model_id="imagen-3.0-generate-002",
+                                cost_usd=img_cost, model_id=img_model_id,
                             ))
 
                             set_cooldown(state, "GENERATE_IMAGE", ctrl=ctrl)
@@ -1214,7 +1216,9 @@ def main():
                                 "cycle": iteration,
                                 "prompt": image_prompt[:500],
                                 "size_bytes": len(image_bytes),
-                                "cost_usd": 0.04,
+                                "model": img_model_id,
+                                "tier": img_tier,
+                                "cost_usd": img_cost,
                             })
 
                             add_history(state, {

@@ -329,16 +329,30 @@ class GeminiBackend(ModelBackend):
             latency_ms=latency_ms,
         )
 
+    # Imagen model tiers: fast ($0.02), standard ($0.04), ultra ($0.06)
+    IMAGEN_MODELS = {
+        "imagen-fast": {"model_id": "imagen-3.0-fast-generate-001", "cost": 0.02},
+        "imagen-standard": {"model_id": "imagen-3.0-generate-002", "cost": 0.04},
+        "imagen-ultra": {"model_id": "imagen-4.0-ultra-generate-001", "cost": 0.06},
+    }
+
     def generate_image(
         self,
         prompt: str,
-        model_id: str = "imagen-3.0-generate-002",
+        tier: str = "imagen-ultra",
         aspect_ratio: str = "1:1",
-    ) -> bytes:
+    ) -> tuple:
         """Generate an image from a text prompt using Imagen.
 
-        Returns raw PNG bytes. Raises on failure.
+        Args:
+            tier: "imagen-fast" ($0.02), "imagen-standard" ($0.04), or "imagen-ultra" ($0.06)
+
+        Returns (raw_png_bytes, model_id, cost_usd).
         """
+        info = self.IMAGEN_MODELS.get(tier, self.IMAGEN_MODELS["imagen-ultra"])
+        model_id = info["model_id"]
+        cost = info["cost"]
+
         response = self._client.models.generate_images(
             model=model_id,
             prompt=prompt,
@@ -349,7 +363,7 @@ class GeminiBackend(ModelBackend):
         )
         if not response.generated_images:
             raise RuntimeError("Imagen returned no images")
-        return response.generated_images[0].image.image_bytes
+        return response.generated_images[0].image.image_bytes, model_id, cost
 
     def available_models(self) -> List[ModelInfo]:
         return list(GEMINI_MODELS)

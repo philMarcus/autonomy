@@ -281,6 +281,9 @@ def build_default_registry(args, model_registry) -> ControlRegistry:
                 "Minutes between posts", "timing", min_val=5, max_val=1440),
         Control("image_cooldown_hours", "int", 24,
                 "Min hours between image generations", "timing", min_val=4, max_val=168),
+        Control("image_model_tier", "str", "imagen-ultra",
+                "Imagen tier: fast ($0.02), standard ($0.04), ultra ($0.06)", "llm",
+                choices=["imagen-fast", "imagen-standard", "imagen-ultra"]),
 
         # --- Output ---
         Control("output_destination", "str", output_default,
