@@ -1323,10 +1323,25 @@ def main():
                             if sq:
                                 search_queries_str = ", ".join(str(q) for q in sq)
 
+                        # Generate descriptive title for replies/comments
+                        artifact_title = executed_plan.get("title", "")
+                        if not artifact_title:
+                            if act_upper == "REPLY" and reply_candidate:
+                                author = reply_candidate.get("comment_author", "")
+                                artifact_title = f"Reply to @{author}" if author else "Reply"
+                            elif act_upper == "COMMENT":
+                                # Try to get post title from the post object
+                                _cmt_post_id = executed_plan.get("post_id", "")
+                                if outside_candidate and outside_candidate.get("post_id") == _cmt_post_id:
+                                    _cmt_title = outside_candidate.get("title", "")
+                                    artifact_title = f"Comment on: {_cmt_title}" if _cmt_title else "Comment"
+                                else:
+                                    artifact_title = "Comment"
+
                         store.write_artifact(iteration, {
                             "brain": brain_name,
                             "artifact_type": act_upper.lower(),
-                            "title": executed_plan.get("title", ""),
+                            "title": artifact_title,
                             "body_markdown": executed_plan.get("content", ""),
                             "monologue_public": preamble,
                             "channel": executed_plan.get("submolt", ""),
