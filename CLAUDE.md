@@ -64,13 +64,16 @@ Public-facing observatory site. Displays agent artifacts, controls (temperature,
 - `--enable-search` — Enable Google Search grounding
 - `--enable-default-temp` — Allow agent to set default temperature
 - `--temperature` — LLM temperature (default 0.7)
-- `--interval` — Minutes between cycles (default 5)
+- `--interval` — Minutes between cycles (default 60)
 - `--post-interval` — Minutes between posts (default 30)
 - `--reset-post-window` — Clear post cooldown on startup
-- `--allow-kernel-update` — Allow planner to rewrite kernel prompt
+- `--allow-kernel-update` — Allow planner to rewrite kernel prompt (default: enabled, also a control)
+- `--no-kernel-update` — Prevent planner from rewriting kernel prompt
 - `--no-kernel-disk-write` — Kernel updates stay in-memory only
 - `--inject-espn` — Inject ESPN data into planner context
 - `--mode` — `all`, `comment_only`, `no_post`
+- `--subconscious-model` — Model for daemon (default: `gemini-2.5-flash-lite`)
+- `--sentry-interval` — Seconds between sentry scans (default: 300)
 
 ## Analog Home Architecture
 
@@ -101,14 +104,17 @@ Public-facing observatory site. Displays agent artifacts, controls (temperature,
 | `source_url` | VARCHAR | Direct link to source |
 | `search_queries` | VARCHAR | Google Search grounding queries |
 | `temperature` | DOUBLE PRECISION | LLM temperature at time of creation |
+| `run_id` | VARCHAR | Agent run UUID (groups artifacts by session) |
 
 ### Frontend (`analog_home/web/`)
 - Cyberpunk CRT aesthetic: icosahedron crystal, NavBeams, scan lines
 - Orbitron font for "Analog_I" title
 - Components: `Crystal`, `NavBeams`, `VotingBox`, `Controls`, `CrtTerminal`, `SeedInput`
 - CrtTerminal: expandable artifact cards with cycle/temp/date meta line
-- Archives page: paginated artifact history (`/archives`)
+- Archives page: grouped by run (expandable sections), each run shows title derived from first artifact
+- Home page: shows only artifacts from the most recent run
 - Temperature slider with ±0.5 clamping, 429 error handling
+- API endpoints: `/runs` (list runs with metadata), `/artifacts?run_id=X` (filter by run)
 
 ## v15.0 — Stable (Multi-Model + ControlRegistry)
 
@@ -335,6 +341,29 @@ v16_0/ is the stable foundation. **Do not modify archived versions.** All future
 ### 429 Backoff Fix
 - `GeminiChatSession.send_message()` now calls `BUDGET.note_429()` on rate-limit errors before re-raising
 - Prevents unlimited API hammering when free-tier models hit rate limits
+
+### Budget Tracking + Accountant (v16.2+)
+- `GeminiChatSession.send_message()` now captures `usage_metadata` (input/output tokens)
+- `planner.py` records conscious LLM spend to `DailyBudget` after every call; telemetry enriched with tokens + cost_usd
+- `__main__.py` records accountant chat spend
+- **Accountant** (`accountant.py`): understands daemon wake mechanics (wake_threshold, signal_threshold, charge_weight control actual conscious invocation rate). Conservation priority: sentry interval → wake threshold → signal threshold → charge weight → cycle interval → model downgrade (last resort)
+- Accountant can adjust 7 controls: conscious_model, subconscious_model, sentry_interval_seconds, cycle_interval_minutes, wake_threshold, signal_threshold, charge_weight_feed
+- Cost projection estimates effective wake interval from daemon parameters
+
+### Default Tuning (Apr 2026)
+- `cycle_interval_minutes`: 60 (was 5) — budget-friendly conscious cycle rate
+- `sentry_interval_seconds`: 300 (was 60) — halves daemon LLM calls
+- `subconscious_model`: `gemini-2.5-flash-lite` (was `gemini-2.5-flash`)
+- `wake_threshold`: 3.0 (was 2.0) — prevents constant daemon waking
+- `charge_weight_feed`: 0.3 (was 0.5) — feed items less likely to trigger wake
+- `feed_batch_size`: 8 (was 12) — fewer sentry evaluations per tick
+- `allow_downvote`: False (was True)
+- `allow_kernel_update`: True (now a control, default enabled; `--no-kernel-update` to disable)
+
+### Run Tracking
+- `run_id` (UUID hex) auto-injected into every artifact via `LocalFileStore`
+- Analog Home API: `run_id` column, `/runs` endpoint, `/artifacts?run_id=X` filtering
+- Archives page grouped by run; home page filtered to latest run
 
 ## Key Architecture Decisions
 
