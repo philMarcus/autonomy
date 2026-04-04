@@ -235,6 +235,7 @@ class LocalFileStore(Store):
             "search_queries": artifact.get("search_queries", ""),
             "temperature": artifact.get("temperature"),
             "run_id": artifact.get("run_id", "") or self._run_id,
+            "image_url": artifact.get("image_url", ""),
         }
         try:
             import requests

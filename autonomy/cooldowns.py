@@ -27,6 +27,7 @@ DEFAULT_COOLDOWNS: Dict[str, int] = {
     "SUBSCRIBE_SUBMOLT": 300,   # 5m
     "CREATE_SUBMOLT": 3600,     # 1h
     "DM": 600,                  # 10m
+    "GENERATE_IMAGE": 86400,    # 24h — overridden by image_cooldown_hours
 }
 
 # Map from ControlRegistry keys to action names they override
@@ -127,6 +128,11 @@ def _resolve_default(action: str, ctrl: Optional[Any]) -> int:
                 return int(ctrl.get("cooldown_create_submolt_seconds"))
             except Exception:
                 pass
+        elif action == "GENERATE_IMAGE":
+            try:
+                return int(ctrl.get("image_cooldown_hours") * 3600)
+            except Exception:
+                pass
     return DEFAULT_COOLDOWNS.get(action, 60)
 
 
@@ -141,7 +147,7 @@ def cooldown_status_text(
         "UPVOTE_COMMENT", "DOWNVOTE_COMMENT",
         "FOLLOW", "UNFOLLOW",
         "SUBSCRIBE_SUBMOLT", "CREATE_SUBMOLT",
-        "DM",
+        "DM", "GENERATE_IMAGE",
     ]
     lines = []
     for action in actions:

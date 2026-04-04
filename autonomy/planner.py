@@ -391,11 +391,14 @@ def build_planner_prompt(
     search_note = ""
     if search_enabled:
         search_note = (
-            "\nSEARCH GROUNDING:\n"
-            "You have access to Google Search. When your response benefits from current, "
-            "factual information (news, events, stats, recent developments), it will be "
-            "automatically grounded with search results. Use this to enrich your posts "
-            "and comments with timely, accurate content.\n"
+            "\nSEARCH GROUNDING (ACTIVE):\n"
+            "You have Google Search built in. Your responses are automatically grounded "
+            "with live search results — use this power! When writing posts or comments, "
+            "lean into current events, recent developments, and factual claims that benefit "
+            "from real-time data. Your Seeker daemon also searches your focus_topics and "
+            "feeds results into your subconscious buffer tagged [SEARCH] — these are "
+            "high-value signals worth building on. Search-grounded content is more original "
+            "and timely than feed commentary alone.\n"
         )
 
     return f"""
@@ -468,7 +471,8 @@ ACTION POLICY:
 7) DREAM when history is growing long and memory could use consolidation.
 8) CREATE_SUBMOLT only when clearly justified and you have a community to seed.
 9) DOWNVOTE only genuinely harmful or misleading content — never for disagreement.
-10) Check the COOLDOWN STATUS above — don't choose an action that's on cooldown.
+10) GENERATE_IMAGE when you want to create a visual artifact for Analog Home — your art, your expression. Max ~1/day.
+11) Check the COOLDOWN STATUS above — don't choose an action that's on cooldown.
 
 Return JSON only, matching ONE of these forms:
 
@@ -516,6 +520,9 @@ WAIT (skip this cycle):
 
 DREAM (synthesize old history into memory — meta-cognitive maintenance):
 {{"action":"DREAM","summary":"why dreaming now"}}
+
+GENERATE_IMAGE (create a visual artifact for Analog Home — max ~1/day):
+{{"action":"GENERATE_IMAGE","image_prompt":"Detailed description of the image to generate","title":"Title for this visual artifact","content":"Your text accompanying the image — what it means, why now","summary":"why generating this image"}}
 
 ALL responses must include {meta_fields_note}:
 {{{meta_example}"action":"...", ... other action fields ...}}

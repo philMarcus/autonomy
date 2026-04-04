@@ -279,6 +279,8 @@ def build_default_registry(args, model_registry) -> ControlRegistry:
                 "Minutes between cycles", "timing", min_val=1, max_val=120),
         Control("post_interval_minutes", "int", getattr(args, "post_interval", 30),
                 "Minutes between posts", "timing", min_val=5, max_val=1440),
+        Control("image_cooldown_hours", "int", 24,
+                "Min hours between image generations", "timing", min_val=4, max_val=168),
 
         # --- Output ---
         Control("output_destination", "str", output_default,

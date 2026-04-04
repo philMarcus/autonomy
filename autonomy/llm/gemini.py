@@ -329,5 +329,27 @@ class GeminiBackend(ModelBackend):
             latency_ms=latency_ms,
         )
 
+    def generate_image(
+        self,
+        prompt: str,
+        model_id: str = "imagen-3.0-generate-002",
+        aspect_ratio: str = "1:1",
+    ) -> bytes:
+        """Generate an image from a text prompt using Imagen.
+
+        Returns raw PNG bytes. Raises on failure.
+        """
+        response = self._client.models.generate_images(
+            model=model_id,
+            prompt=prompt,
+            config=types.GenerateImagesConfig(
+                number_of_images=1,
+                aspect_ratio=aspect_ratio,
+            ),
+        )
+        if not response.generated_images:
+            raise RuntimeError("Imagen returned no images")
+        return response.generated_images[0].image.image_bytes
+
     def available_models(self) -> List[ModelInfo]:
         return list(GEMINI_MODELS)

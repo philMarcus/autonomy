@@ -1172,6 +1172,66 @@ def main():
                     safe_print(f"{Fore.RED}[DREAM] Failed: {dream_result['error']}")
 
                 # Skip execute_action — fall through to controls persist + sleep
+
+            elif act == "GENERATE_IMAGE":
+                # --- Image generation action ---
+                img_ok, img_secs = can_do(state, "GENERATE_IMAGE", ctrl=ctrl)
+                if not img_ok:
+                    safe_print(f"{Fore.YELLOW}[IMAGE] Cooldown active ({img_secs // 3600}h {(img_secs % 3600) // 60}m remaining), skipping.")
+                else:
+                    image_prompt = (plan.get("image_prompt") or "").strip()
+                    if not image_prompt:
+                        safe_print(f"{Fore.RED}[IMAGE] No image_prompt in plan, skipping.")
+                    else:
+                        safe_print(f"{Fore.MAGENTA}[IMAGE] Generating: {image_prompt[:120]}...")
+                        try:
+                            import base64
+                            image_bytes = gemini_backend.generate_image(prompt=image_prompt)
+                            image_b64 = base64.b64encode(image_bytes).decode("ascii")
+                            image_data_uri = f"data:image/png;base64,{image_b64}"
+
+                            # Budget: ~$0.04 per Imagen call
+                            from .llm.base import LLMResponse as _ImgResp
+                            budget.record_usage("imagen-3.0-generate-002", _ImgResp(
+                                text="", input_tokens=0, output_tokens=0,
+                                cost_usd=0.04, model_id="imagen-3.0-generate-002",
+                            ))
+
+                            set_cooldown(state, "GENERATE_IMAGE", ctrl=ctrl)
+
+                            store.write_artifact(iteration, {
+                                "brain": brain_name,
+                                "artifact_type": "image",
+                                "title": shorten(plan.get("title", "Visual Artifact"), 200),
+                                "body_markdown": plan.get("content", ""),
+                                "monologue_public": preamble,
+                                "image_url": image_data_uri,
+                                "temperature": cycle_temperature,
+                            })
+
+                            safe_print(f"{Fore.GREEN}[IMAGE] Generated and published ({len(image_bytes)} bytes)")
+                            telemetry.log("image_generated", {
+                                "cycle": iteration,
+                                "prompt": image_prompt[:500],
+                                "size_bytes": len(image_bytes),
+                                "cost_usd": 0.04,
+                            })
+
+                            add_history(state, {
+                                "action": "GENERATE_IMAGE",
+                                "target": "analog_home",
+                                "summary": plan.get("summary", "Generated image"),
+                            })
+                            store.save_state(state)
+
+                        except Exception as e:
+                            safe_print(f"{Fore.RED}[IMAGE] Generation failed: {e}")
+                            telemetry.log("image_error", {
+                                "cycle": iteration,
+                                "prompt": image_prompt[:500],
+                                "error": str(e)[:500],
+                            })
+
             else:
                 # --- Normal action execution ---
                 executed = False
