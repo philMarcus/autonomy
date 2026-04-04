@@ -167,6 +167,62 @@ def read_brain_events(brain_name: str) -> list[dict]:
 
 
 # ============================================================
+# Spend data loader (reads JSONL directly for cost_usd)
+# ============================================================
+@st.cache_data(ttl=30)
+def _load_spend_data(brain_filter: str):
+    """Parse telemetry JSONL for spend data, grouped by hour and category."""
+    import pandas as pd
+    from datetime import datetime
+
+    records = []
+    for fname in glob.glob(os.path.join(TELEMETRY_DIR, "*_events.jsonl")):
+        try:
+            with open(fname, "r", encoding="utf-8", errors="replace") as f:
+                for line in f:
+                    try:
+                        e = json.loads(line)
+                        if brain_filter != "(all)" and e.get("brain") != brain_filter:
+                            continue
+                        evt = e.get("event_type", "")
+                        cost = 0.0
+                        category = None
+
+                        if evt == "llm_call" and e.get("cost_usd"):
+                            cost = float(e["cost_usd"])
+                            tag = e.get("tag", "")
+                            if tag in ("planner", "fallback_regen", "dream_compress"):
+                                category = "conscious"
+                            elif tag in ("sentry", "strategist", "seeker"):
+                                category = "subconscious"
+                            else:
+                                category = "conscious"  # default
+                        elif evt == "image_generated" and e.get("cost_usd"):
+                            cost = float(e["cost_usd"])
+                            category = "image"
+
+                        if category and cost > 0:
+                            ts = e.get("ts", "")[:13]  # truncate to hour
+                            records.append({"hour": ts, "category": category, "cost": cost})
+                    except (json.JSONDecodeError, ValueError, TypeError):
+                        pass
+        except OSError:
+            pass
+
+    if not records:
+        return None
+
+    df = pd.DataFrame(records)
+    pivot = df.pivot_table(index="hour", columns="category", values="cost", aggfunc="sum", fill_value=0.0)
+    # Ensure all columns exist
+    for col in ["conscious", "subconscious", "image"]:
+        if col not in pivot.columns:
+            pivot[col] = 0.0
+    pivot = pivot[["conscious", "subconscious", "image"]].sort_index()
+    return pivot
+
+
+# ============================================================
 # Tab 1: Overview
 # ============================================================
 def render_overview_tab(brain_filter: str):
@@ -237,6 +293,22 @@ def render_overview_tab(brain_filter: str):
     c6.metric("Blocked", int(kpi.loc[0, "actions_blocked"] or 0))
     c7.metric("Errors", int(kpi.loc[0, "error_events"] or 0))
     c8.metric("429s", int(kpi.loc[0, "rate_limited_429"] or 0))
+
+    st.divider()
+
+    # ---- Spend chart (from JSONL telemetry, not DuckDB) ----
+    st.caption("Spend over time (conscious vs subconscious vs image)")
+    _spend_df = _load_spend_data(brain_filter)
+    if _spend_df is not None and len(_spend_df) > 0:
+        st.area_chart(_spend_df, height=220)
+        totals = _spend_df.sum()
+        sc1, sc2, sc3, sc4 = st.columns(4)
+        sc1.metric("Conscious", f"${totals.get('conscious', 0):.3f}")
+        sc2.metric("Subconscious", f"${totals.get('subconscious', 0):.3f}")
+        sc3.metric("Image", f"${totals.get('image', 0):.3f}")
+        sc4.metric("Total", f"${totals.sum():.3f}")
+    else:
+        st.info("No spend data found (cost tracking requires v16.3+)")
 
     st.divider()
 
