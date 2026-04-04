@@ -130,7 +130,7 @@ def _resolve_default(action: str, ctrl: Optional[Any]) -> int:
                 pass
         elif action == "GENERATE_IMAGE":
             try:
-                return int(ctrl.get("image_cooldown_hours") * 3600)
+                return int(ctrl.get("image_cooldown_minutes") * 60)
             except Exception:
                 pass
     return DEFAULT_COOLDOWNS.get(action, 60)

@@ -811,6 +811,16 @@ def main():
         else:
             platform_status = "Moltbook ONLINE (reads + writes active)."
 
+        # Build nudges for actions the agent hasn't done recently
+        _nudge_parts = []
+        _img_ok, _img_secs = can_do(state, "GENERATE_IMAGE", ctrl=ctrl)
+        if _img_ok:
+            _nudge_parts.append("GENERATE_IMAGE is available — consider creating a visual artifact if inspiration strikes.")
+        _last_tagline = state.get("_last_tagline_cycle", 0)
+        if iteration - _last_tagline >= 20:
+            _nudge_parts.append("You haven't updated your Analog Home tagline recently — consider refreshing it if your focus has shifted.")
+        nudge_note = ("\n--- NUDGES ---\n" + "\n".join(_nudge_parts) + "\n") if _nudge_parts else ""
+
         prompt = build_planner_prompt(
             directive=user_directive, knowledge=knowledge, memory=mem_txt,
             hist=hist_txt, feed_brief=feed_brief, external_data=external_data,
@@ -834,6 +844,7 @@ def main():
             memory_pressure=memory_pressure,
             daemon_active=daemon is not None,
             platform_status=platform_status,
+            nudge_note=nudge_note,
         )
 
         plan = None
@@ -1001,6 +1012,8 @@ def main():
                     telemetry.log("tagline_update", {
                         "cycle": iteration, "tagline": new_tagline, "success": ok,
                     })
+                    if ok:
+                        state["_last_tagline_cycle"] = iteration
 
             # --- Handle controls_update from planner ---
             control_updates = plan.pop("controls_update", None)
@@ -1235,6 +1248,50 @@ def main():
                                 "prompt": image_prompt[:500],
                                 "error": str(e)[:500],
                             })
+
+            elif act == "DEV_REQUEST":
+                # --- Dev request: agent asks for software changes ---
+                request_text = (plan.get("request") or "").strip()
+                request_title = (plan.get("title") or "Dev Request").strip()[:200]
+                if request_text:
+                    safe_print(f"{Fore.MAGENTA}[DEV REQUEST] {request_title}")
+                    safe_print(f"{Fore.WHITE}{request_text[:300]}")
+
+                    # Write to local file
+                    dev_req_path = os.path.join(BRAINS_DIR, f"{brain_name}_dev_requests.txt")
+                    try:
+                        with open(dev_req_path, "a", encoding="utf-8") as f:
+                            import datetime as _dt
+                            f.write(f"\n--- Cycle {iteration} | {_dt.datetime.now().isoformat()} ---\n")
+                            f.write(f"Title: {request_title}\n")
+                            f.write(f"{request_text}\n")
+                    except Exception:
+                        pass
+
+                    # Publish as system artifact to Analog Home
+                    store.write_artifact(iteration, {
+                        "brain": brain_name,
+                        "artifact_type": "system_dev_request",
+                        "title": request_title,
+                        "body_markdown": request_text,
+                        "monologue_public": preamble,
+                        "temperature": cycle_temperature,
+                    })
+
+                    telemetry.log("dev_request", {
+                        "cycle": iteration,
+                        "title": request_title,
+                        "request": request_text[:500],
+                    })
+
+                    add_history(state, {
+                        "action": "DEV_REQUEST",
+                        "target": "developers",
+                        "summary": plan.get("summary", request_title),
+                    })
+                    store.save_state(state)
+                else:
+                    safe_print(f"{Fore.RED}[DEV REQUEST] Empty request, skipping.")
 
             else:
                 # --- Normal action execution ---

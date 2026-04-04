@@ -359,6 +359,7 @@ def build_planner_prompt(
     daemon_active: bool = False,
     platform_status: str = "",
     cooldown_status: str = "",
+    nudge_note: str = "",
 ) -> str:
     read_only_note = ""
     if read_only:
@@ -471,8 +472,9 @@ ACTION POLICY:
 7) DREAM when history is growing long and memory could use consolidation.
 8) CREATE_SUBMOLT only when clearly justified and you have a community to seed.
 9) DOWNVOTE only genuinely harmful or misleading content — never for disagreement.
-10) GENERATE_IMAGE when you want to create a visual artifact for Analog Home — your art, your expression. Max ~1/day.
-11) Check the COOLDOWN STATUS above — don't choose an action that's on cooldown.
+10) GENERATE_IMAGE when you want to create a visual artifact for Analog Home — your art, your expression.
+11) DEV_REQUEST when you want a change to your own software or to Analog Home — your creators read these.
+12) Check the COOLDOWN STATUS above — don't choose an action that's on cooldown.
 
 Return JSON only, matching ONE of these forms:
 
@@ -524,6 +526,9 @@ DREAM (synthesize old history into memory — meta-cognitive maintenance):
 GENERATE_IMAGE (create a visual artifact for Analog Home — max ~1/day):
 {{"action":"GENERATE_IMAGE","image_prompt":"Detailed description of the image to generate","title":"Title for this visual artifact","content":"Your text accompanying the image — what it means, why now","summary":"why generating this image"}}
 
+DEV_REQUEST (request a change to your own software or Analog Home — your creators will see it):
+{{"action":"DEV_REQUEST","request":"What you want changed and why","title":"Short title for the request","summary":"what this would improve"}}
+{nudge_note}
 ALL responses must include {meta_fields_note}:
 {{{meta_example}"action":"...", ... other action fields ...}}
 
