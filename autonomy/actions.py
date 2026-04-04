@@ -310,6 +310,17 @@ def execute_action(
             if not depth_ok:
                 raise ActionBlocked("REPLY", "REPLY blocked (soft rule): only depth-1 replies allowed on others' posts")
 
+        # Enrich plan with metadata for artifact title
+        plan["_post_title"] = post_obj.get("title", "")
+        try:
+            _reply_comments = client.get_post_comments(post_id, sort="new") or []
+            for c in _reply_comments:
+                if c.get("id") == parent_id:
+                    plan["_reply_author"] = get_author_name(c.get("author")) or ""
+                    break
+        except Exception:
+            pass
+
         print(f"{Fore.CYAN}...Action: REPLY")
         print(f"{Fore.YELLOW}Target post: {post_url(post_id)}")
         print(f"{Fore.YELLOW}Target CID: {parent_id}")
@@ -345,6 +356,10 @@ def execute_action(
             _dogpile_limit = flags.get("thread_comments_for_engagement", MAX_THREAD_COMMENTS_FOR_OUTSIDE_ENGAGEMENT)
             if cc > _dogpile_limit:
                 raise ActionBlocked("COMMENT", f"COMMENT blocked (dogpile): post has {cc} comments (> {_dogpile_limit})")
+        # Enrich plan with post metadata for artifact title
+        plan["_post_title"] = post_obj.get("title", "")
+        plan["_post_author"] = (get_author_name(post_obj.get("author")) or "")
+
         content = plan.get("content") or ""
         print(f"{Fore.CYAN}...Action: COMMENT")
         print(f"{Fore.YELLOW}Target post: {post_url(post_id)}")

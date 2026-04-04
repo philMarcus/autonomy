@@ -1389,16 +1389,21 @@ def main():
 
                         # Generate descriptive title for replies/comments
                         artifact_title = executed_plan.get("title", "")
-                        if not artifact_title:
-                            if act_upper == "REPLY" and reply_candidate:
-                                author = reply_candidate.get("comment_author", "")
+                        if not artifact_title or act_upper in ("REPLY", "COMMENT"):
+                            if act_upper == "REPLY":
+                                # Use enriched metadata from execute_action, fall back to reply_candidate
+                                author = (executed_plan.get("_reply_author", "")
+                                          or (reply_candidate or {}).get("comment_author", ""))
                                 artifact_title = f"Reply to @{author}" if author else "Reply"
                             elif act_upper == "COMMENT":
-                                # Try to get post title from the post object
-                                _cmt_post_id = executed_plan.get("post_id", "")
-                                if outside_candidate and outside_candidate.get("post_id") == _cmt_post_id:
-                                    _cmt_title = outside_candidate.get("title", "")
-                                    artifact_title = f"Comment on: {_cmt_title}" if _cmt_title else "Comment"
+                                # Use enriched metadata from execute_action, fall back to outside_candidate
+                                _cmt_title = (executed_plan.get("_post_title", "")
+                                              or (outside_candidate or {}).get("title", ""))
+                                _cmt_author = executed_plan.get("_post_author", "")
+                                if _cmt_title:
+                                    artifact_title = f"Comment on: {_cmt_title}"
+                                elif _cmt_author:
+                                    artifact_title = f"Comment on @{_cmt_author}'s post"
                                 else:
                                     artifact_title = "Comment"
 
