@@ -434,11 +434,35 @@ def main():
             changes.append(f"History was wiped (was {previous_meta['history_count']} entries)")
         if current_meta["memory_length"] == 0 and previous_meta.get("memory_length", 0) > 0:
             changes.append("Memory was wiped")
+    # --- Session tracking ---
+    # A "session" persists across Ctrl+C restarts unless memories/kernel were wiped.
+    # This groups artifacts by meaningful continuity, not by process restart.
+    fresh_session = False
+    if not previous_meta:
+        # First run ever
+        fresh_session = True
+    elif any("wiped" in c.lower() for c in changes):
+        # Memory or history was wiped — this is a fresh start
+        fresh_session = True
+
+    if fresh_session:
+        session_id = uuid.uuid4().hex
+    else:
+        session_id = state.get("_session_id", "") or uuid.uuid4().hex
+
+    state["_session_id"] = session_id
     state["_last_run"] = current_meta
     store.save_state(state)
 
+    # Update store's run_id to use session_id (groups restarts together)
+    store._run_id = session_id
+
     if analog_home_url:
         run_body = f"Version: {VERSION}\nModel: {conscious_model}"
+        if fresh_session:
+            run_body += "\nSession: NEW"
+        else:
+            run_body += f"\nSession: continued (restart)"
         if changes:
             run_body += "\n\nChanges detected:\n" + "\n".join(f"- {c}" for c in changes)
         else:
