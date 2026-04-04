@@ -53,9 +53,10 @@ class Store(ABC):
 class LocalFileStore(Store):
     """File-backed state + HTTP artifact publishing to Analog_Home API."""
 
-    def __init__(self, state_path: str, analog_home_url: str = ""):
+    def __init__(self, state_path: str, analog_home_url: str = "", run_id: str = ""):
         self._state_path = state_path
         self._analog_home_url = analog_home_url
+        self._run_id = run_id
         self._pending_path = state_path.replace("_memories.json", "_pending_artifacts.json")
 
     @property
@@ -217,6 +218,7 @@ class LocalFileStore(Store):
             "source_url": artifact.get("source_url", ""),
             "search_queries": artifact.get("search_queries", ""),
             "temperature": artifact.get("temperature"),
+            "run_id": artifact.get("run_id", "") or self._run_id,
         }
         try:
             import requests

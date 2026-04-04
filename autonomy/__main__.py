@@ -390,7 +390,7 @@ def main():
             kernel_path = alt
 
     analog_home_url = os.environ.get(f"{prefix}_ANALOG_HOME_API_URL", "").strip() or os.environ.get("ANALOG_HOME_API_URL", "").strip()
-    store = LocalFileStore(state_path, analog_home_url=analog_home_url)
+    store = LocalFileStore(state_path, analog_home_url=analog_home_url, run_id=run_id)
     state = store.load_state()
 
     # Migrate legacy cooldown format (next_post_time / next_comment_time → state["cooldowns"])
