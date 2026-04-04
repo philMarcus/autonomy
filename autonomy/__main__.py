@@ -437,9 +437,10 @@ def main():
     # --- Session tracking ---
     # A "session" persists across Ctrl+C restarts unless memories/kernel were wiped.
     # This groups artifacts by meaningful continuity, not by process restart.
+    existing_session = state.get("_session_id", "")
     fresh_session = False
-    if not previous_meta:
-        # First run ever
+    if not existing_session:
+        # No session_id in state — first run or first run after session tracking added
         fresh_session = True
     elif any("wiped" in c.lower() for c in changes):
         # Memory or history was wiped — this is a fresh start
@@ -448,7 +449,7 @@ def main():
     if fresh_session:
         session_id = uuid.uuid4().hex
     else:
-        session_id = state.get("_session_id", "") or uuid.uuid4().hex
+        session_id = existing_session
 
     state["_session_id"] = session_id
     state["_last_run"] = current_meta
