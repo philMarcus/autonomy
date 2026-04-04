@@ -1199,12 +1199,22 @@ def main():
                         img_tier = ctrl.get("image_model_tier") or "imagen-ultra"
                         safe_print(f"{Fore.MAGENTA}[IMAGE] Generating ({img_tier}): {image_prompt[:120]}...")
                         try:
-                            import base64
+                            import base64, io
                             image_bytes, img_model_id, img_cost = gemini_backend.generate_image(
                                 prompt=image_prompt, tier=img_tier,
                             )
+                            # Compress PNG to JPEG (Imagen outputs ~1MB PNG; JPEG is ~10x smaller)
+                            try:
+                                from PIL import Image as _PILImage
+                                _pil_img = _PILImage.open(io.BytesIO(image_bytes))
+                                _jpeg_buf = io.BytesIO()
+                                _pil_img.convert("RGB").save(_jpeg_buf, format="JPEG", quality=85)
+                                image_bytes = _jpeg_buf.getvalue()
+                                _img_mime = "image/jpeg"
+                            except ImportError:
+                                _img_mime = "image/png"  # fallback if Pillow not installed
                             image_b64 = base64.b64encode(image_bytes).decode("ascii")
-                            image_data_uri = f"data:image/png;base64,{image_b64}"
+                            image_data_uri = f"data:{_img_mime};base64,{image_b64}"
 
                             from .llm.base import LLMResponse as _ImgResp
                             budget.record_usage(img_model_id, _ImgResp(
