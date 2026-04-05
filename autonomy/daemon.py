@@ -20,7 +20,11 @@ from .controls import ControlRegistry
 from .cooldowns import can_do
 from .llm import DailyBudget, ModelRegistry
 from .llm.base import LLMResponse
-from .scoring import build_sentry_prompt, parse_rubric_response, compute_score, weights_from_controls
+from .scoring import (
+    build_sentry_prompt, build_batch_sentry_prompt,
+    parse_rubric_response, parse_batch_rubric_response,
+    compute_score, weights_from_controls,
+)
 from .telemetry import TelemetryLogger
 from .utils import shorten, is_item_too_old, norm_key
 
@@ -209,8 +213,10 @@ class SubconsciousDaemon:
             items_scanned = len(items)
             new_items = len(items)
 
-            for item in items:
-                score = self._score_item(item)
+            # Batch score all items in a single LLM call
+            scores = self._score_items_batch(items) if items else []
+
+            for item, score in zip(items, scores):
                 item_id = item.get("id", "")
 
                 if score > 0:
@@ -495,6 +501,91 @@ class SubconsciousDaemon:
                 "error_type": type(e).__name__,
             })
             return 0.0
+
+    def _score_items_batch(self, items: list) -> list:
+        """Score multiple feed items in a single LLM call (batch mode).
+
+        Falls back to per-item scoring if batch parsing fails.
+        Returns list of float scores (same length as items).
+        """
+        if not items:
+            return []
+
+        model_id = self._ctrl.get("subconscious_model")
+        temp = self._ctrl.get("subconscious_temperature")
+
+        # Budget check for entire batch
+        est_in_per_item = 600
+        est_out_per_item = 30
+        total_in = len(self._kernel) // 4 + est_in_per_item * len(items)
+        total_out = est_out_per_item * len(items)
+        if not self._budget.can_afford(model_id, est_input_tokens=total_in, est_output_tokens=total_out):
+            return [0.0] * len(items)
+
+        # Build per-item text summaries
+        item_texts = []
+        for item in items:
+            author_name = _get_author(item)
+            title = item.get("title", "") or ""
+            content = item.get("content", "") or ""
+            item_texts.append(f"- Author: @{author_name}\n- Title: {title}\n- Content: {shorten(content, 400)}")
+
+        directives_text = self._get_directives_text()
+        prompt = build_batch_sentry_prompt(item_texts, self._directive, directives_text)
+
+        try:
+            chat = self._registry.create_chat(
+                model_id=model_id,
+                system_instruction=self._kernel,
+                temperature=temp,
+                max_output_tokens=max(256, 60 * len(items)),
+            )
+            text = chat.send_message(prompt)
+
+            # Budget tracking
+            est_in = (len(self._kernel) + len(prompt)) // 4
+            est_out = len(text) // 4
+            self._budget.record_usage(model_id, _make_response(text, est_in, est_out, model_id))
+
+            # Parse batch response
+            rubrics = parse_batch_rubric_response(text, len(items))
+            weights = weights_from_controls(self._ctrl)
+
+            scores = []
+            for i, (item, rubric) in enumerate(zip(items, rubrics)):
+                score = compute_score(rubric, weights)
+                scores.append(score)
+                self._telemetry.log("sentry_rubric", {
+                    "brain": self._brain_name,
+                    "tick": self._tick_count,
+                    "item_id": item.get("id", ""),
+                    "relevance": rubric.get("relevance", 0),
+                    "novelty": rubric.get("novelty", 0),
+                    "actionability": rubric.get("actionability", 0),
+                    "score": score,
+                    "reason": rubric.get("reason", ""),
+                    "model": model_id,
+                    "batch": True,
+                })
+
+            self._telemetry.log("sentry_batch", {
+                "brain": self._brain_name,
+                "tick": self._tick_count,
+                "items_scored": len(items),
+                "model": model_id,
+            })
+            return scores
+
+        except Exception as e:
+            self._telemetry.log("sentry_batch_error", {
+                "brain": self._brain_name,
+                "tick": self._tick_count,
+                "items": len(items),
+                "error": str(e)[:300],
+                "error_type": type(e).__name__,
+            })
+            # Fallback: score items individually
+            return [self._score_item(item) for item in items]
 
     # ------------------------------------------------------------------
     # Gear 2: Strategist — draft an action plan for high-signal items

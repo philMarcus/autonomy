@@ -13,7 +13,7 @@ Final score = weighted average normalized to 0.0-1.0.
 """
 
 import re
-from typing import Dict, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 # Default weights (overridden by ControlRegistry at runtime)
 DEFAULT_WEIGHTS = {
@@ -90,6 +90,74 @@ def build_sentry_prompt(
         f"actionability: <0-3>\n"
         f"reason: <one sentence>\n"
     )
+
+
+def build_batch_sentry_prompt(
+    items: List[str],
+    directive: str,
+    directives_text: str = "",
+) -> str:
+    """Build a batch scoring prompt for multiple feed items in one LLM call.
+
+    Each item_text should be pre-formatted (Author/Title/Content).
+    Returns a prompt that asks for scores for all items at once.
+    """
+    directive_section = ""
+    if directives_text:
+        directive_section = f"\nConscious directives:\n{directives_text}\n"
+
+    criteria_block = ""
+    for c in CRITERIA:
+        anchors = "  ".join(f"{k} = {v}" for k, v in c["anchors"].items())
+        criteria_block += f"  {c['name']}: {anchors}\n"
+
+    items_block = ""
+    for i, item_text in enumerate(items, 1):
+        items_block += f"\n--- ITEM {i} ---\n{item_text}\n"
+
+    response_format = ""
+    for i in range(1, len(items) + 1):
+        response_format += f"\nITEM {i}:\nrelevance: <0-3>\nnovelty: <0-3>\nactionability: <0-3>\n"
+
+    return (
+        f"Score each feed item on three criteria (0-3 each).\n\n"
+        f"Directive: {directive}\n"
+        f"{directive_section}\n"
+        f"Criteria:\n{criteria_block}\n"
+        f"{items_block}\n"
+        f"Respond in EXACTLY this format:{response_format}"
+    )
+
+
+def parse_batch_rubric_response(text: str, num_items: int) -> List[Dict]:
+    """Parse batch rubric scores from model output.
+
+    Splits by ITEM markers, then parses each chunk with the single-item parser.
+    Returns a list of dicts (one per item). Missing items get all-zero scores.
+    """
+    results: List[Dict] = []
+
+    # Split by ITEM markers
+    chunks = re.split(r'ITEM\s+(\d+)\s*:', text, flags=re.IGNORECASE)
+    # chunks alternates: [preamble, "1", chunk1_text, "2", chunk2_text, ...]
+
+    parsed_by_index: Dict[int, Dict] = {}
+    for i in range(1, len(chunks) - 1, 2):
+        try:
+            idx = int(chunks[i]) - 1  # 0-based
+            chunk_text = chunks[i + 1]
+            parsed_by_index[idx] = parse_rubric_response(chunk_text)
+        except (ValueError, IndexError):
+            pass
+
+    # Build result list, filling missing items with zeros
+    for i in range(num_items):
+        if i in parsed_by_index:
+            results.append(parsed_by_index[i])
+        else:
+            results.append({name: 0 for name in CRITERION_NAMES} | {"reason": "", "raw": ""})
+
+    return results
 
 
 def parse_rubric_response(text: str) -> Dict:

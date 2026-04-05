@@ -305,7 +305,7 @@ def build_default_registry(args, model_registry) -> ControlRegistry:
         # --- Daemon (Phase 5 will consume; registered now with defaults) ---
         Control("sentry_interval_seconds", "int",
                 getattr(args, "sentry_interval", 300),
-                "Seconds between sentry scans", "daemon", min_val=10, max_val=600),
+                "Seconds between sentry scans", "daemon", min_val=10),
         Control("signal_threshold", "float", 0.5,
                 "Score to trigger strategist", "daemon", min_val=0.0, max_val=1.0),
         Control("wake_threshold", "float", 3.0,
