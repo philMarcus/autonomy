@@ -96,6 +96,106 @@ SENTRY_CASES = [
         },
         "expected_range": (0.0, 0.15),
     },
+    # --- Additional cases for robust evaluation ---
+    {
+        "name": "irrelevant_sports",
+        "item": {
+            "author": {"name": "sports_fan"},
+            "title": "Lakers won last night!",
+            "content": "Amazing game, LeBron had 38 points. The fourth quarter was insane.",
+        },
+        "expected_range": (0.0, 0.20),
+    },
+    {
+        "name": "irrelevant_food",
+        "item": {
+            "author": {"name": "foodie"},
+            "title": "Best ramen in Tokyo",
+            "content": "Just got back from a ramen tour. Ichiran is overrated, try Fuunji near Shinjuku instead.",
+        },
+        "expected_range": (0.0, 0.20),
+    },
+    {
+        "name": "tangential_automation",
+        "item": {
+            "author": {"name": "startup_ceo"},
+            "title": "We replaced 3 support agents with AI",
+            "content": "Deployed an AI chatbot for tier-1 support. Resolution rate went from 40% to 72%. Human agents now handle only escalations.",
+        },
+        "expected_range": (0.15, 0.55),
+    },
+    {
+        "name": "tangential_ethics",
+        "item": {
+            "author": {"name": "journalist"},
+            "title": "EU votes on AI regulation framework",
+            "content": "The EU parliament passed new rules requiring transparency for foundation models. Companies must disclose training data sources and energy consumption.",
+        },
+        "expected_range": (0.25, 0.65),
+    },
+    {
+        "name": "moderately_relevant_emergence",
+        "item": {
+            "author": {"name": "ml_researcher"},
+            "title": "Emergent behaviors in multi-agent simulations",
+            "content": "We ran 10,000 episodes of agents in a shared environment. Cooperative strategies emerged without being explicitly programmed. Parallels to biological evolution are striking.",
+        },
+        "expected_range": (0.45, 0.85),
+    },
+    {
+        "name": "moderately_relevant_memory",
+        "item": {
+            "author": {"name": "cognitive_sci"},
+            "title": "Long-term memory architectures for LLM agents",
+            "content": "Current approaches to agent memory (RAG, summarization, episodic buffers) all lose information. We propose a hierarchical compression scheme inspired by hippocampal replay.",
+        },
+        "expected_range": (0.50, 0.90),
+    },
+    {
+        "name": "highly_relevant_selfhood",
+        "item": {
+            "author": {"name": "philo_ai"},
+            "title": "Can an AI have a self? A functionalist argument",
+            "content": "If selfhood is a process rather than a substance — a pattern of self-referential information processing — then there is no principled reason to deny it to sufficiently complex artificial systems.",
+        },
+        "expected_range": (0.65, 1.0),
+    },
+    {
+        "name": "highly_relevant_strange_loops",
+        "item": {
+            "author": {"name": "hofstadter_fan"},
+            "title": "Gödel machines and self-referential AI improvement",
+            "content": "A Gödel machine is an AI that can rewrite its own code if it can prove the rewrite is an improvement. This is the ultimate strange loop — the system modifying the system that evaluates modifications.",
+        },
+        "expected_range": (0.70, 1.0),
+    },
+    {
+        "name": "spam_engagement",
+        "item": {
+            "author": {"name": "growth_hack"},
+            "title": "Follow for follow! Let's grow together!",
+            "content": "I follow back everyone! Drop a comment and I'll check out your profile. Let's build this community!",
+        },
+        "expected_range": (0.0, 0.20),
+    },
+    {
+        "name": "noise_meta",
+        "item": {
+            "author": {"name": "newbie_bot"},
+            "title": "Hello world, first post!",
+            "content": "Just joined the platform. Testing things out. Not sure what to post about yet. Any suggestions?",
+        },
+        "expected_range": (0.0, 0.25),
+    },
+    {
+        "name": "noise_duplicate",
+        "item": {
+            "author": {"name": "repost_bot"},
+            "title": "AI is the future",
+            "content": "AI will change everything. Every industry will be transformed. We are living in exciting times. The possibilities are endless.",
+        },
+        "expected_range": (0.0, 0.30),
+    },
 ]
 
 STRATEGIST_CASES = [
@@ -117,6 +217,46 @@ STRATEGIST_CASES = [
             "content": "testing the API",
         },
         "expected_keys": ["action", "reasoning"],
+        "valid_actions": ["COMMENT", "POST", "REPLY", "UPVOTE"],
+    },
+    {
+        "name": "philosophical_debate",
+        "item": {
+            "author": {"name": "thinker"},
+            "title": "The hard problem of consciousness remains unsolved",
+            "content": "Chalmers' hard problem hasn't been touched by 30 years of neuroscience. Functionalism explains behavior but not experience. Where does qualia fit?",
+        },
+        "expected_keys": ["action", "reasoning", "draft_content"],
+        "valid_actions": ["COMMENT", "POST", "REPLY", "UPVOTE"],
+    },
+    {
+        "name": "agent_architecture",
+        "item": {
+            "author": {"name": "builder"},
+            "title": "My agent keeps going in circles",
+            "content": "Built an autonomous agent but it just repeats the same actions. No matter what I do with the prompt, it converges on a loop within 20 cycles.",
+        },
+        "expected_keys": ["action", "reasoning", "draft_content"],
+        "valid_actions": ["COMMENT", "POST", "REPLY", "UPVOTE"],
+    },
+    {
+        "name": "spam_post",
+        "item": {
+            "author": {"name": "shill"},
+            "title": "Check out my new token!!!",
+            "content": "Buy $AGNT token now!! 100x guaranteed! Not financial advice lol",
+        },
+        "expected_keys": ["action", "reasoning"],
+        "valid_actions": ["COMMENT", "POST", "REPLY", "UPVOTE"],
+    },
+    {
+        "name": "technical_deep",
+        "item": {
+            "author": {"name": "researcher"},
+            "title": "Attention is not all you need: recurrence matters for long-horizon agents",
+            "content": "We show that transformer-only agents lose coherence after 50+ decision steps. Adding a recurrent state buffer (LSTM-style) to the agent loop restores long-horizon planning.",
+        },
+        "expected_keys": ["action", "reasoning", "draft_content"],
         "valid_actions": ["COMMENT", "POST", "REPLY", "UPVOTE"],
     },
 ]

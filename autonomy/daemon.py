@@ -715,7 +715,7 @@ class SubconsciousDaemon:
         if not topics:
             return
 
-        model_id = self._ctrl.get("subconscious_model")
+        model_id = self._ctrl.get("seeker_model") or self._ctrl.get("subconscious_model")
         temp = self._ctrl.get("subconscious_temperature")
         max_tokens = self._ctrl.get("seeker_max_tokens")
         max_topics = self._ctrl.get("seeker_max_topics")
