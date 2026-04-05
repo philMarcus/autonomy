@@ -225,7 +225,7 @@ class SubconsciousDaemon:
         self._tick_count += 1
 
         # Read controls
-        decay_rate = self._ctrl.get("wake_decay_rate")
+        decay_rate = 1.0  # no decay — wake_potential only changes via charge/refractory
         wake_threshold = self._ctrl.get("wake_threshold")
         signal_threshold = self._ctrl.get("signal_threshold")
 

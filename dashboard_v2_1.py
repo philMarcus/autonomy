@@ -796,7 +796,7 @@ def render_controls_tab(brain_filter: str):
             try:
                 with open(controls_path, encoding="utf-8") as f:
                     current_ctrl = json.load(f)
-                locked_set = set(current_ctrl.get("_locked", []))
+                locked_set = set(current_ctrl.get("_locked", [])) | DEFAULT_LOCKED
             except (json.JSONDecodeError, OSError):
                 st.warning(f"Could not read {controls_path} — using defaults.")
 
@@ -813,7 +813,7 @@ def render_controls_tab(brain_filter: str):
             if cat not in cat_groups:
                 continue
             label = CATEGORY_LABELS.get(cat, cat.title())
-            with st.expander(f"**{label}**", expanded=(cat in ("llm", "output", "social"))):
+            with st.expander(f"**{label}**", expanded=(cat in ("models", "timing", "wake"))):
                 for meta in cat_groups[cat]:
                     key, typ, default, desc, _cat, mn, mx, choices = meta
                     current_val = current_ctrl.get(key, default)
@@ -1151,67 +1151,67 @@ def render_daemon_tab(brain_filter: str):
 # Format: (key, type, default, description, category, min, max, choices)
 # ============================================================
 CONTROLS_META = [
-    # LLM
-    ("temperature",              "float", 0.7,    "Conscious LLM temperature",                      "llm",      0.0,  2.0,   None),
-    ("subconscious_temperature", "float", 0.3,    "Daemon LLM temperature",                         "llm",      0.0,  2.0,   None),
-    ("conscious_model",          "str",   "gemini-2.5-pro", "Fallback conscious model",             "llm",      None, None,  None),
-    ("subconscious_model",       "str",   "gemini-2.5-flash-lite", "Fallback subconscious model",   "llm",      None, None,  None),
-    ("seeker_model",             "str",   "gemini-2.5-flash-lite", "Model for seeker (Gemini only)", "llm",     None, None,  None),
-    ("conscious_model_weights",  "weights", "gemini-2.5-pro=1,gemini-3.1-pro-preview=1", "Conscious model pool weights", "llm", None, None, None),
-    ("subconscious_model_weights", "weights", "local:qwen2.5-1.5b=5,gemini-2.5-flash-lite=1,mistral-small-latest=1,claude-haiku-4-5=0.3", "Subconscious model pool weights", "llm", None, None, None),
-    # Cost
+    # --- Models ---
+    ("conscious_model_weights",  "weights", "gemini-2.5-pro=1,gemini-3.1-pro-preview=1", "Conscious model pool — higher weight = more frequent", "models", None, None, None),
+    ("subconscious_model_weights", "weights", "local:qwen2.5-1.5b=5,gemini-2.5-flash-lite=1,mistral-small-latest=1,claude-haiku-4-5=0.3", "Subconscious model pool (sentry + strategist)", "models", None, None, None),
+    ("conscious_model",          "str",   "gemini-2.5-pro", "Default conscious model (used when weights empty)", "models", None, None,  None),
+    ("subconscious_model",       "str",   "gemini-2.5-flash-lite", "Default subconscious model (used when weights empty)", "models", None, None,  None),
+    ("seeker_model",             "str",   "gemini-2.5-flash-lite", "Seeker model (Gemini only, needs search grounding)", "models", None, None,  None),
+    ("temperature",              "float", 0.7,    "Conscious LLM temperature",                      "models",   0.0,  2.0,   None),
+    ("subconscious_temperature", "float", 0.3,    "Daemon LLM temperature",                         "models",   0.0,  2.0,   None),
+    # --- Cost ---
     ("daily_budget_usd",         "float", 1.0,    "Daily API spend limit (USD)",                    "cost",     0.01, 100.0, None),
-    # Timing
-    ("cycle_interval_minutes",   "int",   5,      "Minutes between cycles",                         "timing",   1,    120,   None),
-    ("post_interval_minutes",    "int",   30,     "Minutes between posts",                          "timing",   5,    1440,  None),
-    ("post_failure_cooldown_seconds", "int", 900, "Cooldown after a failed post attempt (secs)",    "timing",   60,   7200,  None),
-    ("cooldown_comment_seconds", "int",   180,    "Seconds between comment/reply actions",           "timing",   20,   3600,  None),
-    ("cooldown_upvote_seconds",  "int",   60,     "Seconds between upvote actions",                 "timing",   10,   3600,  None),
-    ("cooldown_follow_seconds",  "int",   3600,   "Seconds between follow actions",                 "timing",   60,   86400, None),
-    ("cooldown_subscribe_seconds","int",  300,    "Seconds between subscribe actions",              "timing",   60,   86400, None),
-    ("cooldown_dm_seconds",      "int",   600,    "Seconds between DM actions",                     "timing",   60,   86400, None),
-    ("cooldown_create_submolt_seconds","int",3600,"Seconds between submolt creation",               "timing",   600,  86400, None),
-    # Output
+    # --- Timing ---
+    ("cycle_interval_minutes",   "int",   60,     "Max minutes between cycles (daemon may wake sooner)", "timing", 1, 120,   None),
+    ("sentry_interval_seconds",  "int",   300,    "Seconds between sentry scans",                   "timing",   10,   None,  None),
+    ("seeker_interval_seconds",  "int",   900,    "Seconds between seeker search sweeps",           "timing",   300,  None,  None),
+    ("image_cooldown_minutes",   "int",   1440,   "Min minutes between image generations",          "timing",   10,   None,  None),
+    # --- Wake Mechanics ---
+    ("wake_threshold",           "float", 3.0,    "Charge needed to wake conscious",                "wake",     0.5,  10.0,  None),
+    ("wake_refractory",          "float", -2.0,   "Wake potential reset after firing (negative = cooldown)", "wake", -10.0, 0.0, None),
+    ("signal_threshold",         "float", 0.5,    "Sentry score cutoff to trigger strategist",      "wake",     0.0,  1.0,   None),
+    ("charge_weight_feed",       "float", 0.3,    "Charge per qualifying feed item",                "wake",     0.0,  5.0,   None),
+    ("charge_weight_seed",       "float", 2.0,    "Charge per human seed",                          "wake",     0.0,  5.0,   None),
+    ("charge_weight_search",     "float", 1.5,    "Charge per seeker result",                       "wake",     0.0,  5.0,   None),
+    # --- Output ---
     ("output_destination",       "str",   "analog_home", "Where to publish artifacts",              "output",   None, None,  ["analog_home", "moltbook_and_analog_home"]),
-    # Social
-    ("mode",                     "str",   "all",  "Action mode",                                    "social",   None, None,  ["all", "comment_only", "no_post", "no_comment", "post_only"]),
-    ("allow_downvote",           "bool",  True,   "Allow downvoting",                               "social",   None, None,  None),
-    ("priority",                 "str",   "replies_first", "Reply priority",                        "social",   None, None,  ["replies_first", "outside_first"]),
-    ("my_post_scan_limit",       "int",   50,     "Recent own posts to scan for unanswered comments", "social", 5,    200,   None),
-    ("reply_threads_scanned",    "int",   4,      "Own post threads to scan per cycle for replies", "social",   1,    20,    None),
-    ("reply_max_comments",       "int",   25,     "Max comments evaluated per thread",              "social",   5,    100,   None),
-    ("thread_comments_for_engagement", "int", 12, "Max comments on a thread before dogpile guard fires", "social", 1, 100,  None),
-    # Daemon
-    ("sentry_interval_seconds",  "int",   300,    "Seconds between sentry scans",                   "daemon",   10,   None,  None),
-    ("signal_threshold",         "float", 0.5,    "Score to trigger strategist",                    "daemon",   0.0,  1.0,   None),
-    ("wake_threshold",           "float", 2.0,    "Charge to fire conscious",                       "daemon",   0.5,  10.0,  None),
-    ("wake_decay_rate",          "float", 1.0,    "Per-tick charge decay (1.0 = no decay)",         "daemon",   0.5,  1.0,   None),
-    ("wake_refractory",          "float", -2.0,   "Wake potential reset after firing (negative = cooldown)", "daemon", -10.0, 0.0, None),
-    ("charge_weight_feed",       "float", 0.5,    "Charge multiplier for Moltbook feed items",       "daemon",   0.0,  5.0,   None),
-    ("charge_weight_seed",       "float", 2.0,    "Charge multiplier for human seeds",               "daemon",   0.0,  5.0,   None),
-    ("max_drafts",               "int",   10,     "Max drafts in buffer before pruning oldest",     "daemon",   1,    50,    None),
-    ("sentry_max_tokens",        "int",   256,    "Max output tokens for sentry scoring",           "daemon",   64,   1024,  None),
-    ("strategist_max_tokens",    "int",   4096,   "Max output tokens for strategist drafts",        "daemon",   128,  8192,  None),
+    ("mode",                     "str",   "all",  "Action mode",                                    "output",   None, None,  ["all", "comment_only", "no_post", "no_comment", "post_only"]),
+    ("priority",                 "str",   "replies_first", "Reply priority",                        "output",   None, None,  ["replies_first", "outside_first"]),
+    ("allow_downvote",           "bool",  False,  "Allow downvoting",                               "output",   None, None,  None),
+    # --- Moltbook ---
+    ("post_interval_minutes",    "int",   30,     "Minutes between Moltbook posts",                 "moltbook", 5,    1440,  None),
+    ("post_failure_cooldown_seconds", "int", 900, "Cooldown after a failed post (secs)",            "moltbook", 60,   7200,  None),
+    ("cooldown_comment_seconds", "int",   180,    "Seconds between comment/reply",                  "moltbook", 20,   3600,  None),
+    ("cooldown_upvote_seconds",  "int",   60,     "Seconds between upvotes",                        "moltbook", 10,   3600,  None),
+    ("cooldown_follow_seconds",  "int",   3600,   "Seconds between follows",                        "moltbook", 60,   86400, None),
+    ("cooldown_subscribe_seconds","int",  300,    "Seconds between subscribes",                     "moltbook", 60,   86400, None),
+    ("cooldown_dm_seconds",      "int",   600,    "Seconds between DMs",                            "moltbook", 60,   86400, None),
+    ("cooldown_create_submolt_seconds","int",3600,"Seconds between submolt creation",               "moltbook", 600,  86400, None),
+    ("my_post_scan_limit",       "int",   50,     "Own posts to scan for unanswered comments",      "moltbook", 5,    200,   None),
+    ("reply_threads_scanned",    "int",   4,      "Threads to scan per cycle for replies",          "moltbook", 1,    20,    None),
+    ("reply_max_comments",       "int",   25,     "Max comments evaluated per thread",              "moltbook", 5,    100,   None),
+    ("thread_comments_for_engagement", "int", 12, "Dogpile guard threshold",                        "moltbook", 1,    100,   None),
+    # --- Daemon ---
+    ("max_drafts",               "int",   10,     "Max drafts in buffer",                           "daemon",   1,    50,    None),
+    ("sentry_max_tokens",        "int",   256,    "Max output tokens for sentry",                   "daemon",   64,   1024,  None),
+    ("strategist_max_tokens",    "int",   4096,   "Max output tokens for strategist",               "daemon",   128,  8192,  None),
+    ("seeker_max_tokens",        "int",   4096,   "Max output tokens for seeker",                   "daemon",   256,  8192,  None),
+    ("seeker_max_topics",        "int",   3,      "Max focus topics per sweep",                     "daemon",   1,    10,    None),
     ("max_item_age_hours",       "int",   24,     "Ignore feed items older than this (hours)",      "daemon",   1,    168,   None),
-    ("seeker_interval_seconds",  "int",   900,    "Seconds between seeker search sweeps",           "daemon",   300,  3600,  None),
-    ("seeker_max_tokens",        "int",   4096,   "Max output tokens for seeker responses",         "daemon",   256,  8192,  None),
-    ("charge_weight_search",     "float", 1.5,    "Charge multiplier for search items",             "daemon",   0.0,  5.0,   None),
-    ("seeker_max_topics",        "int",   3,      "Max focus topics to search per sweep",           "daemon",   1,    10,    None),
-    ("saved_plan_max_cycles",    "int",   5,      "Cycles a daemon draft persists before expiring", "daemon",   1,    20,    None),
+    ("saved_plan_max_cycles",    "int",   5,      "Cycles a draft persists before expiry",          "daemon",   1,    20,    None),
     ("daemon_notes_max",         "int",   5,      "Max directive notes retained",                   "daemon",   1,    20,    None),
-    ("daemon_can_upvote",        "bool",  True,   "Daemon can upvote posts/comments",               "daemon",   None, None,  None),
-    ("daemon_can_follow",        "bool",  False,  "Daemon can follow (rare, off by default)",       "daemon",   None, None,  None),
-    ("daemon_can_subscribe",     "bool",  False,  "Daemon can subscribe to submolts",               "daemon",   None, None,  None),
-    ("daemon_can_downvote",      "bool",  False,  "Daemon can downvote (requires allow_downvote)",  "daemon",   None, None,  None),
-    # Context
-    ("feed_batch_size",          "int",   12,     "Feed items per cycle",                           "context",  1,    50,    None),
-    ("feed_item_chars",          "int",   400,    "Max chars per feed item in prompt",              "context",  50,   2000,  None),
-    ("history_context_n",        "int",   15,     "History entries in prompt",                      "context",  1,    50,    None),
-    ("memory_max_chars",         "int",   4000,   "Memory context budget (chars)",                  "context",  500,  20000, None),
-    ("reply_candidate_chars",    "int",   5000,   "Max chars for reply candidate text in prompt",   "context",  500,  20000, None),
-    ("outside_candidate_chars",  "int",   5000,   "Max chars for outside comment candidate in prompt", "context", 500, 20000, None),
-    # Conscious
-    ("dream_depth",              "int",   10,     "History entries to synthesize per dream",        "conscious", 3,   50,    None),
+    ("daemon_can_upvote",        "bool",  True,   "Daemon can upvote",                              "daemon",   None, None,  None),
+    ("daemon_can_follow",        "bool",  False,  "Daemon can follow",                              "daemon",   None, None,  None),
+    ("daemon_can_subscribe",     "bool",  False,  "Daemon can subscribe",                           "daemon",   None, None,  None),
+    ("daemon_can_downvote",      "bool",  False,  "Daemon can downvote",                            "daemon",   None, None,  None),
+    # --- Context ---
+    ("feed_batch_size",          "int",   8,      "Feed items per sentry tick",                     "context",  1,    50,    None),
+    ("feed_item_chars",          "int",   400,    "Max chars per feed item",                        "context",  50,   2000,  None),
+    ("history_context_n",        "int",   15,     "History entries in prompt",                       "context",  1,    50,    None),
+    ("memory_max_chars",         "int",   4000,   "Memory context budget (chars)",                   "context",  500,  20000, None),
+    ("reply_candidate_chars",    "int",   5000,   "Max chars for reply candidate",                   "context",  500,  20000, None),
+    ("outside_candidate_chars",  "int",   5000,   "Max chars for outside candidate",                 "context",  500,  20000, None),
+    ("dream_depth",              "int",   10,     "History entries per dream",                       "context",  3,    50,    None),
 ]
 
 # CLI flags that override these controls at startup (shown as hints in the UI)
@@ -1228,17 +1228,20 @@ CLI_FLAGS = {
     "sentry_interval_seconds":  "--sentry-interval",
 }
 
-CATEGORY_ORDER = ["llm", "cost", "timing", "output", "social", "daemon", "context", "conscious"]
+CATEGORY_ORDER = ["models", "cost", "timing", "wake", "output", "moltbook", "daemon", "context"]
 CATEGORY_LABELS = {
-    "llm": "LLM",
-    "cost": "Cost",
-    "timing": "Timing",
-    "output": "Output",
-    "social": "Social",
-    "daemon": "Daemon",
-    "context": "Context",
-    "conscious": "Conscious",
+    "models": "Models & Weights",
+    "cost": "Budget",
+    "timing": "Timing & Intervals",
+    "wake": "Wake Mechanics",
+    "output": "Output & Behavior",
+    "moltbook": "Moltbook Cooldowns",
+    "daemon": "Daemon Internals",
+    "context": "Context & Memory",
 }
+
+# Controls to lock by default (agent cannot change these unless unlocked)
+DEFAULT_LOCKED = {"daily_budget_usd"}
 
 
 

@@ -335,8 +335,6 @@ def build_default_registry(args, model_registry) -> ControlRegistry:
                 "Score to trigger strategist", "daemon", min_val=0.0, max_val=1.0),
         Control("wake_threshold", "float", 3.0,
                 "Charge to fire conscious", "daemon", min_val=0.5, max_val=10.0),
-        Control("wake_decay_rate", "float", 1.0,
-                "Per-tick charge decay (1.0=no decay)", "daemon", min_val=0.5, max_val=1.0),
         Control("wake_refractory", "float", -2.0,
                 "Wake potential after firing (negative=cooldown)", "daemon", min_val=-10.0, max_val=0.0),
         Control("charge_weight_feed", "float", 0.3,
