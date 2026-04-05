@@ -474,7 +474,16 @@ def main():
     store._run_id = session_id
 
     if analog_home_url:
-        run_body = f"Version: {VERSION}\nModel: {conscious_model}"
+        con_weights = ctrl.get("conscious_model_weights") or conscious_model
+        sub_weights = ctrl.get("subconscious_model_weights") or args.subconscious_model
+        seeker = ctrl.get("seeker_model") or "gemini-2.5-flash-lite"
+        run_body = (
+            f"Version: {VERSION}\n"
+            f"Default conscious model: {conscious_model}\n"
+            f"**Conscious pool:** {con_weights}\n"
+            f"**Subconscious pool:** {sub_weights}\n"
+            f"**Seeker model:** {seeker}"
+        )
         if fresh_session:
             run_body += "\nSession: NEW"
         else:
