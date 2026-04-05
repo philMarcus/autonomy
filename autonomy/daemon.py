@@ -784,7 +784,7 @@ class SubconsciousDaemon:
             result = self._seek_topic(topic, model_id, temp, max_tokens)
             if result:
                 results_found += 1
-                draft = self._strategize_search_result(result, topic)
+                draft = self._strategize_search_result(result, topic, model_id=model_id)
                 if draft:
                     self._buffer.add_draft(draft)
                     drafts_created += 1
@@ -895,7 +895,8 @@ class SubconsciousDaemon:
             return None
 
     def _strategize_search_result(self, result: dict,
-                                  topic: str) -> Optional[Draft]:
+                                  topic: str,
+                                  model_id: str = "") -> Optional[Draft]:
         """Convert a seeker search result into a Draft for the conscious buffer.
 
         No additional LLM call — parses the seeker response directly.
