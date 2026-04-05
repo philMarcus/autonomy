@@ -1466,8 +1466,9 @@ def main():
                         source_id = ""
                         source_parent_id = ""
                         source_url_str = ""
-                        src_platform = "analog_home" if not args.moltbook_enabled else "moltbook"
-                        if args.moltbook_enabled:
+                        _moltbook_active = args.moltbook_enabled and not flags.get("moltbook_disabled", False)
+                        src_platform = "moltbook" if _moltbook_active else "analog_home"
+                        if _moltbook_active:
                             if act_upper == "POST" and state.get("my_post_ids"):
                                 source_id = state["my_post_ids"][-1]
                                 source_url_str = post_url(source_id)
