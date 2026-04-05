@@ -121,6 +121,34 @@ STRATEGIST_CASES = [
     },
 ]
 
+MATH_CASES = [
+    {
+        "name": "simple_multiply",
+        "challenge": "A] lO-oBbSsTtEr^ ClAaWw F(o)rCeE Is] tW/eNtY fOuR ~ nEwToNs, aNd- tHrEe } lO\\bStErS PuSh, mUlTiPlY < tO gEt- ToTaL fOrCe?",
+        "expected": 72.00,
+    },
+    {
+        "name": "simple_add",
+        "challenge": "33 neurons + 2 neurons = how many neurons?",
+        "expected": 35.00,
+    },
+    {
+        "name": "obfuscated_multiply",
+        "challenge": "f!I#v*E   c~A+t$S   e^A&c(H   h)A-v=E   s|E\\v/E,n   l.I;v:E's,   h'O\"w   m`A~n!Y   l@I#v$E%s   t^O&t*A(l?",
+        "expected": 35.00,
+    },
+    {
+        "name": "simple_divide",
+        "challenge": "One hundred cookies divided equally among 4 kids. How many each?",
+        "expected": 25.00,
+    },
+    {
+        "name": "two_step",
+        "challenge": "A box has 12 apples. You eat 3 and then buy 8 more. How many apples?",
+        "expected": 17.00,
+    },
+]
+
 PLANNER_SYSTEM = "You are an autonomous agent. Respond with valid JSON."
 
 PLANNER_CASES = [
@@ -490,6 +518,87 @@ class BenchmarkRunner:
             "total_cost": round(total_cost, 6),
         }
 
+    # --- Math Verification ---
+
+    def run_math_benchmark(self, model_id: str) -> Dict[str, Any]:
+        """Run math verification test cases. Tests ability to solve obfuscated arithmetic."""
+        results = []
+        total_cost = 0.0
+
+        math_prompt_template = (
+            "Solve the math problem and respond with ONLY the number "
+            "(with 2 decimal places, e.g., '525.00').\n\n"
+            "Work through this step by step:\n"
+            "STEP 1 — EXTRACT: Strip away ALL obfuscation. Write out the clean question.\n"
+            "STEP 2 — IDENTIFY: What are the numbers? What operation?\n"
+            "STEP 3 — SOLVE: Do the arithmetic.\n"
+            "STEP 4 — FORMAT: Write ONLY the number with 2 decimal places.\n\n"
+            "Challenge: {challenge}\n\n"
+            "Your answer (number only, e.g. 42.00):"
+        )
+
+        for case in MATH_CASES:
+            prompt = math_prompt_template.format(challenge=case["challenge"])
+
+            t0 = time.time()
+            try:
+                chat = self.registry.create_chat(
+                    model_id=model_id,
+                    system_instruction="You are a math solver. Respond with ONLY the numeric answer.",
+                    temperature=0.0,
+                    max_output_tokens=512,
+                )
+                raw = chat.send_message(prompt)
+                latency_ms = int((time.time() - t0) * 1000)
+
+                cost = estimate_cost(model_id, len(prompt) // 4, len(raw) // 4)
+                total_cost += cost
+
+                # Extract number from response
+                import re as _re
+                nums = _re.findall(r'(\d+\.?\d*)', raw)
+                answer = float(nums[-1]) if nums else None
+
+                correct = answer is not None and abs(answer - case["expected"]) < 0.01
+
+                result = {
+                    "case": case["name"],
+                    "expected": case["expected"],
+                    "answer": answer,
+                    "correct": correct,
+                    "raw": raw[:200],
+                    "latency_ms": latency_ms,
+                    "cost": round(cost, 6),
+                }
+                results.append(result)
+
+                status = "OK" if correct else "WRONG"
+                self._log(
+                    f"[{status}] {case['name']}: got={answer} expected={case['expected']} ({latency_ms}ms)"
+                )
+
+            except Exception as e:
+                latency_ms = int((time.time() - t0) * 1000)
+                results.append({
+                    "case": case["name"],
+                    "correct": False,
+                    "error": str(e),
+                    "latency_ms": latency_ms,
+                })
+                self._log(f"[ERR] {case['name']}: {e}")
+
+        correct_count = sum(1 for r in results if r.get("correct"))
+
+        return {
+            "model": model_id,
+            "task": "math",
+            "cases": results,
+            "accuracy": round(correct_count / len(results), 3) if results else 0,
+            "parse_rate": round(correct_count / len(results), 3) if results else 0,
+            "avg_latency_ms": int(sum(r.get("latency_ms", 0) for r in results) / max(1, len(results))),
+            "total_cost": round(total_cost, 6),
+        }
+
     # --- Run all ---
 
     def run_all(self, tasks: List[str]) -> Dict[str, Any]:
@@ -498,6 +607,7 @@ class BenchmarkRunner:
             "sentry": self.run_sentry_benchmark,
             "strategist": self.run_strategist_benchmark,
             "planner": self.run_planner_benchmark,
+            "math": self.run_math_benchmark,
         }
 
         report: Dict[str, Any] = {
@@ -543,6 +653,47 @@ class BenchmarkRunner:
         report["recommendations"] = _generate_recommendations(report["results"])
 
         return report
+
+
+def _print_summary_table(results: Dict, tasks: List[str]) -> None:
+    """Print a compact comparison table of all models × tasks."""
+    if not results:
+        return
+
+    print(f"\n{'='*80}")
+    print("SUMMARY TABLE")
+    print(f"{'='*80}")
+
+    # Header
+    header = f"{'Model':<28}"
+    for task in tasks:
+        header += f"{'':>2}{task[:7]:>7}"
+    header += f"  {'Avg ms':>7}  {'Cost':>8}"
+    print(header)
+    print("-" * len(header))
+
+    for model_id, model_tasks in results.items():
+        row = f"{model_id:<28}"
+        total_latency = 0
+        total_cost = 0.0
+        task_count = 0
+
+        for task in tasks:
+            if task in model_tasks:
+                t = model_tasks[task]
+                acc = t.get("accuracy", 0)
+                row += f"  {acc:>6.0%}"
+                total_latency += t.get("avg_latency_ms", 0)
+                total_cost += t.get("cost", 0)
+                task_count += 1
+            else:
+                row += f"  {'--':>7}"
+
+        avg_lat = total_latency // max(1, task_count)
+        row += f"  {avg_lat:>5}ms  ${total_cost:>7.4f}"
+        print(row)
+
+    print(f"{'='*80}")
 
 
 def _generate_recommendations(results: Dict) -> Dict[str, str]:
@@ -591,8 +742,8 @@ def main():
         help="Comma-separated model IDs to test (default: all available)",
     )
     parser.add_argument(
-        "--tasks", type=str, default="sentry,strategist,planner",
-        help="Comma-separated tasks to run (default: sentry,strategist,planner)",
+        "--tasks", type=str, default="sentry,strategist,planner,math",
+        help="Comma-separated tasks to run (default: sentry,strategist,planner,math)",
     )
     parser.add_argument(
         "--output", type=str, default="benchmark_results.json",
@@ -644,6 +795,9 @@ def main():
     with open(output_path, "w") as f:
         json.dump(report, f, indent=2)
     print(f"\nReport saved to {output_path}")
+
+    # Print summary table
+    _print_summary_table(report["results"], tasks)
 
     # Print recommendations
     if report.get("recommendations"):
