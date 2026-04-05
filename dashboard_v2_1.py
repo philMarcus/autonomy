@@ -824,6 +824,47 @@ def render_controls_tab(brain_filter: str):
                     if cli_flag:
                         help_text += f"  \nCLI override: `{cli_flag}`"
 
+                    # Special UI for weighted model pools
+                    if typ == "weights":
+                        st.markdown(f"**{key}**")
+                        st.caption(help_text)
+                        weights_str = str(current_val or default)
+                        # Parse existing weights
+                        model_weights = {}
+                        for pair in weights_str.split(","):
+                            pair = pair.strip()
+                            if "=" in pair:
+                                m, w = pair.rsplit("=", 1)
+                                try:
+                                    model_weights[m.strip()] = float(w.strip())
+                                except ValueError:
+                                    pass
+
+                        # Render slider per model
+                        updated_weights = {}
+                        for model_name, weight in model_weights.items():
+                            scol, lcol = st.columns([4, 1])
+                            with scol:
+                                new_w = st.slider(
+                                    model_name, min_value=0.0, max_value=10.0,
+                                    value=float(weight), step=0.1,
+                                    key=f"weight_{key}_{model_name}",
+                                )
+                            with lcol:
+                                agent_writable = st.checkbox(
+                                    "Unlk", value=(key not in locked_set),
+                                    key=f"lock_{key}_{model_name}",
+                                    help="Uncheck to lock"
+                                )
+                                if not agent_writable:
+                                    new_locked.add(key)
+                            updated_weights[model_name] = new_w
+
+                        # Rebuild weights string
+                        val = ",".join(f"{m}={w}" for m, w in updated_weights.items() if w > 0)
+                        new_values[key] = val
+                        continue  # skip the normal col_w/col_l rendering
+
                     col_w, col_l = st.columns([5, 1])
                     with col_w:
                         if choices:
@@ -1113,8 +1154,11 @@ CONTROLS_META = [
     # LLM
     ("temperature",              "float", 0.7,    "Conscious LLM temperature",                      "llm",      0.0,  2.0,   None),
     ("subconscious_temperature", "float", 0.3,    "Daemon LLM temperature",                         "llm",      0.0,  2.0,   None),
-    ("conscious_model",          "str",   "gemini-2.5-flash", "Model for conscious loop",           "llm",      None, None,  None),
-    ("subconscious_model",       "str",   "gemini-2.5-flash", "Model for subconscious daemon",      "llm",      None, None,  None),
+    ("conscious_model",          "str",   "gemini-2.5-pro", "Fallback conscious model",             "llm",      None, None,  None),
+    ("subconscious_model",       "str",   "gemini-2.5-flash-lite", "Fallback subconscious model",   "llm",      None, None,  None),
+    ("seeker_model",             "str",   "gemini-2.5-flash-lite", "Model for seeker (Gemini only)", "llm",     None, None,  None),
+    ("conscious_model_weights",  "weights", "gemini-2.5-pro=1,gemini-3.1-pro-preview=1", "Conscious model pool weights", "llm", None, None, None),
+    ("subconscious_model_weights", "weights", "local:qwen2.5-1.5b=5,gemini-2.5-flash-lite=1,mistral-small-latest=1,claude-haiku-4-5=0.3", "Subconscious model pool weights", "llm", None, None, None),
     # Cost
     ("daily_budget_usd",         "float", 1.0,    "Daily API spend limit (USD)",                    "cost",     0.01, 100.0, None),
     # Timing
@@ -1138,7 +1182,7 @@ CONTROLS_META = [
     ("reply_max_comments",       "int",   25,     "Max comments evaluated per thread",              "social",   5,    100,   None),
     ("thread_comments_for_engagement", "int", 12, "Max comments on a thread before dogpile guard fires", "social", 1, 100,  None),
     # Daemon
-    ("sentry_interval_seconds",  "int",   60,     "Seconds between sentry scans",                   "daemon",   10,   600,   None),
+    ("sentry_interval_seconds",  "int",   300,    "Seconds between sentry scans",                   "daemon",   10,   None,  None),
     ("signal_threshold",         "float", 0.5,    "Score to trigger strategist",                    "daemon",   0.0,  1.0,   None),
     ("wake_threshold",           "float", 2.0,    "Charge to fire conscious",                       "daemon",   0.5,  10.0,  None),
     ("wake_decay_rate",          "float", 1.0,    "Per-tick charge decay (1.0 = no decay)",         "daemon",   0.5,  1.0,   None),
