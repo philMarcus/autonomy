@@ -167,6 +167,25 @@ def read_brain_events(brain_name: str) -> list[dict]:
 
 
 # ============================================================
+# Cost estimation for daemon events (no cost_usd in telemetry)
+# ============================================================
+# Gemini 2.5 models use "thinking" tokens that multiply actual output cost.
+# Visible output may be 100 tokens but model thinks for 500-2000 tokens.
+# We apply a thinking multiplier to output cost estimates.
+_MODEL_COSTS = {
+    # (input_per_1K, output_per_1K, thinking_multiplier)
+    "gemini-2.5-flash-lite": (0.0001, 0.0004, 3.0),
+    "gemini-2.5-flash": (0.0003, 0.0025, 4.0),
+    "gemini-2.5-pro": (0.00125, 0.01, 5.0),
+}
+
+def _estimate_daemon_cost(model: str, input_tokens: int, output_tokens: int) -> float:
+    costs = _MODEL_COSTS.get(model, (0.0001, 0.0004, 3.0))
+    # Output tokens * thinking multiplier to account for hidden thinking
+    return (input_tokens / 1000 * costs[0]) + (output_tokens * costs[2] / 1000 * costs[1])
+
+
+# ============================================================
 # Spend data loader (reads JSONL directly for cost_usd)
 # ============================================================
 @st.cache_data(ttl=30)
@@ -200,6 +219,22 @@ def _load_spend_data(brain_filter: str):
                         elif evt == "image_generated" and e.get("cost_usd"):
                             cost = float(e["cost_usd"])
                             category = "image"
+                        # Estimate daemon costs from event counts + model pricing
+                        elif evt == "sentry_rubric":
+                            # ~800 input + 50 output tokens per sentry call
+                            model = e.get("model", "gemini-2.5-flash-lite")
+                            cost = _estimate_daemon_cost(model, 800, 50)
+                            category = "subconscious"
+                        elif evt == "strategist_draft":
+                            # ~1200 input + 400 output tokens per strategist call
+                            model = e.get("model", "gemini-2.5-flash-lite")
+                            cost = _estimate_daemon_cost(model, 1200, 400)
+                            category = "subconscious"
+                        elif evt == "seeker_result":
+                            # ~600 input + 200 output tokens per seeker call
+                            model = e.get("model", "gemini-2.5-flash-lite")
+                            cost = _estimate_daemon_cost(model, 600, 200)
+                            category = "subconscious"
 
                         if category and cost > 0:
                             ts = e.get("ts", "")[:13]  # truncate to hour
