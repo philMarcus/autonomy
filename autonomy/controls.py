@@ -127,6 +127,23 @@ class ControlRegistry:
                 if defn.choices and v not in defn.choices:
                     return None
                 return v
+            elif defn.dtype == "weights":
+                # Validate weighted model pool: strip models not in choices
+                v = str(value).strip()
+                if not v:
+                    return v
+                if defn.choices:
+                    valid_pairs = []
+                    for pair in v.split(","):
+                        pair = pair.strip()
+                        if "=" not in pair:
+                            continue
+                        model, w = pair.rsplit("=", 1)
+                        model = model.strip()
+                        if model in defn.choices:
+                            valid_pairs.append(f"{model}={w.strip()}")
+                    return ",".join(valid_pairs) if valid_pairs else None
+                return v
         except (ValueError, TypeError):
             return None
         return None
@@ -280,11 +297,13 @@ def build_default_registry(args, model_registry) -> ControlRegistry:
         Control("seeker_model", "str", "gemini-2.5-flash-lite",
                 "Model for seeker gear (needs Gemini for search grounding)", "llm",
                 choices=[m for m in all_model_ids if m.startswith("gemini")]),
-        Control("conscious_model_weights", "str", "gemini-2.5-pro=1,gemini-3.1-pro-preview=1",
-                "Weighted model pool for conscious (model=weight pairs, comma-separated)", "llm"),
-        Control("subconscious_model_weights", "str",
+        Control("conscious_model_weights", "weights", "gemini-2.5-pro=1,gemini-3.1-pro-preview=1",
+                "Weighted model pool for conscious (pro-tier only)", "llm",
+                choices=conscious_choices),
+        Control("subconscious_model_weights", "weights",
                 "local:qwen2.5-1.5b=5,gemini-2.5-flash-lite=1,mistral-small-latest=1,claude-haiku-4-5=0.3",
-                "Weighted model pool for sentry+strategist (model=weight pairs)", "llm"),
+                "Weighted model pool for sentry+strategist (cheap/local)", "llm",
+                choices=subconscious_choices),
         Control("temperature", "float", getattr(args, "temperature", 0.7),
                 "Conscious LLM temperature", "llm", min_val=0.0, max_val=2.0),
         Control("subconscious_temperature", "float", 0.3,
