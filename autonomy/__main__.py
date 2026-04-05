@@ -605,8 +605,12 @@ def main():
                     "vote_label_3": analog_controls.get("vote_label_3", "self"),
                 }
 
-        # Read current conscious model from control registry (may have changed)
-        conscious_model = ctrl.get("conscious_model")
+        # Read current conscious model — use weighted pool if set
+        from .daemon import _pick_weighted_model
+        conscious_model = _pick_weighted_model(
+            ctrl.get("conscious_model_weights"),
+            ctrl.get("conscious_model"),
+        )
 
         # --- Budget planning (accountant) ---
         if ctrl.get("budget_plan_enabled"):
