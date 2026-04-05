@@ -279,9 +279,23 @@ def render_overview_tab(brain_filter: str):
 
     st.sidebar.header("Filters")
 
+    # Quick time range buttons
+    import datetime
+    today = datetime.date.today()
+    range_choice = st.sidebar.radio(
+        "Time range", ["Past day", "Past week", "All time"],
+        index=0, horizontal=True,
+    )
+    if range_choice == "Past day":
+        default_start = today - datetime.timedelta(days=1)
+    elif range_choice == "Past week":
+        default_start = today - datetime.timedelta(days=7)
+    else:
+        default_start = min_dt
+
     start_dt, end_dt = st.sidebar.date_input(
         "Date range",
-        value=(min_dt, max_dt),
+        value=(max(min_dt, default_start), max_dt),
         min_value=min_dt,
         max_value=max_dt,
     )
@@ -335,7 +349,9 @@ def render_overview_tab(brain_filter: str):
     st.caption("Spend over time (conscious vs subconscious vs image)")
     _spend_df = _load_spend_data(brain_filter)
     if _spend_df is not None and len(_spend_df) > 0:
-        st.area_chart(_spend_df, height=220)
+        _chart_col, _ = st.columns([3, 1])
+        with _chart_col:
+            st.area_chart(_spend_df, height=220)
         totals = _spend_df.sum()
         sc1, sc2, sc3, sc4 = st.columns(4)
         sc1.metric("Conscious", f"${totals.get('conscious', 0):.3f}")
@@ -816,6 +832,7 @@ def render_controls_tab(brain_filter: str):
             with st.expander(f"**{label}**", expanded=(cat in ("models", "timing", "wake"))):
                 for meta in cat_groups[cat]:
                     key, typ, default, desc, _cat, mn, mx, choices = meta
+                    display_name = DISPLAY_NAMES.get(key, key)
                     current_val = current_ctrl.get(key, default)
 
                     # Build help text with CLI flag hint
@@ -870,18 +887,18 @@ def render_controls_tab(brain_filter: str):
                         if choices:
                             safe_val = current_val if current_val in choices else choices[0]
                             val = st.selectbox(
-                                key, choices, index=choices.index(safe_val),
+                                display_name, choices, index=choices.index(safe_val),
                                 help=help_text, key=f"ctrl_{key}"
                             )
                         elif typ == "bool":
-                            val = st.checkbox(key, value=bool(current_val), help=help_text, key=f"ctrl_{key}")
+                            val = st.checkbox(display_name, value=bool(current_val), help=help_text, key=f"ctrl_{key}")
                         elif typ == "float":
                             try:
                                 fval = float(current_val)
                             except (TypeError, ValueError):
                                 fval = float(default)
                             val = st.number_input(
-                                key, value=fval,
+                                display_name, value=fval,
                                 min_value=float(mn) if mn is not None else None,
                                 max_value=float(mx) if mx is not None else None,
                                 step=0.01, format="%.3f", help=help_text, key=f"ctrl_{key}"
@@ -892,13 +909,13 @@ def render_controls_tab(brain_filter: str):
                             except (TypeError, ValueError):
                                 ival = int(default)
                             val = st.number_input(
-                                key, value=ival,
+                                display_name, value=ival,
                                 min_value=int(mn) if mn is not None else None,
                                 max_value=int(mx) if mx is not None else None,
                                 step=1, help=help_text, key=f"ctrl_{key}"
                             )
                         else:
-                            val = st.text_input(key, value=str(current_val), help=help_text, key=f"ctrl_{key}")
+                            val = st.text_input(display_name, value=str(current_val), help=help_text, key=f"ctrl_{key}")
                         new_values[key] = val
 
                     with col_l:
@@ -939,7 +956,7 @@ def render_controls_tab(brain_filter: str):
 _DAEMON_EVENT_TYPES = {
     "daemon_start", "daemon_stop", "daemon_tick", "daemon_error",
     "daemon_wake", "daemon_directives",
-    "sentry_signal", "sentry_score_error",
+    "sentry_signal", "sentry_score_error", "sentry_rubric", "sentry_batch",
     "strategist_draft", "strategist_error", "strategist_parse_fail",
     "strategist_budget_skip",
     # Seeker gear
@@ -1008,18 +1025,26 @@ def render_daemon_tab(brain_filter: str):
     c7.metric("Sweeps", len(sweeps))
     c8.metric("Searches", len(seeker_results))
 
-    # Model + interval caption
+    # Model distribution from sentry rubric events
+    rubrics = df[df["event_type"] == "sentry_rubric"]
+    if "model" in rubrics.columns and len(rubrics) > 0:
+        model_dist = rubrics["model"].value_counts()
+        model_parts = [f"**{m}**: {c}" for m, c in model_dist.items()]
+        st.caption("Sentry model distribution: " + " | ".join(model_parts))
+    elif len(starts) > 0:
+        latest = starts.iloc[-1]
+        st.caption(f"Model: **{latest.get('model', '?')}**")
+
     if len(starts) > 0:
         latest = starts.iloc[-1]
         st.caption(
-            f"Model: **{latest.get('model', '?')}** | "
             f"Interval: **{latest.get('sentry_interval', '?')}s** | "
             f"Run: `{latest.get('run_id', '?')[:12]}...`"
         )
 
     st.divider()
 
-    # --- Charts (compact, native Streamlit) ---
+    # --- Charts (compact) ---
     if len(ticks) > 0 and "wake_potential" in ticks.columns:
         left, right = st.columns(2)
 
@@ -1154,8 +1179,8 @@ CONTROLS_META = [
     # --- Models ---
     ("conscious_model_weights",  "weights", "gemini-2.5-pro=1,gemini-3.1-pro-preview=1", "Conscious model pool — higher weight = more frequent", "models", None, None, None),
     ("subconscious_model_weights", "weights", "local:qwen2.5-1.5b=5,gemini-2.5-flash-lite=1,mistral-small-latest=1,claude-haiku-4-5=0.3", "Subconscious model pool (sentry + strategist)", "models", None, None, None),
-    ("conscious_model",          "str",   "gemini-2.5-pro", "Default conscious model (used when weights empty)", "models", None, None,  None),
-    ("subconscious_model",       "str",   "gemini-2.5-flash-lite", "Default subconscious model (used when weights empty)", "models", None, None,  None),
+    ("conscious_model",          "str",   "gemini-2.5-pro", "Fallback when conscious weights empty", "models", None, None,  None),
+    ("subconscious_model",       "str",   "gemini-2.5-flash-lite", "Fallback when subconscious weights empty", "models", None, None,  None),
     ("seeker_model",             "str",   "gemini-2.5-flash-lite", "Seeker model (Gemini only, needs search grounding)", "models", None, None,  None),
     ("temperature",              "float", 0.7,    "Conscious LLM temperature",                      "models",   0.0,  2.0,   None),
     ("subconscious_temperature", "float", 0.3,    "Daemon LLM temperature",                         "models",   0.0,  2.0,   None),
@@ -1242,6 +1267,14 @@ CATEGORY_LABELS = {
 
 # Controls to lock by default (agent cannot change these unless unlocked)
 DEFAULT_LOCKED = {"daily_budget_usd"}
+
+# Friendly display names for controls (overrides raw key in UI)
+DISPLAY_NAMES = {
+    "conscious_model": "default_conscious_model",
+    "subconscious_model": "default_subconscious_model",
+    "conscious_model_weights": "Conscious Model Weights",
+    "subconscious_model_weights": "Subconscious Model Weights",
+}
 
 
 
