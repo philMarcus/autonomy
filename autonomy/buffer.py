@@ -25,6 +25,7 @@ class Draft:
     charge: float             # how much wake_potential this added
     source: str = "feed"      # "feed" or "seed" — origin of the triggering item
     cycles_saved: int = 0     # how many cycles this has been saved (0 = fresh)
+    model: str = ""           # which subconscious model produced this draft
 
     def to_dict(self) -> dict:
         """Serialize for JSON state persistence."""
@@ -39,6 +40,7 @@ class Draft:
             "charge": self.charge,
             "source": self.source,
             "cycles_saved": self.cycles_saved,
+            "model": self.model,
         }
 
     @classmethod
@@ -55,6 +57,7 @@ class Draft:
             charge=d.get("charge", 0.0),
             source=d.get("source", "feed"),
             cycles_saved=d.get("cycles_saved", 0),
+            model=d.get("model", ""),
         )
 
 

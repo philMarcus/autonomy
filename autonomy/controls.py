@@ -280,6 +280,8 @@ def build_default_registry(args, model_registry) -> ControlRegistry:
         Control("seeker_model", "str", "gemini-2.5-flash-lite",
                 "Model for seeker gear (needs Gemini for search grounding)", "llm",
                 choices=[m for m in all_model_ids if m.startswith("gemini")]),
+        Control("subconscious_model_cadre", "str", "",
+                "Comma-separated models for round-robin sentry+strategist (empty = use subconscious_model only)", "daemon"),
         Control("temperature", "float", getattr(args, "temperature", 0.7),
                 "Conscious LLM temperature", "llm", min_val=0.0, max_val=2.0),
         Control("subconscious_temperature", "float", 0.3,

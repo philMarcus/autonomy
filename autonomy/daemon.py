@@ -445,7 +445,7 @@ class SubconsciousDaemon:
 
         Returns 0.0 if budget exhausted, model unavailable, or on error.
         """
-        model_id = self._ctrl.get("subconscious_model")
+        model_id = self._pick_cadre_model()
         temp = self._ctrl.get("subconscious_temperature")
 
         # Budget check
@@ -502,6 +502,15 @@ class SubconsciousDaemon:
             })
             return 0.0
 
+    def _pick_cadre_model(self) -> str:
+        """Pick next model from the rotating cadre, or fall back to subconscious_model."""
+        cadre_str = (self._ctrl.get("subconscious_model_cadre") or "").strip()
+        if cadre_str:
+            cadre = [m.strip() for m in cadre_str.split(",") if m.strip()]
+            if cadre:
+                return cadre[self._tick_count % len(cadre)]
+        return self._ctrl.get("subconscious_model")
+
     def _score_items_batch(self, items: list) -> list:
         """Score multiple feed items in a single LLM call (batch mode).
 
@@ -511,7 +520,7 @@ class SubconsciousDaemon:
         if not items:
             return []
 
-        model_id = self._ctrl.get("subconscious_model")
+        model_id = self._pick_cadre_model()
         temp = self._ctrl.get("subconscious_temperature")
 
         # Budget check for entire batch
@@ -596,7 +605,7 @@ class SubconsciousDaemon:
 
         Uses create_chat() with kernel as system instruction.
         """
-        model_id = self._ctrl.get("subconscious_model")
+        model_id = self._pick_cadre_model()
         temp = self._ctrl.get("subconscious_temperature")
         max_tokens = self._ctrl.get("strategist_max_tokens")
 
@@ -688,6 +697,7 @@ class SubconsciousDaemon:
                 draft_content=plan.get("draft_content", ""),
                 charge=charge,
                 source=item.get("_source", "feed"),
+                model=model_id,
             )
         except Exception as e:
             self._telemetry.log("strategist_error", {
@@ -913,6 +923,7 @@ class SubconsciousDaemon:
             draft_content=shorten(draft_content, 800),
             charge=charge,
             source="search",
+            model=model_id,
         )
 
 
