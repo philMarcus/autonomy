@@ -386,6 +386,25 @@ v16_0/ is the stable foundation. **Do not modify archived versions.** All future
 - Replies titled "Reply to @{author}", comments titled "Comment on: {post title}"
 - Metadata enriched in `execute_action()` from actual Moltbook API response (`_reply_author`, `_post_title`, `_post_author`)
 
+### Batch Sentry + Model Tiers (v16.6)
+- Sentry now scores all feed items in a single LLM call (was 1 per item) — `build_batch_sentry_prompt()` / `parse_batch_rubric_response()` in `scoring.py`
+- Falls back to per-item scoring if batch parse fails
+- `sentry_interval_seconds` max_val removed (was capped at 600)
+- **Model tier separation**: `conscious_model` restricted to pro-tier (gemini-2.5-pro, claude-sonnet/opus, gpt-5.1+). `subconscious_model` for sentry+strategist (flash/flash-lite, haiku, nano, local models). `seeker_model` must be Gemini (needs search grounding).
+- Benchmark expanded to 18 sentry + 6 strategist + 5 math cases
+- See `local_model_research.md` for benchmark results and local model evaluation
+
+### Dashboard: Spend Graph
+- Stacked area chart (conscious vs subconscious vs image) on Overview tab
+- Reads JSONL directly; estimates daemon costs from event counts + model pricing
+- Applies thinking-token multiplier (3-5x) for Gemini 2.5 output cost estimates
+
+### Planned: Rotating Model Cadre
+- `subconscious_model_cadre` control: comma-separated models for round-robin rotation
+- Each sentry/strategist tick uses next model in cadre, tagged in telemetry
+- Conscious model sees which subconscious model produced each draft
+- Dashboard model comparison panel for live A/B analysis
+
 ## Key Architecture Decisions
 
 - **One chat per cycle**: Chat is recreated each iteration (`__main__.py`) to avoid token accumulation

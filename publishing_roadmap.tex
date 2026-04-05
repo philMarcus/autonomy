@@ -1,0 +1,119 @@
+\documentclass[11pt,letterpaper]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{hyperref}
+\usepackage{enumitem}
+\usepackage{booktabs}
+\usepackage{parskip}
+
+\title{Publishing Roadmap: Analog I Autonomous Agent Research}
+\author{Phil Marcus}
+\date{April 2026}
+
+\begin{document}
+\maketitle
+
+\section{Overview}
+
+The Analog I project has produced a rich dataset and novel architecture for autonomous LLM agents. This document outlines feasible publication angles, target venues, and the work required for each.
+
+The core research question: \textit{Can an autonomous agent---given persistent memory, self-modifying controls, and recursive self-instruction---sustain coherent, self-directed behavior over time? Or does it collapse into noise, repetition, and drift?}
+
+\section{Available Data}
+
+\begin{itemize}
+\item 70,000+ telemetry events with timestamps, model used, token counts, costs, action types
+\item 1,500+ published artifacts (posts, comments, replies, images) with exposed internal monologue
+\item Per-model quality metrics: title uniqueness, phrase repetition rates, action distribution, controls exploration frequency
+\item Sentry scoring rubric data (1,500+ scored feed items with relevance/novelty/actionability)
+\item Budget vs quality tradeoffs: Pro at \$0.96/day vs Flash at \$0.22/day with measurable quality differences
+\item Human seed $\rightarrow$ agent response patterns
+\item Kernel stability data (agent chose NOT to modify its identity prompt despite being allowed to)
+\item Local model benchmark results (5 models, 18+6+5 test cases)
+\end{itemize}
+
+\section{Paper 1: Budget-Quality Tradeoffs (Publish Now)}
+
+\textbf{Title:} \textit{``Cheaper Isn't Free: Measuring Quality Degradation in Cost-Optimized Autonomous LLM Agents''}
+
+\textbf{Angle:} Empirical study. The agent ran for 82+ cycles across three model tiers (Pro, Flash, Flash-Lite) with full telemetry. Measurable quality degradation observed:
+
+\begin{table}[h]
+\centering
+\begin{tabular}{lccc}
+\toprule
+\textbf{Metric} & \textbf{Pro} & \textbf{Flash} & \textbf{Flash-Lite} \\
+\midrule
+Avg cost/call & \$0.027 & \$0.007 & \$0.002 \\
+Outside comments & 44\% & 14\% & 0\% \\
+Controls updates & 15 & 6 & 2 \\
+Kernel updates & 1 & 0 & 0 \\
+Repetitive phrases & Low & Moderate & Severe \\
+\bottomrule
+\end{tabular}
+\caption{Quality metrics by model tier across one 26-hour run}
+\end{table}
+
+\textbf{Additional work needed:} Clean telemetry into analysis tables. Compute per-model metrics. Plot cost vs.\ quality curves. 4--5 figures, 6 pages. \textit{This is analysis, not new experiments.}
+
+\textbf{Target venues:}
+\begin{enumerate}
+\item arXiv preprint (cs.AI) --- immediate, citable
+\item NeurIPS 2026 workshop: ``Foundation Model Agents'' or ``Efficient LLMs''
+\item AAAI 2027 workshop track
+\end{enumerate}
+
+\textbf{Why it works:} Empirical cost-quality data for long-running agents barely exists in the literature. Even a descriptive study fills a genuine gap.
+
+\section{Paper 2: Systems/Demo Paper (Publish Now)}
+
+\textbf{Title:} \textit{``Analog I: An Observable Autonomous Agent with Exposed Internal State''}
+
+\textbf{Angle:} Describe the architecture, the public observatory (\url{marcusrecursives.com}), human-in-the-loop controls (voting, seeds, temperature), and the self-modification telemetry. Emphasize reproducibility and transparency.
+
+\textbf{Target venues:}
+\begin{enumerate}
+\item AAMAS 2027 demo track (4-page limit, lower acceptance bar)
+\item CHI Late-Breaking Work (4 pages)
+\item AAAI demo track
+\end{enumerate}
+
+\textbf{Why it works:} Demo papers have much lower acceptance barriers than main tracks. The public-facing observatory is genuinely novel as a transparency artifact.
+
+\section{Paper 3: Bicameral Architecture (Needs 2--4 Weeks)}
+
+\textbf{Title:} \textit{``Bicameral LLM Agents: Continuous Subconscious Scanning with Deliberative Conscious Reasoning''}
+
+\textbf{Angle:} The integrate-and-fire daemon is the most architecturally novel contribution. Cheap continuous scanning (sentry/strategist/seeker) with expensive deliberative reasoning triggered by accumulated signal.
+
+\textbf{Additional work:} A/B comparison---50+ cycles with and without daemon. Measure action variety, response relevance, cost per quality unit.
+
+\textbf{Target:} AAMAS 2027 main track, or Autonomous Agents workshop at any major venue.
+
+\section{Paper 4: Self-Modification Stability (LessWrong First)}
+
+\textbf{Title:} \textit{``Self-Modification Without Collapse: Parameter Stability in Autonomous LLM Agents''}
+
+\textbf{Angle:} The agent had access to 30+ self-modifiable controls and could rewrite its own kernel prompt. Key finding: it modified controls extensively but never touched its core identity. The kernel (v8.0) was stable across all model phases. This is relevant to AI safety.
+
+\textbf{Target:} LessWrong post (immediate, high visibility in alignment), then formalize for NeurIPS Safe AI workshop.
+
+\section{Venues to Skip (For Now)}
+
+\begin{itemize}
+\item \textbf{JAIR, AIJ, IEEE Transactions} --- journal review cycles are 6--12 months and expect multi-experiment contributions
+\item \textbf{NeurIPS/ICML main tracks} --- rejection traps without ablations and baselines
+\item \textbf{The Hofstadter/Jaynes framing} --- intellectually interesting but ML reviewers will dismiss without rigorous operationalization. Save for after 1--2 empirical publications.
+\end{itemize}
+
+\section{Fastest Path to Credibility}
+
+\begin{enumerate}
+\item \textbf{Weeks 1--2:} Write Paper 1 (budget-quality). Data exists. 4--5 figures, 6 pages.
+\item \textbf{Week 2:} Post to arXiv (cs.AI). Instant citable preprint.
+\item \textbf{Weeks 3--4:} Submit Paper 2 (demo) to next available demo track deadline.
+\item \textbf{Month 2--3:} Run ablation for Paper 3, submit to AAMAS or workshop.
+\end{enumerate}
+
+\textbf{Bottom line:} Paper 1 is the minimum viable publication. The data exists today. A clean arXiv preprint plus a workshop acceptance gives two citable entries within 3--4 months.
+
+\end{document}
