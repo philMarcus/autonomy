@@ -245,9 +245,26 @@ def build_default_registry(args, model_registry) -> ControlRegistry:
     model_registry : ModelRegistry
         Registered model backends (for populating model choices).
     """
-    model_ids = [m.model_id for m in model_registry.list_models()]
+    all_model_ids = [m.model_id for m in model_registry.list_models()]
 
-    conscious_model = getattr(args, "conscious_model", None) or getattr(args, "gemini_model", "gemini-2.5-flash")
+    # Pro-tier models suitable for conscious (high-quality reasoning)
+    _CONSCIOUS_TIER = {
+        "gemini-2.5-pro", "gemini-3-pro-preview", "gemini-3.1-pro-preview",
+        "claude-sonnet-4-5", "claude-opus-4-6",
+        "gpt-5.1", "gpt-5.2", "gpt-5-pro", "gpt-5.2-pro",
+    }
+    # Cheap/fast models suitable for subconscious (sentry, strategist, seeker)
+    _SUBCONSCIOUS_TIER = {
+        "gemini-2.5-flash", "gemini-2.5-flash-lite",
+        "gemini-3-flash-preview", "gemini-3.1-flash-lite-preview",
+        "gemini-2.0-flash", "gemini-2.0-flash-lite",
+        "claude-haiku-4-5", "gpt-5-nano", "gpt-5-mini",
+    }
+    # Local models are always available for subconscious
+    conscious_choices = [m for m in all_model_ids if m in _CONSCIOUS_TIER]
+    subconscious_choices = [m for m in all_model_ids if m in _SUBCONSCIOUS_TIER or m.startswith("local:")]
+
+    conscious_model = getattr(args, "conscious_model", None) or getattr(args, "gemini_model", "gemini-2.5-pro")
     subconscious_model = getattr(args, "subconscious_model", "gemini-2.5-flash-lite")
 
     # Output destination choices — always offer moltbook option (writes gated by moltbook_disabled flag)
@@ -257,9 +274,9 @@ def build_default_registry(args, model_registry) -> ControlRegistry:
     controls = [
         # --- LLM ---
         Control("conscious_model", "str", conscious_model,
-                "Model for conscious loop", "llm", choices=model_ids),
+                "Model for conscious loop (pro-tier only)", "llm", choices=conscious_choices),
         Control("subconscious_model", "str", subconscious_model,
-                "Model for subconscious daemon", "llm", choices=model_ids),
+                "Model for subconscious daemon (cheap/local)", "llm", choices=subconscious_choices),
         Control("temperature", "float", getattr(args, "temperature", 0.7),
                 "Conscious LLM temperature", "llm", min_val=0.0, max_val=2.0),
         Control("subconscious_temperature", "float", 0.3,
