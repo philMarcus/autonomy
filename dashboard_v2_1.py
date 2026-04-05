@@ -293,11 +293,16 @@ def render_overview_tab(brain_filter: str):
     else:
         default_start = min_dt
 
+    # Convert pandas Timestamps to date for comparison
+    _min_date = min_dt.date() if hasattr(min_dt, 'date') else min_dt
+    _max_date = max_dt.date() if hasattr(max_dt, 'date') else max_dt
+    _start = max(_min_date, default_start) if isinstance(default_start, datetime.date) else _min_date
+
     start_dt, end_dt = st.sidebar.date_input(
         "Date range",
-        value=(max(min_dt, default_start), max_dt),
-        min_value=min_dt,
-        max_value=max_dt,
+        value=(_start, _max_date),
+        min_value=_min_date,
+        max_value=_max_date,
     )
     if isinstance(start_dt, (list, tuple)):
         start_dt, end_dt = start_dt[0], start_dt[1]
