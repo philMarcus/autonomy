@@ -264,20 +264,8 @@ def main():
         from .llm.mistral import MistralBackend
         registry.register_backend("mistral", MistralBackend(api_key=mistral_key))
 
-    # Local models — register when any model arg or weight pool uses "local:"
-    _ctrl_file = os.path.join(BRAINS_DIR, f"{brain_name}_controls.json")
-    _ctrl_peek = ""
-    if os.path.exists(_ctrl_file):
-        try:
-            with open(_ctrl_file, "r", encoding="utf-8") as _f:
-                _ctrl_peek = _f.read()
-        except OSError:
-            pass
-    _needs_local = (
-        conscious_model.startswith("local:")
-        or args.subconscious_model.startswith("local:")
-        or "local:" in _ctrl_peek
-    )
+    # Local models — always register if available (weight pools may reference them)
+    _needs_local = True  # cadre system means local models can appear in any weight pool
     if _needs_local:
         from .llm.local import LocalBackend
         registry.register_backend("local", LocalBackend())
