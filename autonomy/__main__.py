@@ -611,6 +611,7 @@ def main():
             ctrl.get("conscious_model_weights"),
             ctrl.get("conscious_model"),
         )
+        safe_print(f"{Fore.CYAN}[CONSCIOUS MODEL] {conscious_model}")
 
         # --- Budget planning (accountant) ---
         if ctrl.get("budget_plan_enabled"):
@@ -792,6 +793,19 @@ def main():
             fresh_drafts, wake_pot = draft_buffer.drain(refractory=ctrl.get("wake_refractory"))
             if fresh_drafts:
                 safe_print(f"{Fore.MAGENTA}[DAEMON] {len(fresh_drafts)} draft(s) from subconscious (wake_potential={wake_pot:.2f})")
+                # Show model distribution in drafts
+                from collections import Counter
+                model_counts = Counter(d.model for d in fresh_drafts if d.model)
+                if model_counts:
+                    model_summary = ", ".join(f"{m}: {c}" for m, c in model_counts.most_common())
+                    safe_print(f"{Fore.CYAN}  Draft models: {model_summary}")
+            # Show daemon tick stats (model usage since last wake)
+            if hasattr(daemon, '_tick_model_counts'):
+                mc = daemon._tick_model_counts
+                if mc:
+                    tick_summary = ", ".join(f"{m}: {c}" for m, c in sorted(mc.items(), key=lambda x: -x[1]))
+                    safe_print(f"{Fore.CYAN}  Sentry ticks by model: {tick_summary}")
+                    daemon._tick_model_counts = {}  # reset for next wake period
             # Load saved plans from state (previous cycles' unused drafts)
             saved_plans = [
                 Draft.from_dict(d) for d in state.get("saved_plans", [])

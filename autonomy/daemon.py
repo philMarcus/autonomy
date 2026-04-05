@@ -98,6 +98,9 @@ class SubconsciousDaemon:
         self._directives: Dict[str, Any] = {}
         self._directives_lock = threading.Lock()
 
+        # Track model usage per wake period (reset by __main__.py after each conscious cycle)
+        self._tick_model_counts: Dict[str, int] = {}
+
         # Track which feed items we've already scored (avoid re-scoring)
         self._seen_ids: Set[str] = set()
         # Track seed texts we've already scored (avoid re-scoring same seed)
@@ -533,15 +536,13 @@ class SubconsciousDaemon:
             return 0.0
 
     def _pick_cadre_model(self) -> str:
-        """Pick a model from the weighted subconscious pool.
-
-        Format: "model=weight,model=weight" e.g. "local:qwen2.5-1.5b=5,gemini-2.5-flash-lite=1"
-        Falls back to subconscious_model if weights not set or parse fails.
-        """
-        return _pick_weighted_model(
+        """Pick a model from the weighted subconscious pool and track usage."""
+        model = _pick_weighted_model(
             self._ctrl.get("subconscious_model_weights"),
             self._ctrl.get("subconscious_model"),
         )
+        self._tick_model_counts[model] = self._tick_model_counts.get(model, 0) + 1
+        return model
 
     def _score_items_batch(self, items: list) -> list:
         """Score multiple feed items in a single LLM call (batch mode).
