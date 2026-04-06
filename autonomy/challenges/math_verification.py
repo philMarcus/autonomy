@@ -136,10 +136,28 @@ CRITICAL: Follow the format instructions EXACTLY. If it asks for a number with 2
             }
 
         except Exception as e:
+            err_str = str(e)
+            is_503 = "503" in err_str or "UNAVAILABLE" in err_str
             try:
-                print(f"{Fore.RED}[VERIFICATION] Failed to solve challenge: {e}{Style.RESET_ALL}")
+                print(f"{Fore.RED}[VERIFICATION] Failed to solve challenge. {e}{Style.RESET_ALL}")
             except:
                 pass
             if self.telemetry:
-                self.telemetry.log("verification_challenge_error", {"error": str(e)})
+                self.telemetry.log("verification_challenge_error", {"error": err_str[:300]})
+            # Retry with backup LLM on 503
+            if is_503 and hasattr(self, 'backup_llm') and self.backup_llm:
+                try:
+                    print(f"{Fore.YELLOW}[VERIFICATION] 503 — retrying with backup model{Style.RESET_ALL}")
+                    raw_response = self.backup_llm.generate(prompt, temperature=0.0, max_output_tokens=8192).strip()
+                    lines = [l.strip() for l in raw_response.splitlines() if l.strip()]
+                    answer = lines[-1] if lines else ""
+                    answer = answer.strip('"\'` \n\r\t')
+                    for prefix in ("ANSWER:", "Answer:", "answer:", "STEP 4", "Step 4"):
+                        if answer.startswith(prefix):
+                            answer = answer[len(prefix):].strip().strip(":").strip()
+                    if answer:
+                        print(f"{Fore.GREEN}[VERIFICATION] Backup answer: {answer}{Style.RESET_ALL}")
+                        return {"verification_code": verification_code, "answer": answer}
+                except Exception:
+                    pass
             return None

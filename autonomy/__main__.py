@@ -408,6 +408,13 @@ def main():
         # Challenges are rare (only on Moltbook writes), so cost is negligible.
         challenge_llm = registry.as_llm_client(default_model_id=args.conscious_model)
         challenge_solver = MathVerificationSolver(llm_client=challenge_llm, telemetry=telemetry)
+        # Set backup LLM for 503 retry (pick a different conscious-tier model)
+        _con_weights = ctrl.get("conscious_model_weights") if ctrl else ""
+        if _con_weights:
+            _backup_models = [p.split("=")[0].strip() for p in _con_weights.split(",") if "=" in p]
+            _backup_models = [m for m in _backup_models if m != args.conscious_model]
+            if _backup_models:
+                challenge_solver.backup_llm = registry.as_llm_client(default_model_id=_backup_models[0])
         platform = MoltbookClient(
             api_key=mb_key, telemetry=telemetry, brain_name=brain_name,
             read_only=args.read_only, challenge_solver=challenge_solver,
