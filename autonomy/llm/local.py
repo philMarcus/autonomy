@@ -18,6 +18,8 @@ HF_MODEL_MAP: Dict[str, str] = {
     # Small models (fit float16 on <=10GB VRAM, no quantization needed)
     "local:qwen2.5-1.5b":  "Qwen/Qwen2.5-1.5B-Instruct",
     "local:llama-3.2-3b":  "meta-llama/Llama-3.2-3B-Instruct",
+    # Medium models (3-4B, may need quantization depending on VRAM)
+    "local:phi-4-mini":    "microsoft/Phi-4-mini-instruct",
     # Full models (need 4-bit quantization on <=10GB VRAM)
     "local:qwen2.5-7b":    "Qwen/Qwen2.5-7B-Instruct",
     "local:mistral-7b":    "mistralai/Mistral-7B-Instruct-v0.3",
@@ -38,6 +40,15 @@ LOCAL_MODELS: List[ModelInfo] = [
         model_id="local:llama-3.2-3b",
         provider="local",
         display_name="Llama 3.2 3B (local)",
+        is_local=True,
+        input_cost_per_1k=0.0,
+        output_cost_per_1k=0.0,
+        max_context_tokens=128_000,
+    ),
+    ModelInfo(
+        model_id="local:phi-4-mini",
+        provider="local",
+        display_name="Phi-4 Mini 3.8B (local)",
         is_local=True,
         input_cost_per_1k=0.0,
         output_cost_per_1k=0.0,
