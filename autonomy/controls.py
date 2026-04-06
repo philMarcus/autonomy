@@ -306,7 +306,7 @@ def build_default_registry(args, model_registry) -> ControlRegistry:
                 "Weighted model pool for conscious (pro-tier only)", "llm",
                 choices=conscious_choices),
         Control("subconscious_model_weights", "weights",
-                "local:qwen2.5-1.5b=5,gemini-2.5-flash-lite=1,mistral-small-latest=1,claude-haiku-4-5=0.3",
+                "gemini-2.5-flash-lite=3,claude-haiku-4-5=1,mistral-small-latest=1",
                 "Weighted model pool for sentry+strategist (cheap/local)", "llm",
                 choices=subconscious_choices),
         Control("temperature", "float", getattr(args, "temperature", 0.7),
