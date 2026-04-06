@@ -128,22 +128,27 @@ class ControlRegistry:
                     return None
                 return v
             elif defn.dtype == "weights":
-                # Validate weighted model pool: strip models not in choices
+                # Validate weighted model pool: strip invalid models, max 1 local
                 v = str(value).strip()
                 if not v:
                     return v
-                if defn.choices:
-                    valid_pairs = []
-                    for pair in v.split(","):
-                        pair = pair.strip()
-                        if "=" not in pair:
-                            continue
-                        model, w = pair.rsplit("=", 1)
-                        model = model.strip()
-                        if model in defn.choices:
-                            valid_pairs.append(f"{model}={w.strip()}")
-                    return ",".join(valid_pairs) if valid_pairs else None
-                return v
+                valid_pairs = []
+                local_seen = False
+                for pair in v.split(","):
+                    pair = pair.strip()
+                    if "=" not in pair:
+                        continue
+                    model, w = pair.rsplit("=", 1)
+                    model = model.strip()
+                    if defn.choices and model not in defn.choices:
+                        continue
+                    # Only allow one local model (can't swap GPU models per tick)
+                    if model.startswith("local:"):
+                        if local_seen:
+                            continue  # skip additional local models
+                        local_seen = True
+                    valid_pairs.append(f"{model}={w.strip()}")
+                return ",".join(valid_pairs) if valid_pairs else None
         except (ValueError, TypeError):
             return None
         return None
