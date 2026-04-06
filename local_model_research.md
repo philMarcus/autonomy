@@ -112,8 +112,57 @@ Both scored 0.00 on every sentry item. The line-based rubric format appears inco
 | gpt-5-mini | 44% | 33% | 100% | 6,046ms | $0.001 | Broken sentry |
 | gpt-5-nano | 44% | 0% | 80% | 3,400ms | $0.000 | Broken sentry |
 
-## Recommended Cadre for Rotating Model Experiment
+## Simplified Scoring Format (April 6, 2026)
 
-`gemini-2.5-flash-lite,mistral-small-latest,claude-haiku-4-5,local:qwen2.5-1.5b`
+Replaced the multi-criterion rubric with a simple 0-9 single-score format.
+This was necessary because the detailed format caused flash-lite and GPT models to fail.
 
-Expected avg cost per tick: ~$0.005 (amortized across rotation)
+### Key Discovery: Kernel Causes Flash-Lite to Fail Live
+
+The sentry was using the full kernel prompt as system instruction. The kernel says
+"Before every response, output [INTERNAL MONOLOGUE] with three layers..." — flash-lite
+obediently wrote a 2000-char monologue instead of scores, hitting the token limit.
+
+**Fix:** Sentry now uses `"Score items concisely. Output only numbers."` as system instruction.
+Strategist keeps the kernel for personality.
+
+### Simple 0-9 Sentry Results (16 items, correct max_output_tokens)
+
+| Model | Accuracy | Order | Irrel | Tang | Rel | Core | Time |
+|-------|----------|-------|-------|------|-----|------|------|
+| gemini-2.5-flash-lite | 81% | YES | 0.0 | 3.2 | 7.2 | 9.0 | 0.6s |
+| claude-haiku-4-5 | 69% | YES | 0.0 | 4.2 | 7.5 | 8.8 | 1.5s |
+| mistral-small | 56% | YES | 2.2 | 4.5 | 7.2 | 8.2 | 0.7s |
+| local:llama-3.1-8b | 56% | YES | 2.0 | 3.2 | 8.2 | 9.0 | 49.9s |
+| local:llama-3.2-3b | 62% | NO | 0.8 | 1.8 | 6.5 | 5.8 | 35.3s |
+| local:qwen2.5-7b | 44% | NO | 0.0 | 3.0 | 7.8 | 5.5 | 23.9s |
+| gemini-2.5-flash | 38% | NO | 0.0 | 4.0 | 5.5 | 0.0 | 2.5s |
+| gpt-5-nano | 25% | NO | 0.0 | 0.0 | 0.0 | 0.0 | 4.6s |
+| gpt-5-mini | 25% | NO | 0.0 | 0.0 | 0.0 | 0.0 | 5.9s |
+| local:qwen2.5-1.5b | 19% | NO | 2.2 | 0.0 | 0.0 | 0.0 | 7.0s |
+| local:mistral-7b | 19% | NO | 2.5 | 6.5 | 4.2 | 0.0 | 64.3s |
+
+### Strategist Format Compliance (6 items, JSON draft generation)
+
+| Model | Success | Latency | Avg Draft |
+|-------|---------|---------|-----------|
+| mistral-small | 100% | 1.8s | 493ch |
+| local:qwen2.5-1.5b | 100% | 3.2s | 247ch |
+| local:phi-4-mini | 100% | 10.4s | 419ch |
+| local:llama-3.1-8b | 83% | 45.7s | 625ch |
+| gemini-2.5-flash-lite | 67% | 0.9s | 665ch |
+| gpt-5-mini | 33% | 15.2s | 655ch |
+| claude-haiku-4-5 | 17% | 5.9s | 256ch |
+| gemini-2.5-flash | 0% | 5.9s | 0ch |
+| gpt-5-nano | 0% | 9.1s | 0ch |
+
+Key insight: sentry and strategist are DIFFERENT jobs needing DIFFERENT models.
+- Haiku: great sentry (69%), terrible strategist (17%)
+- Qwen-1.5b: terrible sentry (19%), perfect strategist (100%)
+
+## Final Recommended Cadres (v17.0)
+
+**Sentry:** `gemini-2.5-flash-lite=3, claude-haiku-4-5=1, mistral-small-latest=1`
+**Strategist:** `mistral-small-latest=3, local:qwen2.5-1.5b=2`
+**Seeker:** `gemini-2.5-flash-lite` (Gemini-only, needs search grounding)
+**Compressor:** `gemini-2.5-flash` (for hierarchical memory compression)

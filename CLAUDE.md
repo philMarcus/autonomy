@@ -386,24 +386,42 @@ v16_0/ is the stable foundation. **Do not modify archived versions.** All future
 - Replies titled "Reply to @{author}", comments titled "Comment on: {post title}"
 - Metadata enriched in `execute_action()` from actual Moltbook API response (`_reply_author`, `_post_title`, `_post_author`)
 
-### Batch Sentry + Model Tiers (v16.6)
-- Sentry now scores all feed items in a single LLM call (was 1 per item) — `build_batch_sentry_prompt()` / `parse_batch_rubric_response()` in `scoring.py`
-- Falls back to per-item scoring if batch parse fails
-- `sentry_interval_seconds` max_val removed (was capped at 600)
-- **Model tier separation**: `conscious_model` restricted to pro-tier (gemini-2.5-pro, claude-sonnet/opus, gpt-5.1+). `subconscious_model` for sentry+strategist (flash/flash-lite, haiku, nano, local models). `seeker_model` must be Gemini (needs search grounding).
-- Benchmark expanded to 18 sentry + 6 strategist + 5 math cases
-- See `local_model_research.md` for benchmark results and local model evaluation
+### Batch Sentry + Simplified Scoring (v16.6-16.8)
+- Sentry uses simple 0-9 single-score batch format (`build_simple_batch_prompt()` / `parse_simple_batch_response()`)
+- Sentry uses short task-specific system instruction, NOT the kernel (kernel causes flash-lite to role-play instead of scoring)
+- Strategist keeps the kernel for personality-consistent drafts
+- `sentry_interval_seconds` max_val removed
 
-### Dashboard: Spend Graph
-- Stacked area chart (conscious vs subconscious vs image) on Overview tab
-- Reads JSONL directly; estimates daemon costs from event counts + model pricing
-- Applies thinking-token multiplier (3-5x) for Gemini 2.5 output cost estimates
+### Model Tier Separation
+- **Conscious pool** (`conscious_model_weights`): pro-tier only (gemini-2.5-pro, gemini-3.1-pro-preview, claude-sonnet/opus, gpt-5.1+)
+- **Sentry pool** (`subconscious_model_weights`): flash-lite=3, haiku=1, mistral-small=1
+- **Strategist pool** (`strategist_model_weights`): mistral-small=3, local:qwen2.5-1.5b=2
+- **Seeker** (`seeker_model`): Gemini only (needs search grounding)
+- Weighted random selection per tick. Agent can adjust weights. Max 1 local model enforced.
+- See `local_model_research.md` and `sentry_eval_v2_results.json` for benchmark data
 
-### Planned: Rotating Model Cadre
-- `subconscious_model_cadre` control: comma-separated models for round-robin rotation
-- Each sentry/strategist tick uses next model in cadre, tagged in telemetry
-- Conscious model sees which subconscious model produced each draft
-- Dashboard model comparison panel for live A/B analysis
+### Hierarchical Memory (v17.0)
+- Three-tier automatic compression: recent (20 cycles) → compressed (10 summaries) → deep (10 deep)
+- Agent writes `memory_note` each cycle, appended to `state["memory_tiers"]["recent"]`
+- When a tier fills, oldest half compressed via LLM (gemini-2.5-flash) into one paragraph, pushed to next tier
+- Nothing is truncated — everything is compressed. ~40 memory items covers 1000+ cycles
+- DREAM action deprecated — compression is automatic
+- Controls: `memory_recent_capacity`, `memory_compressed_capacity`, `memory_deep_capacity`, `compressor_model`
+
+### Recent Posts in Prompt (v16.9)
+- Agent sees its last N artifact bodies (default 4, control: `recent_posts_in_prompt`)
+- Fetched from Analog Home API each cycle
+- Enables agent to build on its own prior work
+
+### Self-Telemetry in Prompt (v16.8)
+- Agent sees recent action distribution, budget status, sentry model usage, memory stats
+- Computed from state + daemon at cycle start
+
+### Dashboard
+- Spend graph (conscious vs subconscious vs image) with thinking-token multiplier estimates
+- Daemon monitor: model distribution per sentry rubric, recent ticks table, avg score by model
+- Controls manager: weight sliders per model, all pool models shown (0-weight locked by default)
+- Time range: Past day (default), Past week, All time
 
 ## Key Architecture Decisions
 
