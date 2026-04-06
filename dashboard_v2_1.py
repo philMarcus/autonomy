@@ -1211,7 +1211,8 @@ def render_daemon_tab(brain_filter: str):
 CONTROLS_META = [
     # --- Models ---
     ("conscious_model_weights",  "weights", "gemini-2.5-pro=1,gemini-3.1-pro-preview=1", "Conscious model pool — higher weight = more frequent", "models", None, None, None),
-    ("subconscious_model_weights", "weights", "local:qwen2.5-1.5b=5,gemini-2.5-flash-lite=1,mistral-small-latest=1,claude-haiku-4-5=0.3", "Subconscious model pool (sentry + strategist)", "models", None, None, None),
+    ("subconscious_model_weights", "weights", "gemini-2.5-flash-lite=3,claude-haiku-4-5=1,mistral-small-latest=1", "Sentry model pool (feed scoring)", "models", None, None, None),
+    ("strategist_model_weights", "weights", "mistral-small-latest=2,gemini-2.5-flash-lite=2", "Strategist model pool (draft generation)", "models", None, None, None),
     ("seeker_model",             "str",   "gemini-2.5-flash-lite", "Seeker model (Gemini only, needs search grounding)", "models", None, None,  None),
     ("temperature",              "float", 0.7,    "Conscious LLM temperature",                      "models",   0.0,  2.0,   None),
     ("subconscious_temperature", "float", 0.3,    "Daemon LLM temperature",                         "models",   0.0,  2.0,   None),
@@ -1300,7 +1301,8 @@ DEFAULT_LOCKED = {"daily_budget_usd"}
 # Friendly display names for controls (overrides raw key in UI)
 DISPLAY_NAMES = {
     "conscious_model_weights": "Conscious Model Pool",
-    "subconscious_model_weights": "Subconscious Model Pool",
+    "subconscious_model_weights": "Sentry Model Pool",
+    "strategist_model_weights": "Strategist Model Pool",
 }
 
 
