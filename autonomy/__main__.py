@@ -109,7 +109,7 @@ def _build_self_telemetry(state: dict, budget, iteration: int, daemon=None) -> s
     # Budget
     if budget:
         remaining = budget.remaining_fraction()
-        lines.append(f"Budget: {remaining:.0%} remaining (${budget._daily_limit * remaining:.2f} of ${budget._daily_limit:.2f})")
+        lines.append(f"Budget: {remaining:.0%} remaining (${budget.daily_limit_usd * remaining:.2f} of ${budget.daily_limit_usd:.2f})")
 
     # Sentry model stats from daemon
     if daemon and hasattr(daemon, '_tick_model_counts'):
