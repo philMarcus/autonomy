@@ -958,7 +958,37 @@ def main():
 
         plan = None
         try:
-            plan = plan_next_action(chat, prompt, telemetry=telemetry, brain_name=brain_name, budget=budget)
+            try:
+                plan = plan_next_action(chat, prompt, telemetry=telemetry, brain_name=brain_name, budget=budget)
+            except Exception as _plan_err:
+                _err_str = str(_plan_err)
+                if "503" in _err_str or "UNAVAILABLE" in _err_str:
+                    # Retry with a different conscious model
+                    from .daemon import _pick_weighted_model
+                    retry_model = _pick_weighted_model(
+                        ctrl.get("conscious_model_weights"), ctrl.get("conscious_model"),
+                    )
+                    # Keep retrying until we get a different model (max 3 attempts)
+                    for _ in range(3):
+                        if retry_model != conscious_model:
+                            break
+                        retry_model = _pick_weighted_model(
+                            ctrl.get("conscious_model_weights"), ctrl.get("conscious_model"),
+                        )
+                    if retry_model != conscious_model:
+                        safe_print(f"{Fore.YELLOW}[503] {conscious_model} unavailable, retrying with {retry_model}")
+                        chat = registry.create_chat(
+                            model_id=retry_model,
+                            system_instruction=kernel,
+                            temperature=cycle_temperature,
+                            max_output_tokens=16384,
+                            tools=search_tools if args.enable_search else None,
+                        )
+                        plan = plan_next_action(chat, prompt, telemetry=telemetry, brain_name=brain_name, budget=budget)
+                    else:
+                        raise  # same model, can't retry
+                else:
+                    raise
 
             # Display any non-JSON LLM output (reasoning, preamble, etc.)
             preamble = plan.pop("_preamble", "")
