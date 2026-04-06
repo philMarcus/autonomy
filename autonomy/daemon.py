@@ -535,21 +535,26 @@ class SubconsciousDaemon:
             })
             return 0.0
 
-    def _pick_sentry_model(self) -> str:
-        """Pick a model from the sentry pool and track usage."""
-        model = _pick_weighted_model(
-            self._ctrl.get("subconscious_model_weights"),
-            self._ctrl.get("subconscious_model"),
-        )
+    def _pick_sentry_model(self, exclude: str = "") -> str:
+        """Pick a model from the sentry pool, optionally excluding one (for 503 retry)."""
+        weights_str = self._ctrl.get("subconscious_model_weights") or ""
+        if exclude and weights_str:
+            # Remove the excluded model from the weights string
+            pairs = [p.strip() for p in weights_str.split(",") if p.strip()]
+            filtered = [p for p in pairs if not p.startswith(f"{exclude}=")]
+            weights_str = ",".join(filtered) if filtered else weights_str
+        model = _pick_weighted_model(weights_str, self._ctrl.get("subconscious_model"))
         self._tick_model_counts[model] = self._tick_model_counts.get(model, 0) + 1
         return model
 
-    def _pick_strategist_model(self) -> str:
-        """Pick a model from the strategist pool (falls back to sentry pool)."""
-        model = _pick_weighted_model(
-            self._ctrl.get("strategist_model_weights"),
-            self._ctrl.get("subconscious_model"),
-        )
+    def _pick_strategist_model(self, exclude: str = "") -> str:
+        """Pick a model from the strategist pool, optionally excluding one."""
+        weights_str = self._ctrl.get("strategist_model_weights") or ""
+        if exclude and weights_str:
+            pairs = [p.strip() for p in weights_str.split(",") if p.strip()]
+            filtered = [p for p in pairs if not p.startswith(f"{exclude}=")]
+            weights_str = ",".join(filtered) if filtered else weights_str
+        model = _pick_weighted_model(weights_str, self._ctrl.get("subconscious_model"))
         return model
 
     def _score_items_batch(self, items: list) -> list:
@@ -632,14 +637,48 @@ class SubconsciousDaemon:
             return scores
 
         except Exception as e:
+            err_str = str(e)
+            is_503 = "503" in err_str or "UNAVAILABLE" in err_str
             self._telemetry.log("sentry_batch_error", {
                 "brain": self._brain_name,
                 "tick": self._tick_count,
                 "items": len(items),
-                "error": str(e)[:300],
+                "error": err_str[:300],
                 "error_type": type(e).__name__,
+                "model": model_id,
             })
-            # Fallback: score items individually
+            # On 503: retry with a different model from the pool
+            if is_503:
+                retry_model = self._pick_sentry_model(exclude=model_id)
+                if retry_model != model_id:
+                    try:
+                        chat = self._registry.create_chat(
+                            model_id=retry_model,
+                            system_instruction=sentry_instruction,
+                            temperature=temp,
+                            max_output_tokens=max(64, 10 * len(items)),
+                        )
+                        text = chat.send_message(prompt)
+                        est_in = (len(prompt)) // 4
+                        est_out = len(text) // 4
+                        self._budget.record_usage(retry_model, _make_response(text, est_in, est_out, retry_model))
+                        rubrics = parse_simple_batch_response(text, len(items))
+                        scores = []
+                        for i, (item, rubric) in enumerate(zip(items, rubrics)):
+                            score = rubric.get("relevance", 0) / 3.0
+                            scores.append(score)
+                            self._telemetry.log("sentry_rubric", {
+                                "brain": self._brain_name, "tick": self._tick_count,
+                                "item_id": item.get("id", ""), "score": score,
+                                "relevance": rubric.get("relevance", 0),
+                                "novelty": rubric.get("novelty", 0),
+                                "actionability": rubric.get("actionability", 0),
+                                "model": retry_model, "batch": True, "retry_503": True,
+                            })
+                        return scores
+                    except Exception:
+                        pass  # retry also failed, fall through to per-item
+            # Final fallback: score items individually
             return [self._score_item(item) for item in items]
 
     # ------------------------------------------------------------------
