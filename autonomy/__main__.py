@@ -858,16 +858,17 @@ def main():
         if args.priority == "outside_first":
             config_hint = "- Default preference overridden: prefer outside comments when not posting.\n"
 
-        # Memory pressure indicator (hints planner to DREAM)
+        # Memory status indicator
         history_count = len(state.get("history", []))
-        memory_chars = len(state.get("memory", ""))
-        dream_depth = ctrl.get("dream_depth")
+        tiers = state.get("memory_tiers", {})
+        recent_count = len(tiers.get("recent", []))
+        compressed_count = len(tiers.get("compressed", []))
+        deep_count = len(tiers.get("deep", []))
         memory_pressure = ""
-        if history_count > HISTORY_KEEP * 0.6:
+        if history_count > 10 or recent_count > 0:
             memory_pressure = (
-                f"History: {history_count}/{HISTORY_KEEP} entries | "
-                f"Memory: {memory_chars}/{MEMORY_MAX_CHARS} chars | "
-                f"Dream depth: {dream_depth} entries"
+                f"History: {history_count} entries | "
+                f"Memory: {recent_count} recent, {compressed_count} compressed, {deep_count} deep"
             )
 
         # Drain subconscious buffer (if daemon active) + load saved plans
