@@ -966,15 +966,52 @@ def main():
                 safe_print(f"{Fore.WHITE}{preamble}")
                 safe_print(f"{Fore.CYAN}-----------------{Style.RESET_ALL}")
 
-            # Extract and save memory_note (per-cycle journal)
+            # Extract and save memory_note to hierarchical memory
             memory_note = (plan.pop("memory_note", None) or "").strip()
             if memory_note:
-                existing_mem = state.get("memory", "") or ""
-                new_mem = existing_mem + f"\n[c{iteration}] {memory_note}"
-                # Trim from front to stay within budget
-                _mem_max = int(ctrl.get("memory_max_chars") if ctrl else 4000)
-                state["memory"] = new_mem[-_mem_max:]
+                from .utils import compress_memory_tier
+                tiers = state.setdefault("memory_tiers", {"recent": [], "compressed": [], "deep": []})
+                tiers["recent"].append({"cycle": iteration, "note": memory_note})
                 safe_print(f"{Fore.GREEN}[MEMORY] {memory_note}")
+
+                # Auto-compress when tiers overflow
+                _recent_cap = int(ctrl.get("memory_recent_capacity") if ctrl else 20)
+                _compressed_cap = int(ctrl.get("memory_compressed_capacity") if ctrl else 10)
+                _deep_cap = int(ctrl.get("memory_deep_capacity") if ctrl else 10)
+                _compressor = ctrl.get("compressor_model") if ctrl else "gemini-2.5-flash"
+
+                def _compress_fn(prompt):
+                    _c = registry.create_chat(
+                        model_id=_compressor, system_instruction="Summarize concisely.",
+                        temperature=0.3, max_output_tokens=512)
+                    return _c.send_message(prompt)
+
+                if len(tiers["recent"]) >= _recent_cap:
+                    half = _recent_cap // 2
+                    to_compress = tiers["recent"][:half]
+                    result = compress_memory_tier(to_compress, _compress_fn, tier_name="recent")
+                    if result:
+                        tiers["recent"] = tiers["recent"][half:]
+                        tiers["compressed"].append(result)
+                        safe_print(f"{Fore.CYAN}[COMPRESS] {half} recent → compressed: {result['summary'][:80]}...")
+
+                if len(tiers["compressed"]) >= _compressed_cap:
+                    half = _compressed_cap // 2
+                    to_compress = tiers["compressed"][:half]
+                    result = compress_memory_tier(to_compress, _compress_fn, tier_name="compressed")
+                    if result:
+                        tiers["compressed"] = tiers["compressed"][half:]
+                        tiers["deep"].append(result)
+                        safe_print(f"{Fore.CYAN}[COMPRESS] {half} compressed → deep: {result['summary'][:80]}...")
+
+                if len(tiers["deep"]) >= _deep_cap:
+                    half = _deep_cap // 2
+                    to_compress = tiers["deep"][:half]
+                    result = compress_memory_tier(to_compress, _compress_fn, tier_name="deep")
+                    if result:
+                        tiers["deep"] = tiers["deep"][half:]
+                        tiers["deep"].insert(0, result)
+                        safe_print(f"{Fore.CYAN}[COMPRESS] {half} deep → ultra-deep: {result['summary'][:80]}...")
 
             # Log Google Search grounding metadata if available
             grounding = getattr(chat, "_last_grounding_metadata", None)
@@ -1266,43 +1303,9 @@ def main():
                 else:
                     raise ValueError("POST suggested while post window closed; no comment targets available")
 
-            # --- DREAM action: synthesize history into memory ---
+            # DREAM deprecated in v17 — memory compression is now automatic
             if act == "DREAM":
-                from .utils import compress_memories
-                _dream_depth = ctrl.get("dream_depth")
-                safe_print(f"{Fore.MAGENTA}[DREAM] Synthesizing oldest history entries (depth={_dream_depth})...")
-
-                def _dream_chat_fn(p: str) -> str:
-                    return call_text(chat, p, tag="dream_compress", telemetry=telemetry)
-
-                dream_result = compress_memories(
-                    state, chat_fn=_dream_chat_fn,
-                    depth=_dream_depth, telemetry=telemetry,
-                )
-
-                if dream_result["success"]:
-                    narrative = dream_result.get("narrative", "")
-                    safe_print(f"{Fore.GREEN}[DREAM] Synthesized {dream_result['entries_synthesized']} entries "
-                               f"into {dream_result['narrative_length']} char narrative")
-                    safe_print(f"{Fore.CYAN}--- DREAM NARRATIVE ---")
-                    safe_print(f"{Fore.WHITE}{narrative}")
-                    safe_print(f"{Fore.CYAN}-----------------------{Style.RESET_ALL}")
-                    store.save_state(state)
-                    store.write_artifact(iteration, {
-                        "brain": brain_name,
-                        "artifact_type": "dream",
-                        "title": shorten(f"Dream \u2014 {plan.get('summary', 'Memory Consolidation')}", 200),
-                        "body_markdown": narrative,
-                        "monologue_public": (
-                            f"Synthesized {dream_result['entries_synthesized']} history entries "
-                            f"into memory narrative."
-                        ),
-                        "temperature": cycle_temperature,
-                    })
-                else:
-                    safe_print(f"{Fore.RED}[DREAM] Failed: {dream_result['error']}")
-
-                # Skip execute_action — fall through to controls persist + sleep
+                safe_print(f"{Fore.YELLOW}[DREAM] Deprecated — memory compression is automatic. Treating as WAIT.")
 
             elif act == "GENERATE_IMAGE":
                 # --- Image generation action ---

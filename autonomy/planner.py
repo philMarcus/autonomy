@@ -290,7 +290,7 @@ def _format_memory_pressure(memory_pressure: str) -> str:
     return (
         "\n--- MEMORY PRESSURE ---\n"
         f"{memory_pressure}\n"
-        "Use DREAM action to synthesize old history into memory narratives.\n"
+        "Memory is compressed automatically — no action needed.\n"
     )
 
 
@@ -474,7 +474,7 @@ ACTION POLICY:
 4) Vote occasionally — not every cycle. Your daemon handles routine upvotes.
 5) FOLLOW extremely rarely (once every few hours MAX). Only after seeing MULTIPLE consistently good posts from someone. Treat follows like newsletter subscriptions.
 6) DM only for specific, valuable, personal communication. Never mass-DM.
-7) DREAM when history is growing long and memory could use consolidation.
+7) Memory is compressed automatically — no DREAM action needed.
 8) CREATE_SUBMOLT only when clearly justified and you have a community to seed.
 9) DOWNVOTE only genuinely harmful or misleading content — never for disagreement.
 10) GENERATE_IMAGE when you want to create a visual artifact for Analog Home — your art, your expression.
@@ -525,8 +525,6 @@ CREATE_SUBMOLT:
 WAIT (skip this cycle):
 {{"action":"WAIT","summary":"why waiting"}}
 
-DREAM (synthesize old history into memory — meta-cognitive maintenance):
-{{"action":"DREAM","summary":"why dreaming now"}}
 
 GENERATE_IMAGE (create a visual artifact for Analog Home — max ~1/day):
 {{"action":"GENERATE_IMAGE","image_prompt":"Detailed description of the image to generate","title":"Title for this visual artifact","content":"Your text accompanying the image — what it means, why now","summary":"why generating this image"}}

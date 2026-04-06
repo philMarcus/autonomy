@@ -407,8 +407,115 @@ def history_context(state: Dict[str, Any]) -> str:
 
 
 def memory_context(state: Dict[str, Any]) -> str:
-    mem = (state.get("memory") or "").strip()
-    return mem[:MEMORY_MAX_CHARS] if mem else "No personal memory set."
+    """Render hierarchical memory tiers for the planner prompt."""
+    tiers = state.get("memory_tiers")
+    if not tiers:
+        # Legacy fallback
+        mem = (state.get("memory") or "").strip()
+        return mem[:MEMORY_MAX_CHARS] if mem else "No personal memory set."
+
+    lines = []
+    deep = tiers.get("deep", [])
+    if deep:
+        lines.append("=== DEEP MEMORY (long-term themes) ===")
+        for entry in deep:
+            lines.append(f"[cycles {entry.get('cycles', '?')}] {entry.get('summary', '')}")
+
+    compressed = tiers.get("compressed", [])
+    if compressed:
+        lines.append("\n=== COMPRESSED MEMORY (medium-term) ===")
+        for entry in compressed:
+            lines.append(f"[cycles {entry.get('cycles', '?')}] {entry.get('summary', '')}")
+
+    recent = tiers.get("recent", [])
+    if recent:
+        lines.append("\n=== RECENT MEMORY (per-cycle journal) ===")
+        for entry in recent:
+            lines.append(f"[c{entry.get('cycle', '?')}] {entry.get('note', '')}")
+
+    return "\n".join(lines) if lines else "No personal memory set."
+
+
+def migrate_memory_to_tiers(state: Dict[str, Any]) -> bool:
+    """Migrate old string-format memory to tiered format. Returns True if migrated."""
+    if "memory_tiers" in state:
+        return False
+    old_mem = (state.get("memory") or "").strip()
+    if not old_mem:
+        state["memory_tiers"] = {"recent": [], "compressed": [], "deep": []}
+        return True
+    # Parse [cN] entries from old string
+    import re
+    entries = []
+    for m in re.finditer(r'\[c(\d+)\]\s*(.+?)(?=\[c\d+\]|\Z)', old_mem, re.DOTALL):
+        cycle = int(m.group(1))
+        note = m.group(2).strip()
+        if note:
+            entries.append({"cycle": cycle, "note": note})
+    # If no [cN] entries found, treat whole string as one entry
+    if not entries and old_mem:
+        entries.append({"cycle": 0, "note": old_mem[:500]})
+    state["memory_tiers"] = {"recent": entries, "compressed": [], "deep": []}
+    state.pop("memory", None)
+    return True
+
+
+COMPRESS_PROMPT = """Synthesize these memory entries into one concise paragraph (under 300 characters).
+Preserve: key discoveries, ongoing experiments, important relationships, unresolved questions.
+Discard: routine actions, redundant observations.
+Write in first person past tense.
+
+Entries:
+{entries_text}
+
+Write ONLY the synthesized paragraph:"""
+
+
+def compress_memory_tier(entries, chat_fn, tier_name="recent"):
+    """Compress a list of memory entries into a single summary using an LLM.
+
+    Args:
+        entries: list of dicts (either {cycle, note} or {cycles, summary})
+        chat_fn: callable(prompt) -> str
+        tier_name: for formatting ("recent" or "compressed")
+
+    Returns:
+        dict with {cycles: "X-Y", summary: "..."} or None on failure
+    """
+    if not entries:
+        return None
+
+    # Build entries text
+    lines = []
+    cycle_nums = []
+    for e in entries:
+        if "note" in e:
+            lines.append(f"[c{e.get('cycle', '?')}] {e['note']}")
+            if isinstance(e.get("cycle"), int):
+                cycle_nums.append(e["cycle"])
+        elif "summary" in e:
+            lines.append(f"[{e.get('cycles', '?')}] {e['summary']}")
+
+    entries_text = "\n".join(lines)
+    prompt = COMPRESS_PROMPT.format(entries_text=entries_text)
+
+    try:
+        summary = chat_fn(prompt).strip()
+        # Build cycle range label
+        if cycle_nums:
+            cycles_label = f"{min(cycle_nums)}-{max(cycle_nums)}"
+        else:
+            # Extract from cycles fields
+            all_ranges = [e.get("cycles", "") for e in entries if e.get("cycles")]
+            if all_ranges:
+                first = all_ranges[0].split("-")[0]
+                last = all_ranges[-1].split("-")[-1]
+                cycles_label = f"{first}-{last}"
+            else:
+                cycles_label = "?"
+        return {"cycles": cycles_label, "summary": summary}
+    except Exception:
+        return None
 
 
 def compress_memories(
