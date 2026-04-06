@@ -116,9 +116,10 @@ def _build_recent_posts(store, run_id: str, count: int = 4) -> str:
             atype = a.get("artifact_type", "")
             title = a.get("title", "")
             body = a.get("body_markdown", "")
-            # Truncate long bodies
-            if len(body) > 500:
-                body = body[:497] + "..."
+            # Truncate extremely long bodies
+            _max_body = 5000
+            if len(body) > _max_body:
+                body = body[:_max_body - 3] + "..."
             lines.append(f"[{atype}] {title}\n{body}")
         return "\n\n".join(lines)
     except Exception:
