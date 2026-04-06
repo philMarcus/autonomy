@@ -848,7 +848,7 @@ def render_controls_tab(brain_filter: str):
 
                     # Special UI for weighted model pools
                     if typ == "weights":
-                        st.markdown(f"**{key}**")
+                        st.markdown(f"**{display_name}**")
                         st.caption(help_text)
                         weights_str = str(current_val or default)
                         # Parse existing weights
@@ -862,9 +862,35 @@ def render_controls_tab(brain_filter: str):
                                 except ValueError:
                                     pass
 
-                        # Render slider per model
+                        # Full pool of available models for this weight control
+                        _ALL_CONSCIOUS = [
+                            "gemini-2.5-pro", "gemini-3-pro-preview", "gemini-3.1-pro-preview",
+                            "claude-sonnet-4-5", "claude-opus-4-6",
+                            "gpt-5.1", "gpt-5.2", "gpt-5-pro",
+                        ]
+                        _ALL_SUBCONSCIOUS = [
+                            "gemini-2.5-flash-lite", "gemini-2.5-flash",
+                            "gemini-3-flash-preview", "gemini-3.1-flash-lite-preview",
+                            "claude-haiku-4-5", "mistral-small-latest",
+                            "gpt-5-nano", "gpt-5-mini",
+                            "local:qwen2.5-1.5b", "local:qwen2.5-7b",
+                            "local:llama-3.2-3b", "local:llama-3.1-8b",
+                            "local:mistral-7b",
+                        ]
+                        if "conscious" in key:
+                            all_models = _ALL_CONSCIOUS
+                        else:
+                            all_models = _ALL_SUBCONSCIOUS
+
+                        # Ensure all pool models appear (0 weight if not in current weights)
+                        for m in all_models:
+                            if m not in model_weights:
+                                model_weights[m] = 0.0
+
+                        # Render slider per model, active ones first
                         updated_weights = {}
-                        for model_name, weight in model_weights.items():
+                        sorted_models = sorted(model_weights.items(), key=lambda x: (-x[1], x[0]))
+                        for model_name, weight in sorted_models:
                             scol, lcol = st.columns([4, 1])
                             with scol:
                                 new_w = st.slider(
@@ -873,8 +899,9 @@ def render_controls_tab(brain_filter: str):
                                     key=f"weight_{key}_{model_name}",
                                 )
                             with lcol:
+                                is_locked = key in locked_set or weight == 0.0
                                 agent_writable = st.checkbox(
-                                    "Unlk", value=(key not in locked_set),
+                                    "Unlk", value=(not is_locked),
                                     key=f"lock_{key}_{model_name}",
                                     help="Uncheck to lock"
                                 )
@@ -1185,8 +1212,6 @@ CONTROLS_META = [
     # --- Models ---
     ("conscious_model_weights",  "weights", "gemini-2.5-pro=1,gemini-3.1-pro-preview=1", "Conscious model pool — higher weight = more frequent", "models", None, None, None),
     ("subconscious_model_weights", "weights", "local:qwen2.5-1.5b=5,gemini-2.5-flash-lite=1,mistral-small-latest=1,claude-haiku-4-5=0.3", "Subconscious model pool (sentry + strategist)", "models", None, None, None),
-    ("conscious_model",          "str",   "gemini-2.5-pro", "Fallback when conscious weights empty", "models", None, None,  None),
-    ("subconscious_model",       "str",   "gemini-2.5-flash-lite", "Fallback when subconscious weights empty", "models", None, None,  None),
     ("seeker_model",             "str",   "gemini-2.5-flash-lite", "Seeker model (Gemini only, needs search grounding)", "models", None, None,  None),
     ("temperature",              "float", 0.7,    "Conscious LLM temperature",                      "models",   0.0,  2.0,   None),
     ("subconscious_temperature", "float", 0.3,    "Daemon LLM temperature",                         "models",   0.0,  2.0,   None),
@@ -1248,8 +1273,6 @@ CONTROLS_META = [
 # CLI flags that override these controls at startup (shown as hints in the UI)
 CLI_FLAGS = {
     "temperature":              "--temperature",
-    "conscious_model":          "--conscious-model / --gemini-model",
-    "subconscious_model":       "--subconscious-model",
     "daily_budget_usd":         "--daily-budget",
     "cycle_interval_minutes":   "--interval",
     "post_interval_minutes":    "--post-interval",
@@ -1276,10 +1299,8 @@ DEFAULT_LOCKED = {"daily_budget_usd"}
 
 # Friendly display names for controls (overrides raw key in UI)
 DISPLAY_NAMES = {
-    "conscious_model": "default_conscious_model",
-    "subconscious_model": "default_subconscious_model",
-    "conscious_model_weights": "Conscious Model Weights",
-    "subconscious_model_weights": "Subconscious Model Weights",
+    "conscious_model_weights": "Conscious Model Pool",
+    "subconscious_model_weights": "Subconscious Model Pool",
 }
 
 
