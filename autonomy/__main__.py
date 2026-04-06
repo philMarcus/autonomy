@@ -940,7 +940,7 @@ def main():
                 # Trim from front to stay within budget
                 _mem_max = int(ctrl.get("memory_max_chars") if ctrl else 4000)
                 state["memory"] = new_mem[-_mem_max:]
-                safe_print(f"{Fore.GREEN}[MEMORY] {memory_note[:100]}")
+                safe_print(f"{Fore.GREEN}[MEMORY] {memory_note}")
 
             # Log Google Search grounding metadata if available
             grounding = getattr(chat, "_last_grounding_metadata", None)
