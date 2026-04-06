@@ -497,7 +497,7 @@ class SubconsciousDaemon:
         try:
             chat_kwargs: Dict[str, Any] = dict(
                 model_id=model_id,
-                system_instruction=self._kernel,
+                system_instruction="You are a feed-scanning daemon. Score items concisely.",
                 temperature=temp,
                 max_output_tokens=self._ctrl.get("sentry_max_tokens"),
             )
@@ -585,11 +585,15 @@ class SubconsciousDaemon:
         prompt = build_simple_batch_prompt(item_texts, self._directive, directives_text)
 
         try:
+            # Use short task-specific instruction for sentry (NOT the kernel).
+            # The kernel causes models like flash-lite to role-play and generate
+            # monologue instead of scores.
+            sentry_instruction = "You are a feed-scanning daemon. Score items concisely. Output only numbers."
             chat = self._registry.create_chat(
                 model_id=model_id,
-                system_instruction=self._kernel,
+                system_instruction=sentry_instruction,
                 temperature=temp,
-                max_output_tokens=max(64, 10 * len(items)),  # just numbers, very short
+                max_output_tokens=max(64, 10 * len(items)),
             )
             text = chat.send_message(prompt)
 
