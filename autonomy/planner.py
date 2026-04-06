@@ -110,6 +110,9 @@ def parse_json_with_one_repair(
             return parse_json_strict(raw2)
     except Exception as e:
         msg = str(e)
+        # Re-raise 503s so the caller (__main__.py) can retry with a different model
+        if "503" in msg or "UNAVAILABLE" in msg:
+            raise
         # Store parsing failures on chat so _planner_unavailable_message can surface them
         chat._last_llm_exception = {
             "tag": call_tag, "error_type": type(e).__name__, "error": msg[:800],
