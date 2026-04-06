@@ -22,8 +22,8 @@ from .cooldowns import can_do
 from .llm import DailyBudget, ModelRegistry
 from .llm.base import LLMResponse
 from .scoring import (
-    build_sentry_prompt, build_batch_sentry_prompt, build_simple_batch_prompt,
-    parse_rubric_response, parse_batch_rubric_response, parse_simple_batch_response,
+    build_sentry_prompt, build_simple_batch_prompt,
+    parse_rubric_response, parse_simple_batch_response,
     compute_score, weights_from_controls,
 )
 from .telemetry import TelemetryLogger
@@ -590,13 +590,13 @@ class SubconsciousDaemon:
             est_out = len(text) // 4
             self._budget.record_usage(model_id, _make_response(text, est_in, est_out, model_id))
 
-            # Parse simple response (0-9 per item → rubric-compatible dicts)
+            # Parse simple response (0-9 per item)
             rubrics = parse_simple_batch_response(text, len(items))
-            weights = weights_from_controls(self._ctrl)
 
             scores = []
             for i, (item, rubric) in enumerate(zip(items, rubrics)):
-                score = compute_score(rubric, weights)
+                # Simple score: average of the three identical criteria / 3, normalized to 0-1
+                score = rubric.get("relevance", 0) / 3.0
                 scores.append(score)
                 self._telemetry.log("sentry_rubric", {
                     "brain": self._brain_name,

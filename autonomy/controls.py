@@ -376,14 +376,6 @@ def build_default_registry(args, model_registry) -> ControlRegistry:
         Control("max_item_age_hours", "int", 24,
                 "Ignore feed items older than this (hours)", "daemon", min_val=1, max_val=168),
 
-        # --- Daemon (Sentry rubric weights) ---
-        Control("sentry_weight_relevance", "float", 0.45,
-                "Rubric weight for relevance criterion", "daemon", min_val=0.0, max_val=1.0),
-        Control("sentry_weight_novelty", "float", 0.30,
-                "Rubric weight for novelty criterion", "daemon", min_val=0.0, max_val=1.0),
-        Control("sentry_weight_actionability", "float", 0.25,
-                "Rubric weight for actionability criterion", "daemon", min_val=0.0, max_val=1.0),
-
         # --- Daemon (Seeker gear) ---
         Control("seeker_interval_seconds", "int", 900,
                 "Seconds between seeker search sweeps", "daemon", min_val=300, max_val=3600),
