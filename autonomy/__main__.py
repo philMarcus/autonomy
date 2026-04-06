@@ -94,6 +94,49 @@ def _format_draft_context(drafts: list, saved_plans: list,
     return "\n".join(lines)
 
 
+def _build_self_telemetry(state: dict, budget, iteration: int, daemon=None) -> str:
+    """Build a concise self-telemetry summary for the planner prompt."""
+    from collections import Counter
+    lines = ["--- SELF-TELEMETRY ---"]
+
+    # Action distribution from recent history
+    history = state.get("history", [])[-15:]
+    if history:
+        actions = Counter(h.get("action", "?") for h in history)
+        action_parts = [f"{a}: {c}" for a, c in actions.most_common()]
+        lines.append(f"Recent actions (last {len(history)}): {', '.join(action_parts)}")
+
+    # Budget
+    if budget:
+        remaining = budget.remaining_fraction()
+        lines.append(f"Budget: {remaining:.0%} remaining (${budget._daily_limit * remaining:.2f} of ${budget._daily_limit:.2f})")
+
+    # Sentry model stats from daemon
+    if daemon and hasattr(daemon, '_tick_model_counts'):
+        mc = daemon._tick_model_counts
+        if mc:
+            parts = [f"{m}: {c}" for m, c in sorted(mc.items(), key=lambda x: -x[1])]
+            lines.append(f"Sentry calls this period: {', '.join(parts)}")
+
+    # Memory and kernel status
+    mem_len = len(state.get("memory", ""))
+    hist_len = len(state.get("history", []))
+    lines.append(f"Memory: {mem_len} chars | History: {hist_len} entries | Cycle: {iteration}")
+
+    # Last image
+    last_img = None
+    for h in reversed(state.get("history", [])):
+        if h.get("action") == "GENERATE_IMAGE":
+            last_img = h
+            break
+    if last_img:
+        lines.append(f"Last image: {last_img.get('summary', '')[:60]}")
+    else:
+        lines.append("Images generated: 0 this session")
+
+    return "\n".join(lines) + "\n"
+
+
 def _code_checksum() -> str:
     """Hash all .py files in the package directory to detect any code change."""
     pkg_dir = os.path.dirname(os.path.abspath(__file__))
@@ -875,6 +918,7 @@ def main():
             daemon_active=daemon is not None,
             platform_status=platform_status,
             nudge_note=nudge_note,
+            self_telemetry=_build_self_telemetry(state, budget, iteration, daemon),
         )
 
         plan = None
@@ -887,6 +931,16 @@ def main():
                 safe_print(f"{Fore.CYAN}--- REASONING ---")
                 safe_print(f"{Fore.WHITE}{preamble}")
                 safe_print(f"{Fore.CYAN}-----------------{Style.RESET_ALL}")
+
+            # Extract and save memory_note (per-cycle journal)
+            memory_note = (plan.pop("memory_note", None) or "").strip()
+            if memory_note:
+                existing_mem = state.get("memory", "") or ""
+                new_mem = existing_mem + f"\n[c{iteration}] {memory_note}"
+                # Trim from front to stay within budget
+                _mem_max = int(ctrl.get("memory_max_chars") if ctrl else 4000)
+                state["memory"] = new_mem[-_mem_max:]
+                safe_print(f"{Fore.GREEN}[MEMORY] {memory_note[:100]}")
 
             # Log Google Search grounding metadata if available
             grounding = getattr(chat, "_last_grounding_metadata", None)

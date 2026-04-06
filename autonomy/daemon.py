@@ -22,8 +22,8 @@ from .cooldowns import can_do
 from .llm import DailyBudget, ModelRegistry
 from .llm.base import LLMResponse
 from .scoring import (
-    build_sentry_prompt, build_batch_sentry_prompt,
-    parse_rubric_response, parse_batch_rubric_response,
+    build_sentry_prompt, build_batch_sentry_prompt, build_simple_batch_prompt,
+    parse_rubric_response, parse_batch_rubric_response, parse_simple_batch_response,
     compute_score, weights_from_controls,
 )
 from .telemetry import TelemetryLogger
@@ -570,17 +570,18 @@ class SubconsciousDaemon:
             author_name = _get_author(item)
             title = item.get("title", "") or ""
             content = item.get("content", "") or ""
-            item_texts.append(f"- Author: @{author_name}\n- Title: {title}\n- Content: {shorten(content, 400)}")
+            item_texts.append(f"@{author_name}: \"{title}\" — {shorten(content, 300)}")
 
         directives_text = self._get_directives_text()
-        prompt = build_batch_sentry_prompt(item_texts, self._directive, directives_text)
+        # Use simple 0-9 format (works across all models including flash-lite/gpt)
+        prompt = build_simple_batch_prompt(item_texts, self._directive, directives_text)
 
         try:
             chat = self._registry.create_chat(
                 model_id=model_id,
                 system_instruction=self._kernel,
                 temperature=temp,
-                max_output_tokens=max(256, 60 * len(items)),
+                max_output_tokens=max(64, 10 * len(items)),  # just numbers, very short
             )
             text = chat.send_message(prompt)
 
@@ -589,8 +590,8 @@ class SubconsciousDaemon:
             est_out = len(text) // 4
             self._budget.record_usage(model_id, _make_response(text, est_in, est_out, model_id))
 
-            # Parse batch response
-            rubrics = parse_batch_rubric_response(text, len(items))
+            # Parse simple response (0-9 per item → rubric-compatible dicts)
+            rubrics = parse_simple_batch_response(text, len(items))
             weights = weights_from_controls(self._ctrl)
 
             scores = []

@@ -160,6 +160,55 @@ def parse_batch_rubric_response(text: str, num_items: int) -> List[Dict]:
     return results
 
 
+def build_simple_batch_prompt(
+    items: List[str],
+    directive: str,
+    directives_text: str = "",
+) -> str:
+    """Simplified batch scoring prompt — one number (0-9) per item.
+
+    Designed for models that can't handle the multi-criterion format.
+    """
+    directive_section = ""
+    if directives_text:
+        directive_section = f"\nFocus: {directives_text}\n"
+
+    items_block = ""
+    for i, item_text in enumerate(items, 1):
+        items_block += f"{i}. {item_text}\n"
+
+    return (
+        f"Score each item 0-9 on relevance to this directive: {directive}\n"
+        f"{directive_section}\n"
+        f"Scale: 0-2 = irrelevant/noise, 3-5 = tangential, 6-7 = relevant, 8-9 = core topic\n\n"
+        f"{items_block}\n"
+        f"Reply with ONLY one number per line (no text, no labels):\n"
+    )
+
+
+def parse_simple_batch_response(text: str, num_items: int) -> List[Dict]:
+    """Parse simple 0-9 scores (one per line) into rubric-compatible dicts."""
+    import re
+    numbers = re.findall(r'\b(\d)\b', text)
+    results = []
+    for i in range(num_items):
+        if i < len(numbers):
+            score_9 = min(9, max(0, int(numbers[i])))
+            # Map 0-9 to 0-3 per criterion (approximate)
+            score_3 = round(score_9 / 3.0)
+            score_3 = min(3, score_3)
+            results.append({
+                "relevance": score_3,
+                "novelty": score_3,
+                "actionability": score_3,
+                "reason": "",
+                "raw": text[:200],
+            })
+        else:
+            results.append({name: 0 for name in CRITERION_NAMES} | {"reason": "", "raw": ""})
+    return results
+
+
 def parse_rubric_response(text: str) -> Dict:
     """Parse rubric scores from model output.
 

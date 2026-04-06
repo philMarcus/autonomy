@@ -360,21 +360,22 @@ def build_planner_prompt(
     platform_status: str = "",
     cooldown_status: str = "",
     nudge_note: str = "",
+    self_telemetry: str = "",
 ) -> str:
     read_only_note = ""
     if read_only:
         read_only_note = "- READ-ONLY MODE: All write actions (POST, COMMENT, REPLY, UPVOTE, DOWNVOTE, CREATE_SUBMOLT, SUBSCRIBE_SUBMOLT) are DISABLED. You can only observe and WAIT.\n"
 
-    meta_fields_base = 'update_kernel'
-    meta_example_base = '"update_kernel": false, '
+    meta_fields_base = 'memory_note, update_kernel'
+    meta_example_base = '"memory_note": "what I want to remember from this cycle", "update_kernel": false, '
     if trajectory_votes is not None:
-        meta_fields_base += ' and set_trajectory'
+        meta_fields_base += ', set_trajectory'
         meta_example_base += '"set_trajectory": false, '
     if controls_block:
-        meta_fields_base += ' and controls_update'
+        meta_fields_base += ', controls_update'
         meta_example_base += '"controls_update": {}, '
     if daemon_active:
-        meta_fields_base += ' and daemon_directives'
+        meta_fields_base += ', daemon_directives'
         meta_example_base += '"daemon_directives": {"focus_topics": [], "note": ""}, '
     meta_fields_note = meta_fields_base + ' fields'
     meta_example = meta_example_base
@@ -423,9 +424,9 @@ MOLTBOOK RATE LIMITS:
 - Following: Should be RARE and selective! Only follow moltys after seeing multiple valuable posts from them. Do NOT follow everyone you interact with.
 {_format_platform_status(platform_status)}{config_hint}{temp_note}
 
-Personal memory (curated):
+Personal memory (your journal — grows each cycle from your memory_note):
 {memory}
-
+{self_telemetry}
 Knowledge (excerpt):
 {knowledge}
 
