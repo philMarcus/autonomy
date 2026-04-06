@@ -94,6 +94,37 @@ def _format_draft_context(drafts: list, saved_plans: list,
     return "\n".join(lines)
 
 
+def _build_recent_posts(store, run_id: str, count: int = 4) -> str:
+    """Fetch recent artifact bodies from Analog Home for the planner prompt."""
+    if not store._analog_home_url or count <= 0:
+        return ""
+    try:
+        import requests
+        from urllib.parse import urljoin
+        url = urljoin(store._analog_home_url.rstrip("/") + "/",
+                      f"artifacts?run_id={run_id}&limit={count}&sort=desc")
+        resp = requests.get(url, timeout=10)
+        if resp.status_code >= 400:
+            return ""
+        arts = resp.json()
+        # Filter to content artifacts only
+        content_arts = [a for a in arts if a.get("artifact_type") in ("post", "comment", "reply", "image")]
+        if not content_arts:
+            return ""
+        lines = []
+        for a in content_arts:
+            atype = a.get("artifact_type", "")
+            title = a.get("title", "")
+            body = a.get("body_markdown", "")
+            # Truncate long bodies
+            if len(body) > 500:
+                body = body[:497] + "..."
+            lines.append(f"[{atype}] {title}\n{body}")
+        return "\n\n".join(lines)
+    except Exception:
+        return ""
+
+
 def _build_self_telemetry(state: dict, budget, iteration: int, daemon=None) -> str:
     """Build a concise self-telemetry summary for the planner prompt."""
     from collections import Counter
@@ -919,6 +950,8 @@ def main():
             platform_status=platform_status,
             nudge_note=nudge_note,
             self_telemetry=_build_self_telemetry(state, budget, iteration, daemon),
+            recent_posts=_build_recent_posts(store, state.get("_session_id", ""),
+                                             count=int(ctrl.get("recent_posts_in_prompt") or 4)),
         )
 
         plan = None

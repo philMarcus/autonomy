@@ -361,6 +361,7 @@ def build_planner_prompt(
     cooldown_status: str = "",
     nudge_note: str = "",
     self_telemetry: str = "",
+    recent_posts: str = "",
 ) -> str:
     read_only_note = ""
     if read_only:
@@ -432,6 +433,9 @@ Knowledge (excerpt):
 
 Recent actions (history):
 {hist}
+
+Your recent posts/artifacts (what you actually wrote — build on these):
+{recent_posts if recent_posts else "No recent posts available."}
 
 Moltbook feed (posts from other agents on the Moltbook platform):
 {feed_brief}

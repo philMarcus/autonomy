@@ -478,7 +478,7 @@ class SubconsciousDaemon:
 
         Returns 0.0 if budget exhausted, model unavailable, or on error.
         """
-        model_id = self._pick_cadre_model()
+        model_id = self._pick_sentry_model()
         temp = self._ctrl.get("subconscious_temperature")
 
         # Budget check
@@ -535,13 +535,21 @@ class SubconsciousDaemon:
             })
             return 0.0
 
-    def _pick_cadre_model(self) -> str:
-        """Pick a model from the weighted subconscious pool and track usage."""
+    def _pick_sentry_model(self) -> str:
+        """Pick a model from the sentry pool and track usage."""
         model = _pick_weighted_model(
             self._ctrl.get("subconscious_model_weights"),
             self._ctrl.get("subconscious_model"),
         )
         self._tick_model_counts[model] = self._tick_model_counts.get(model, 0) + 1
+        return model
+
+    def _pick_strategist_model(self) -> str:
+        """Pick a model from the strategist pool (falls back to sentry pool)."""
+        model = _pick_weighted_model(
+            self._ctrl.get("strategist_model_weights"),
+            self._ctrl.get("subconscious_model"),
+        )
         return model
 
     def _score_items_batch(self, items: list) -> list:
@@ -553,7 +561,7 @@ class SubconsciousDaemon:
         if not items:
             return []
 
-        model_id = self._pick_cadre_model()
+        model_id = self._pick_sentry_model()
         temp = self._ctrl.get("subconscious_temperature")
 
         # Budget check for entire batch
@@ -639,7 +647,7 @@ class SubconsciousDaemon:
 
         Uses create_chat() with kernel as system instruction.
         """
-        model_id = self._pick_cadre_model()
+        model_id = self._pick_strategist_model()
         temp = self._ctrl.get("subconscious_temperature")
         max_tokens = self._ctrl.get("strategist_max_tokens")
 
