@@ -785,13 +785,41 @@ class SubconsciousDaemon:
                 model=model_id,
             )
         except Exception as e:
+            err_str = str(e)
+            is_503 = "503" in err_str or "UNAVAILABLE" in err_str
             self._telemetry.log("strategist_error", {
                 "brain": self._brain_name,
                 "tick": self._tick_count,
                 "item_id": item_id,
-                "error": str(e),
+                "error": err_str[:300],
                 "error_type": type(e).__name__,
+                "model": model_id,
             })
+            # Retry with different strategist model on 503
+            if is_503:
+                retry_model = self._pick_strategist_model(exclude=model_id)
+                if retry_model != model_id:
+                    try:
+                        chat = self._registry.create_chat(
+                            model_id=retry_model, system_instruction=self._kernel,
+                            temperature=temp, max_output_tokens=max_tokens)
+                        text = chat.send_message(prompt)
+                        est_in = (len(self._kernel) + len(prompt)) // 4
+                        est_out = len(text) // 4
+                        self._budget.record_usage(retry_model, _make_response(text, est_in, est_out, retry_model))
+                        plan = _parse_json_safe(text)
+                        if plan:
+                            source = item.get("_source", "feed")
+                            source_weight = float(self._ctrl.get("charge_weight_seed" if source == "seed" else "charge_weight_feed"))
+                            charge = score * urgency * source_weight
+                            return Draft(
+                                timestamp=time.time(), item_id=item_id, signal_score=score,
+                                suggested_action=(plan.get("action") or "COMMENT").upper(),
+                                target_summary=f"@{author_name}: {shorten(title or content, 80)}",
+                                reasoning=plan.get("reasoning", ""), draft_content=plan.get("draft_content", ""),
+                                charge=charge, source=source, model=retry_model)
+                    except Exception:
+                        pass
             return None
 
     # ------------------------------------------------------------------
