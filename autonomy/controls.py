@@ -399,7 +399,7 @@ def build_default_registry(args, model_registry) -> ControlRegistry:
                 "Max chars per feed item in prompt", "context", min_val=50, max_val=2000),
         Control("history_context_n", "int", 15,
                 "History entries in prompt", "context", min_val=1, max_val=50),
-        Control("memory_max_chars", "int", 4000,
+        Control("memory_max_chars", "int", 10000,
                 "Memory context budget", "context", min_val=500, max_val=20000),
         Control("reply_candidate_chars", "int", 5000,
                 "Max chars for reply candidate text in prompt", "context", min_val=500, max_val=20000),
