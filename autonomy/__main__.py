@@ -423,17 +423,11 @@ def main():
         # Use conscious model for verification challenges — cheap models (Flash-Lite)
         # can't reliably parse obfuscated text + do arithmetic.
         # Challenges are rare (only on Moltbook writes), so cost is negligible.
-        challenge_llm = registry.as_llm_client(default_model_id=conscious_model)
+        # Use Flash for verification — 5/5 on math benchmarks, cheaper than Pro
+        challenge_llm = registry.as_llm_client(default_model_id="gemini-2.5-flash")
         challenge_solver = MathVerificationSolver(llm_client=challenge_llm, telemetry=telemetry)
-        # Set backup LLMs for 503 retry
-        # 1st backup: different conscious-tier model
-        _con_weights = ctrl.get("conscious_model_weights") if ctrl else ""
-        if _con_weights:
-            _backup_models = [p.split("=")[0].strip() for p in _con_weights.split(",") if "=" in p]
-            _backup_models = [m for m in _backup_models if m != conscious_model]
-            if _backup_models:
-                challenge_solver.backup_llm = registry.as_llm_client(default_model_id=_backup_models[0])
-        # 2nd backup: ollama:gemma3:12b (free, 4/5 on math, always available)
+        # Backup chain for verification: Pro (if Flash 503s), then Gemma
+        challenge_solver.backup_llm = registry.as_llm_client(default_model_id="gemini-2.5-pro")
         if registry.has_model("ollama:gemma3:12b"):
             challenge_solver.backup_llm_2 = registry.as_llm_client(default_model_id="ollama:gemma3:12b")
         platform = MoltbookClient(
