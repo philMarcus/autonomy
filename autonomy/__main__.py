@@ -348,7 +348,8 @@ def main():
     # Ollama — register if available (manages its own model loading)
     try:
         from .llm.ollama import OllamaBackend
-        _ollama = OllamaBackend()
+        _ollama_url = os.environ.get("OLLAMA_URL", "http://localhost:11434").strip()
+        _ollama = OllamaBackend(base_url=_ollama_url)
         if _ollama.is_available():
             registry.register_backend("ollama", _ollama)
             _ollama_models = _ollama.available_models()
