@@ -254,18 +254,21 @@ class ControlRegistry:
 
 
 # ======================================================================
-# Factory: build the default registry from CLI args + model registry
+# Factory: build the default registry from model registry
 # ======================================================================
 
-def build_default_registry(args, model_registry) -> ControlRegistry:
-    """Create a ControlRegistry populated from CLI args and available models.
+def build_default_registry(model_registry, blacklist_str: str = "") -> ControlRegistry:
+    """Create a ControlRegistry with hardcoded defaults and available models.
+
+    Controls.py is the SINGLE SOURCE OF TRUTH for all default values.
+    CLI flags and controls.json override these after construction.
 
     Parameters
     ----------
-    args : argparse.Namespace
-        Parsed CLI arguments.
     model_registry : ModelRegistry
         Registered model backends (for populating model choices).
+    blacklist_str : str
+        Comma-separated control keys to blacklist (from CLI --blacklist-controls).
     """
     all_model_ids = [m.model_id for m in model_registry.list_models()]
 
@@ -459,8 +462,7 @@ def build_default_registry(args, model_registry) -> ControlRegistry:
                 "Daemon can downvote (requires allow_downvote)", "daemon"),
     ]
 
-    # Parse blacklist from CLI
-    blacklist_raw = getattr(args, "blacklist_controls", "") or ""
-    blacklist = {k.strip() for k in blacklist_raw.split(",") if k.strip()}
+    # Parse blacklist
+    blacklist = {k.strip() for k in blacklist_str.split(",") if k.strip()}
 
     return ControlRegistry(controls=controls, blacklist=blacklist)

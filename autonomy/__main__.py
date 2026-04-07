@@ -321,9 +321,8 @@ def main():
         "no_subconscious": args.no_subconscious,
     })
 
-    # LLM registry + compatible client adapter
+    # === PHASE 2: Build registry (only needs API keys, not model names) ===
     registry = ModelRegistry()
-    budget = DailyBudget(daily_limit_usd=2.0)  # temporary, will be synced from controls
     gemini_backend = GeminiBackend(api_key=gem_key)
     registry.register_backend("gemini", gemini_backend)
 
@@ -370,7 +369,7 @@ def main():
 
     # --- Control Registry (Phase 4) ---
     from .controls import build_default_registry
-    ctrl = build_default_registry(args, registry)
+    ctrl = build_default_registry(registry, blacklist_str=args.blacklist_controls or "")
     controls_file = os.path.join(BRAINS_DIR, f"{brain_name}_controls.json")
     if os.path.exists(controls_file):
         try:
@@ -419,9 +418,9 @@ def main():
 
     _apply_cli_overrides(verbose=True)
 
-    # Sync derived values from controls (now that controls.json + CLI overrides are applied)
+    # === PHASE 4: Derived values from controls (single source of truth) ===
     conscious_model = ctrl.get("conscious_model")
-    budget.daily_limit_usd = float(ctrl.get("daily_budget_usd"))
+    budget = DailyBudget(daily_limit_usd=float(ctrl.get("daily_budget_usd")))
 
     # Platform client: always create for reads if API key exists
     # --enable-moltbook gates WRITES only (via moltbook_disabled flag in actions.py)
@@ -574,7 +573,7 @@ def main():
 
     if analog_home_url:
         con_weights = ctrl.get("conscious_model_weights") or conscious_model
-        sub_weights = ctrl.get("subconscious_model_weights") or args.subconscious_model
+        sub_weights = ctrl.get("subconscious_model_weights") or ctrl.get("subconscious_model")
         seeker = ctrl.get("seeker_model") or "gemini-2.5-flash-lite"
         run_body = (
             f"Version: {VERSION}\n"
