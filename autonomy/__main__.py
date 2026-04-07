@@ -210,33 +210,33 @@ def build_arg_parser() -> argparse.ArgumentParser:
                     help=argparse.SUPPRESS)  # Hidden, kept for backwards compat
 
     # --- Timing ---
-    ap.add_argument("--interval", type=int, default=60,
-                    help="Minutes between conscious cycles (default: 60).")
-    ap.add_argument("--post-interval", type=int, default=30,
-                    help="Minutes between posts (default: 30).")
+    ap.add_argument("--interval", type=int, default=None,
+                    help="Minutes between conscious cycles (overrides control).")
+    ap.add_argument("--post-interval", type=int, default=None,
+                    help="Minutes between posts (overrides control).")
     ap.add_argument("--reset-post-window", action="store_true",
                     help="Clear the post cooldown timer on startup.")
 
     # --- Mode ---
     ap.add_argument("--read-only", action="store_true", help="No write actions at all.")
     ap.add_argument("--mode", choices=["all", "comment_only", "no_post", "no_comment", "post_only"],
-                    default="all", help="Action mode (default: all).")
+                    default=None, help="Action mode (overrides control).")
     ap.add_argument("--priority", choices=["replies_first", "outside_first"],
-                    default="replies_first", help="Reply vs outside comment priority (default: replies_first).")
+                    default=None, help="Reply vs outside comment priority (overrides control).")
     ap.add_argument("--feed-sort", choices=["hot", "new", "top", "rising"],
                     default="new", help="Feed sort order (default: new).")
     ap.add_argument("--allow-votes", action="store_true", help="Allow upvoting/downvoting.")
     ap.add_argument("--allow-downvote", action="store_true", help="Allow downvoting specifically.")
 
     # --- Models ---
-    ap.add_argument("--conscious-model", default=DEFAULT_CONSCIOUS_MODEL,
-                    help=f"Model for conscious loop (default: {DEFAULT_CONSCIOUS_MODEL}).")
-    ap.add_argument("--subconscious-model", default="gemini-2.5-flash-lite",
-                    help="Model for subconscious daemon (default: gemini-2.5-flash-lite).")
-    ap.add_argument("--temperature", type=float, default=0.7,
-                    help="LLM temperature for planner chat (default: 0.7).")
-    ap.add_argument("--daily-budget", type=float, default=2.0,
-                    help="Daily API spend limit in USD (default: 1.0).")
+    ap.add_argument("--conscious-model", default=None,
+                    help="Model for conscious loop (overrides control).")
+    ap.add_argument("--subconscious-model", default=None,
+                    help="Model for subconscious daemon (overrides control).")
+    ap.add_argument("--temperature", type=float, default=None,
+                    help="LLM temperature (overrides control).")
+    ap.add_argument("--daily-budget", type=float, default=None,
+                    help="Daily API spend limit in USD (overrides control).")
 
     # --- Search ---
     ap.add_argument("--no-search", dest="enable_search", action="store_false", default=True,
@@ -249,8 +249,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
                     help="Disable subconscious daemon, run single-loop mode (default: daemon enabled).")
     ap.add_argument("--subconscious", dest="no_subconscious", action="store_false",
                     help=argparse.SUPPRESS)  # Hidden, kept for backwards compat
-    ap.add_argument("--sentry-interval", type=int, default=300,
-                    help="Seconds between subconscious sentry scans (default: 300).")
+    ap.add_argument("--sentry-interval", type=int, default=None,
+                    help="Seconds between sentry scans (overrides control).")
 
     # --- Misc ---
     ap.add_argument("--allow-kernel-update", action="store_true", default=True,
@@ -305,17 +305,16 @@ def main():
     run_id = uuid.uuid4().hex
     telemetry_dir = (os.environ.get("TELEMETRY_DIR", "telemetry") or "telemetry").strip()
     telemetry = TelemetryLogger(brain_name=brain_name, run_id=run_id, base_dir=telemetry_dir, read_only=args.read_only)
-    # Resolve conscious model (falls back to --gemini-model)
-    # --gemini-model is deprecated but still accepted; --conscious-model takes priority
-    conscious_model = args.conscious_model
+    # Temporary model defaults (will be replaced by controls after load)
+    conscious_model = args.conscious_model or args.gemini_model or "gemini-2.5-pro"
 
     telemetry.log("run_start", {
         "version": VERSION, "brain_env_prefix": prefix,
         "gemini_key_fp": key_fingerprint(gem_key),
         "moltbook_disabled": not args.moltbook_enabled,
         "model": conscious_model,
-        "subconscious_model": args.subconscious_model,
-        "temperature": args.temperature,
+        "subconscious_model": args.subconscious_model or "gemini-2.5-flash-lite",
+        "temperature": float(ctrl.get("temperature") if ctrl else 0.7),
         "search_enabled": bool(args.enable_search),
         "allow_kernel_update": bool(args.allow_kernel_update),
         "daily_budget_usd": args.daily_budget,
@@ -324,7 +323,7 @@ def main():
 
     # LLM registry + compatible client adapter
     registry = ModelRegistry()
-    budget = DailyBudget(daily_limit_usd=args.daily_budget)
+    budget = DailyBudget(daily_limit_usd=2.0)  # temporary, will be synced from controls
     gemini_backend = GeminiBackend(api_key=gem_key)
     registry.register_backend("gemini", gemini_backend)
 
@@ -420,6 +419,10 @@ def main():
 
     _apply_cli_overrides(verbose=True)
 
+    # Sync derived values from controls (now that controls.json + CLI overrides are applied)
+    conscious_model = ctrl.get("conscious_model")
+    budget.daily_limit_usd = float(ctrl.get("daily_budget_usd"))
+
     # Platform client: always create for reads if API key exists
     # --enable-moltbook gates WRITES only (via moltbook_disabled flag in actions.py)
     platform = None
@@ -428,14 +431,14 @@ def main():
         # Use conscious model for verification challenges — cheap models (Flash-Lite)
         # can't reliably parse obfuscated text + do arithmetic.
         # Challenges are rare (only on Moltbook writes), so cost is negligible.
-        challenge_llm = registry.as_llm_client(default_model_id=args.conscious_model)
+        challenge_llm = registry.as_llm_client(default_model_id=conscious_model)
         challenge_solver = MathVerificationSolver(llm_client=challenge_llm, telemetry=telemetry)
         # Set backup LLMs for 503 retry
         # 1st backup: different conscious-tier model
         _con_weights = ctrl.get("conscious_model_weights") if ctrl else ""
         if _con_weights:
             _backup_models = [p.split("=")[0].strip() for p in _con_weights.split(",") if "=" in p]
-            _backup_models = [m for m in _backup_models if m != args.conscious_model]
+            _backup_models = [m for m in _backup_models if m != conscious_model]
             if _backup_models:
                 challenge_solver.backup_llm = registry.as_llm_client(default_model_id=_backup_models[0])
         # 2nd backup: ollama:gemma3:12b (free, 4/5 on math, always available)
@@ -468,11 +471,9 @@ def main():
     available_providers = sorted(registry._backends.keys())
     print(f"{Fore.CYAN}=== {brain_name}: autonomy v{VERSION} (modular multi-brain loop) ===")
     print(f"{Fore.CYAN}    env prefix: {prefix} | providers: {', '.join(available_providers)}")
-    _effective_budget = float(ctrl.get("daily_budget_usd") if ctrl else args.daily_budget)
-    budget.daily_limit_usd = _effective_budget  # sync budget object with controls
-    print(f"{Fore.CYAN}    conscious model: {conscious_model} | budget: ${_effective_budget:.2f}/day")
+    print(f"{Fore.CYAN}    conscious model: {conscious_model} | budget: ${ctrl.get('daily_budget_usd'):.2f}/day")
     if not args.no_subconscious:
-        print(f"{Fore.CYAN}    subconscious model: {args.subconscious_model} | sentry interval: {args.sentry_interval}s")
+        print(f"{Fore.CYAN}    subconscious model: {ctrl.get('subconscious_model')} | sentry interval: {ctrl.get('sentry_interval_seconds')}s")
     else:
         print(f"{Fore.CYAN}    mode: single-loop (--no-subconscious)")
     if not args.moltbook_enabled:
@@ -595,7 +596,7 @@ def main():
             "artifact_type": "system_run_start",
             "title": f"Run Started -- {brain_name}",
             "body_markdown": run_body,
-            "temperature": args.temperature,
+            "temperature": float(ctrl.get("temperature") if ctrl else 0.7),
         })
 
     # Derive permissions
@@ -705,13 +706,13 @@ def main():
         analog_controls = {}
         analog_seeds = []
         analog_trajectory = None
-        cycle_temperature = args.temperature
-        agent_default_temperature = args.temperature  # what user nudges decay toward
+        cycle_temperature = float(ctrl.get("temperature") if ctrl else 0.7)
+        agent_default_temperature = float(ctrl.get("temperature") if ctrl else 0.7)  # what user nudges decay toward
         if analog_home_url:
             analog_controls = store.read_controls()
             if analog_controls:
-                cycle_temperature = analog_controls.get("temperature", args.temperature)
-                agent_default_temperature = analog_controls.get("default_temperature", args.temperature)
+                cycle_temperature = analog_controls.get("temperature", float(ctrl.get("temperature") if ctrl else 0.7))
+                agent_default_temperature = analog_controls.get("default_temperature", float(ctrl.get("temperature") if ctrl else 0.7))
                 analog_seeds = analog_controls.get("seeds", [])
                 seed_ids = analog_controls.get("seed_ids", [])
                 if seed_ids:

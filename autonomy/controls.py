@@ -286,19 +286,16 @@ def build_default_registry(args, model_registry) -> ControlRegistry:
     conscious_choices = [m for m in all_model_ids if m in _CONSCIOUS_TIER]
     subconscious_choices = [m for m in all_model_ids if m in _SUBCONSCIOUS_TIER or m.startswith("local:")]
 
-    conscious_model = getattr(args, "conscious_model", None) or getattr(args, "gemini_model", "gemini-2.5-pro")
-    subconscious_model = getattr(args, "subconscious_model", "gemini-2.5-flash-lite")
-
     # Output destination choices — always offer moltbook option (writes gated by moltbook_disabled flag)
     output_choices = ["analog_home", "moltbook_and_analog_home"]
     output_default = "analog_home"
 
     controls = [
         # --- LLM ---
-        Control("conscious_model", "str", conscious_model,
-                "Model for conscious loop (pro-tier only)", "llm", choices=conscious_choices),
-        Control("subconscious_model", "str", subconscious_model,
-                "Model for sentry + strategist (cheap/local)", "llm", choices=subconscious_choices),
+        Control("conscious_model", "str", "gemini-2.5-pro",
+                "Default conscious model", "llm", choices=conscious_choices),
+        Control("subconscious_model", "str", "gemini-2.5-flash-lite",
+                "Default subconscious model", "llm", choices=subconscious_choices),
         Control("seeker_model", "str", "gemini-2.5-flash-lite",
                 "Model for seeker gear (needs Gemini for search grounding)", "llm",
                 choices=[m for m in all_model_ids if m.startswith("gemini")]),
@@ -313,13 +310,13 @@ def build_default_registry(args, model_registry) -> ControlRegistry:
                 "mistral-small-latest=2,gemini-2.5-flash-lite=2",
                 "Weighted model pool for STRATEGIST drafts", "llm",
                 choices=subconscious_choices),
-        Control("temperature", "float", getattr(args, "temperature", 0.7),
+        Control("temperature", "float", 0.7,
                 "Conscious LLM temperature", "llm", min_val=0.0, max_val=2.0),
         Control("subconscious_temperature", "float", 0.3,
                 "Daemon LLM temperature", "llm", min_val=0.0, max_val=2.0),
 
         # --- Cost ---
-        Control("daily_budget_usd", "float", getattr(args, "daily_budget", 2.0),
+        Control("daily_budget_usd", "float", 2.0,
                 "Daily API spend limit", "cost", min_val=0.01, max_val=100.0),
         Control("budget_plan_enabled", "bool", True,
                 "Enable daily budget planning pass", "cost"),
@@ -328,9 +325,9 @@ def build_default_registry(args, model_registry) -> ControlRegistry:
                 min_val=0.05, max_val=0.9),
 
         # --- Timing ---
-        Control("cycle_interval_minutes", "int", getattr(args, "interval", 60),
+        Control("cycle_interval_minutes", "int", 60,
                 "Minutes between cycles", "timing", min_val=1, max_val=120),
-        Control("post_interval_minutes", "int", getattr(args, "post_interval", 30),
+        Control("post_interval_minutes", "int", 30,
                 "Minutes between posts", "timing", min_val=5, max_val=1440),
         Control("image_cooldown_minutes", "int", 1440,
                 "Min minutes between image generations (default 1440 = 24h)", "timing", min_val=10, max_val=10080),
@@ -343,21 +340,21 @@ def build_default_registry(args, model_registry) -> ControlRegistry:
                 "Where to publish artifacts", "output", choices=output_choices),
 
         # --- Social ---
-        Control("mode", "str", getattr(args, "mode", "all"),
+        Control("mode", "str", "all",
                 "Action mode", "social",
                 choices=["all", "comment_only", "no_post", "no_comment", "post_only"]),
-        Control("allow_downvote", "bool", getattr(args, "allow_downvote", False),
+        Control("allow_downvote", "bool", False,
                 "Allow downvoting", "social"),
         Control("allow_kernel_update", "bool",
-                getattr(args, "allow_kernel_update", True),
+                True,
                 "Allow agent to rewrite its kernel prompt", "social"),
-        Control("priority", "str", getattr(args, "priority", "replies_first"),
+        Control("priority", "str", "replies_first",
                 "Reply priority", "social",
                 choices=["replies_first", "outside_first"]),
 
         # --- Daemon (Phase 5 will consume; registered now with defaults) ---
         Control("sentry_interval_seconds", "int",
-                getattr(args, "sentry_interval", 300),
+                300,
                 "Seconds between sentry scans", "daemon", min_val=10),
         Control("signal_threshold", "float", 0.5,
                 "Score to trigger strategist", "daemon", min_val=0.0, max_val=1.0),
