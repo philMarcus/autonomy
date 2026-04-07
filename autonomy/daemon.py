@@ -100,6 +100,10 @@ class SubconsciousDaemon:
 
         # Track model usage per wake period (reset by __main__.py after each conscious cycle)
         self._tick_model_counts: Dict[str, int] = {}
+        # Per-model charge history for auto-calibration (last 20 ticks per model)
+        self._model_charge_history: Dict[str, List[float]] = {}
+        # Track reply candidates already scored (avoid re-scoring)
+        self._scored_comment_ids: Set[str] = set()
 
         # Track which feed items we've already scored (avoid re-scoring)
         self._seen_ids: Set[str] = set()
@@ -225,17 +229,17 @@ class SubconsciousDaemon:
         self._tick_count += 1
 
         # Read controls
-        decay_rate = 1.0  # no decay — wake_potential only changes via charge/refractory
-        wake_threshold = self._ctrl.get("wake_threshold")
         signal_threshold = self._ctrl.get("signal_threshold")
 
-        # Update buffer threshold (conscious may have changed it)
+        # Auto-calibrate wake threshold from target_wake_minutes + observed charge
+        wake_threshold = self._compute_wake_threshold()
         self._buffer.update_threshold(wake_threshold)
 
-        # Decay wake potential
-        self._buffer.decay(decay_rate)
+        # No decay — wake_potential only changes via charge/refractory
+        self._buffer.decay(1.0)
 
         # Sentry scan
+        _pre_tick_potential = self._buffer.wake_potential
         items_scanned = 0
         new_items = 0
         signals_above = 0
@@ -278,6 +282,20 @@ class SubconsciousDaemon:
                             "charge": round(draft.charge, 3),
                             "draft_length": len(draft.draft_content),
                         })
+
+        # Record charge produced this tick for auto-calibration
+        # (uses the wake_potential delta from before/after the sentry scan)
+        _tick_charge = max(0, self._buffer.wake_potential - _pre_tick_potential) if '_pre_tick_potential' in dir() else 0
+        if items_scanned > 0:
+            # Get the model that was used this tick (from tick_model_counts)
+            _last_model = max(self._tick_model_counts, key=self._tick_model_counts.get) if self._tick_model_counts else ""
+            if _last_model:
+                self._record_tick_charge(_last_model, _tick_charge)
+
+        # Reply candidate scan (every N ticks)
+        _reply_interval = int(self._ctrl.get("reply_scan_interval_ticks") or 2)
+        if self._platform and self._tick_count % _reply_interval == 0:
+            self._scan_reply_candidates()
 
         # Seed scan (read from Analog Home, never consume)
         seed_items = self._seed_scan()
@@ -534,6 +552,44 @@ class SubconsciousDaemon:
                 "error_type": type(e).__name__,
             })
             return 0.0
+
+    def _compute_wake_threshold(self) -> float:
+        """Auto-calibrate wake threshold from target_wake_minutes and observed charge rates."""
+        target_minutes = float(self._ctrl.get("target_wake_minutes") or 60)
+        sentry_interval = float(self._ctrl.get("sentry_interval_seconds") or 300)
+        target_ticks = (target_minutes * 60) / max(1, sentry_interval)
+
+        # Weighted average charge per tick across models
+        weights_str = self._ctrl.get("subconscious_model_weights") or ""
+        model_weights: Dict[str, float] = {}
+        for pair in weights_str.split(","):
+            if "=" in pair:
+                m, w = pair.rsplit("=", 1)
+                try:
+                    model_weights[m.strip()] = float(w.strip())
+                except ValueError:
+                    pass
+
+        total_weight = sum(model_weights.values()) or 1.0
+        expected_charge = 0.0
+        for model, weight in model_weights.items():
+            history = self._model_charge_history.get(model, [])
+            if history:
+                avg = sum(history) / len(history)
+            else:
+                avg = 0.2  # default estimate before data exists
+            expected_charge += (weight / total_weight) * avg
+
+        threshold = target_ticks * expected_charge
+        return max(1.0, threshold)
+
+    def _record_tick_charge(self, model_id: str, charge: float) -> None:
+        """Record charge produced by this tick's model for calibration."""
+        history = self._model_charge_history.setdefault(model_id, [])
+        history.append(charge)
+        # Keep last 20 per model
+        if len(history) > 20:
+            self._model_charge_history[model_id] = history[-20:]
 
     def _pick_sentry_model(self, exclude: str = "") -> str:
         """Pick a model from the sentry pool, optionally excluding one (for 503 retry)."""
@@ -821,6 +877,126 @@ class SubconsciousDaemon:
                     except Exception:
                         pass
             return None
+
+    # ------------------------------------------------------------------
+    # Gear 5: Reply Scanner — score comments on our posts
+    # ------------------------------------------------------------------
+
+    def _scan_reply_candidates(self) -> None:
+        """Check recent own posts for worthy reply candidates. Score them with sentry."""
+        if not self._platform:
+            return
+
+        max_replies = int(self._ctrl.get("max_replies_per_post") or 3)
+        charge_weight = float(self._ctrl.get("charge_weight_reply") or 1.5)
+
+        # Get recent post IDs from state
+        with self._state_lock:
+            my_post_ids = list(self._state.get("my_post_ids", []))[-4:]  # last 4 posts
+            replied_keys = set(self._state.get("replied_comment_keys", []))
+
+        for post_id in my_post_ids:
+            try:
+                comments = self._platform.get_post_comments(post_id, sort="new") or []
+            except Exception:
+                continue
+
+            # Count existing replies to this post
+            reply_count = sum(1 for k in replied_keys if k.startswith(f"{post_id}:"))
+            if reply_count >= max_replies:
+                continue
+
+            # Filter comments: skip own, already replied, already scored, stale
+            candidates = []
+            for c in comments[:20]:
+                cid = c.get("id", "")
+                if not cid:
+                    continue
+                key = f"{post_id}:{cid}"
+                if key in replied_keys:
+                    continue
+                if cid in self._scored_comment_ids:
+                    continue
+                author = c.get("author", {})
+                author_name = author.get("name", "") if isinstance(author, dict) else str(author)
+                if author_name and author_name.lower() == self._username.lower():
+                    continue
+                content = c.get("content", "") or ""
+                if len(content) < 15:
+                    continue  # skip very short comments
+                candidates.append(c)
+                self._scored_comment_ids.add(cid)
+
+            if not candidates:
+                continue
+
+            # Batch sentry-score the comments
+            item_texts = []
+            for c in candidates:
+                author = c.get("author", {})
+                author_name = author.get("name", "") if isinstance(author, dict) else str(author)
+                content = c.get("content", "") or ""
+                item_texts.append(f"@{author_name}: {shorten(content, 300)}")
+
+            model_id = self._pick_sentry_model()
+            try:
+                from .scoring import build_simple_batch_prompt, parse_simple_batch_response
+                prompt = build_simple_batch_prompt(
+                    item_texts, self._directive,
+                    self._get_directives_text(),
+                )
+                sentry_instruction = "You are scoring comments on your own posts. Rate how worthy each is of a thoughtful reply. Output only numbers."
+                chat = self._registry.create_chat(
+                    model_id=model_id,
+                    system_instruction=sentry_instruction,
+                    temperature=0.3,
+                    max_output_tokens=max(64, 10 * len(candidates)),
+                )
+                text = chat.send_message(prompt)
+                rubrics = parse_simple_batch_response(text, len(candidates))
+
+                for c, rubric in zip(candidates, rubrics):
+                    score = rubric.get("relevance", 0) / 3.0
+                    if score >= 0.5:  # worthy of reply
+                        cid = c.get("id", "")
+                        author = c.get("author", {})
+                        author_name = author.get("name", "") if isinstance(author, dict) else str(author)
+                        content = c.get("content", "") or ""
+                        charge = score * charge_weight
+
+                        draft = Draft(
+                            timestamp=time.time(),
+                            item_id=cid,
+                            signal_score=score,
+                            suggested_action="REPLY",
+                            target_summary=f"Reply to @{author_name}: {shorten(content, 80)}",
+                            reasoning=f"Worthy comment on our post (score {score:.2f})",
+                            draft_content="",  # conscious will draft the actual reply
+                            charge=charge,
+                            source="reply",
+                            model=model_id,
+                        )
+                        self._buffer.add_draft(draft)
+                        self._telemetry.log("reply_candidate_scored", {
+                            "brain": self._brain_name,
+                            "tick": self._tick_count,
+                            "post_id": post_id,
+                            "comment_id": cid,
+                            "author": author_name,
+                            "score": round(score, 3),
+                            "charge": round(charge, 3),
+                            "model": model_id,
+                        })
+            except Exception as e:
+                self._telemetry.log("reply_scan_error", {
+                    "brain": self._brain_name,
+                    "tick": self._tick_count,
+                    "error": str(e)[:200],
+                })
+
+        # Cap scored_comment_ids
+        if len(self._scored_comment_ids) > 500:
+            self._scored_comment_ids = set(list(self._scored_comment_ids)[-250:])
 
     # ------------------------------------------------------------------
     # Gear 4: Seeker — search for information using Google Search

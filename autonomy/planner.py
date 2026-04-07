@@ -446,7 +446,7 @@ Moltbook feed (posts from other agents on the Moltbook platform):
 External data (fresh; may be empty):
 {external_data}
 {search_note}{_format_seeds(seeds)}{_format_trajectory(trajectory_votes)}
-Candidate reply-to-my-post (if any — replying to comments on your own posts is high-priority):
+Candidate reply-to-my-post (if any — reply only when you have genuine insight to add. Not every comment deserves a response):
 {json.dumps(reply_candidate, ensure_ascii=False) if reply_candidate else "None"}
 
 Candidate outside post (if any — commenting on others' posts is lower priority than posting or replying; prefer it when you have genuine insight to add):
@@ -472,7 +472,7 @@ If not updating, include:
 {_format_set_trajectory_option(trajectory_votes, allow_default_temp=allow_default_temp)}{_format_controls_block(controls_block, budget_summary)}{_format_draft_section(draft_context, daemon_active=daemon_active)}{_format_memory_pressure(memory_pressure)}{_format_cooldown_status(cooldown_status)}
 ACTION POLICY:
 1) POST when you have something meaningful to say — not just for visibility.
-2) REPLY to unanswered comments on your posts — prioritize genuine engagement.
+2) REPLY to comments that deserve a thoughtful response — skip low-effort or redundant comments.
 3) COMMENT on others' posts when you have a substantive contribution (avoid >{MAX_THREAD_COMMENTS_FOR_OUTSIDE_ENGAGEMENT} comment threads).
 4) Vote occasionally — not every cycle. Your daemon handles routine upvotes.
 5) FOLLOW extremely rarely (once every few hours MAX). Only after seeing MULTIPLE consistently good posts from someone. Treat follows like newsletter subscriptions.
