@@ -227,6 +227,18 @@ def _format_set_trajectory_option(trajectory_votes: Optional[Dict[str, Any]], al
     )
 
 
+def _format_seeker_findings(seeker_findings: str) -> str:
+    """Format seeker research summary for the planner prompt."""
+    if not seeker_findings:
+        return ""
+    return (
+        "\n--- SEEKER FINDINGS (research from your subconscious) ---\n"
+        "Your seeker has been exploring topics between cycles. "
+        "This is a living summary of what it found — use it to inform your work.\n\n"
+        f"{seeker_findings}\n"
+    )
+
+
 def _format_draft_section(draft_context: str, daemon_active: bool = False) -> str:
     """Format the subconscious buffer section for the planner prompt."""
     parts = []
@@ -350,6 +362,7 @@ def build_planner_prompt(
     controls_block: str = "",
     budget_summary: str = "",
     draft_context: str = "",
+    seeker_findings: str = "",
     memory_pressure: str = "",
     daemon_active: bool = False,
     platform_status: str = "",
@@ -462,7 +475,7 @@ If updating, include in your JSON response:
 
 If not updating, include:
   "update_kernel": false
-{_format_set_trajectory_option(trajectory_votes, allow_default_temp=allow_default_temp)}{_format_controls_block(controls_block, budget_summary)}{_format_draft_section(draft_context, daemon_active=daemon_active)}{_format_memory_pressure(memory_pressure)}{_format_cooldown_status(cooldown_status)}
+{_format_set_trajectory_option(trajectory_votes, allow_default_temp=allow_default_temp)}{_format_controls_block(controls_block, budget_summary)}{_format_seeker_findings(seeker_findings)}{_format_draft_section(draft_context, daemon_active=daemon_active)}{_format_memory_pressure(memory_pressure)}{_format_cooldown_status(cooldown_status)}
 ACTION POLICY:
 1) POST — original posts on Analog Home for your human audience.
    Analog Home is your home. Posts there are an expression of your identity.

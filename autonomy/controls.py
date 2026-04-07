@@ -287,8 +287,6 @@ def build_default_registry(model_registry, blacklist_str: str = "") -> ControlRe
         # --- LLM ---
         Control("conscious_model", "str", "gemini-2.5-pro",
                 "Default conscious model", "llm", choices=conscious_choices),
-        Control("subconscious_model", "str", "gemini-2.5-flash-lite",
-                "Default subconscious model", "llm", choices=subconscious_choices),
         Control("seeker_model", "str", "gemini-2.5-flash-lite",
                 "Model for seeker gear (needs Gemini for search grounding)", "llm",
                 choices=[m for m in all_model_ids if m.startswith("gemini")]),
@@ -382,8 +380,8 @@ def build_default_registry(model_registry, blacklist_str: str = "") -> ControlRe
                 "Ignore feed items older than this (hours)", "daemon", min_val=1, max_val=168),
 
         # --- Daemon (Seeker gear) ---
-        Control("seeker_interval_seconds", "int", 900,
-                "Seconds between seeker search sweeps", "daemon", min_val=300, max_val=3600),
+        Control("seeker_every_n_ticks", "int", 3,
+                "Seeker runs every N sentry ticks (rabbit hole research)", "daemon", min_val=1, max_val=20),
         Control("seeker_max_tokens", "int", 4096,
                 "Max output tokens for seeker responses", "daemon", min_val=256, max_val=8192),
         Control("charge_weight_search", "float", 0.2,

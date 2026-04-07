@@ -230,7 +230,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     ap.add_argument("--conscious-model", default=None,
                     help="Model for conscious loop (overrides control).")
     ap.add_argument("--subconscious-model", default=None,
-                    help="Model for subconscious daemon (overrides control).")
+                    help=argparse.SUPPRESS)  # Deprecated — use model weight controls
     ap.add_argument("--temperature", type=float, default=None,
                     help="LLM temperature (overrides control).")
     ap.add_argument("--daily-budget", type=float, default=None,
@@ -311,7 +311,7 @@ def main():
         "gemini_key_fp": key_fingerprint(gem_key),
         "moltbook_disabled": not args.moltbook_enabled,
         "model": conscious_model,
-        "subconscious_model": args.subconscious_model or "gemini-2.5-flash-lite",
+        "sentry_cadre": "from_controls",
         "temperature": args.temperature or 0.7,
         "search_enabled": bool(args.enable_search),
         "allow_kernel_update": bool(args.allow_kernel_update),
@@ -374,7 +374,6 @@ def main():
     _CLI_TO_CONTROL = {
         "--conscious-model":    ("conscious_model",          lambda a: a.conscious_model),
         "--gemini-model":       ("conscious_model",          lambda a: a.gemini_model),  # deprecated alias
-        "--subconscious-model": ("subconscious_model",       lambda a: a.subconscious_model),
         "--temperature":        ("temperature",              lambda a: a.temperature),
         "--daily-budget":       ("daily_budget_usd",         lambda a: a.daily_budget),
         "--interval":           ("cycle_interval_minutes",   lambda a: a.interval),
@@ -556,7 +555,7 @@ def main():
 
     if analog_home_url:
         con_weights = ctrl.get("conscious_model_weights") or conscious_model
-        sub_weights = ctrl.get("subconscious_model_weights") or ctrl.get("subconscious_model")
+        sub_weights = ctrl.get("subconscious_model_weights") or "gemini-2.5-flash-lite"
         seeker = ctrl.get("seeker_model") or "gemini-2.5-flash-lite"
         run_body = (
             f"Version: {VERSION}\n"
@@ -627,10 +626,10 @@ def main():
         # Search tools for daemon: only if --enable-search and subconscious model is Gemini
         daemon_search_tools = None
         if search_tools:
-            sub_model = ctrl.get("subconscious_model")
+            seeker_model = ctrl.get("seeker_model") or "gemini-2.5-flash-lite"
             try:
-                sub_info = registry.get_info(sub_model)
-                if sub_info.provider == "gemini":
+                seeker_info = registry.get_info(seeker_model)
+                if seeker_info.provider == "gemini":
                     daemon_search_tools = search_tools
             except ValueError:
                 pass
@@ -667,7 +666,9 @@ def main():
         if analog_home_url:
             extras.append("seeds: ON")
         extra_str = f" | {', '.join(extras)}" if extras else ""
-        print(f"{Fore.CYAN}    subconscious daemon: ACTIVE | model: {ctrl.get('subconscious_model')}{extra_str}")
+        _sentry_w = ctrl.get("subconscious_model_weights") or "flash-lite"
+        _strat_w = ctrl.get("strategist_model_weights") or "flash-lite"
+        print(f"{Fore.CYAN}    subconscious daemon: ACTIVE | sentry: {_sentry_w} | strategist: {_strat_w}{extra_str}")
 
     iteration = 0
     prev_feed_available = None  # Track feed state transitions
@@ -952,6 +953,7 @@ def main():
 
         # Drain subconscious buffer (if daemon active) + load saved plans
         draft_context = ""
+        seeker_findings = ""
         fresh_drafts = []
         saved_plans = []
         if daemon:
@@ -971,6 +973,13 @@ def main():
                     tick_summary = ", ".join(f"{m}: {c}" for m, c in sorted(mc.items(), key=lambda x: -x[1]))
                     safe_print(f"{Fore.CYAN}  Sentry ticks by model: {tick_summary}")
                     daemon._tick_model_counts = {}  # reset for next wake period
+            # Drain seeker findings (living summary from research rabbit hole)
+            _seeker_summary = draft_buffer.get_seeker_summary()
+            if _seeker_summary:
+                _seeker_state = draft_buffer.get_seeker_state()
+                safe_print(f"{Fore.CYAN}[SEEKER] Research summary available ({_seeker_state.runs_this_cycle} runs, "
+                           f"{len(_seeker_state.search_terms)} active terms)")
+                seeker_findings = _seeker_summary
             # Load saved plans from state (previous cycles' unused drafts)
             saved_plans = [
                 Draft.from_dict(d) for d in state.get("saved_plans", [])
@@ -1026,6 +1035,7 @@ def main():
             controls_block=ctrl.to_llm_block(),
             budget_summary=budget.spend_summary_for_planning(registry) if budget else "",
             draft_context=draft_context,
+            seeker_findings=seeker_findings,
             memory_pressure=memory_pressure,
             daemon_active=daemon is not None,
             platform_status=platform_status,
@@ -1368,6 +1378,8 @@ def main():
                 focus = daemon_directives.get("focus_topics", [])
                 if focus:
                     safe_print(f"{Fore.GREEN}  Focus: {', '.join(str(t) for t in focus)}")
+                    # Reset seeker with new topics — starts fresh rabbit hole
+                    draft_buffer.reset_seeker(focus)
                 ignore = daemon_directives.get("ignore_authors", [])
                 if ignore:
                     safe_print(f"{Fore.YELLOW}  Ignore: {', '.join(str(a) for a in ignore)}")

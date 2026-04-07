@@ -1229,7 +1229,7 @@ CONTROLS_META = [
     # --- Timing ---
     ("cycle_interval_minutes",   "int",   60,     "Max minutes between cycles (daemon may wake sooner)", "timing", 1, 120,   None),
     ("sentry_interval_seconds",  "int",   300,    "Seconds between sentry scans",                   "timing",   10,   None,  None),
-    ("seeker_interval_seconds",  "int",   900,    "Seconds between seeker search sweeps",           "timing",   300,  None,  None),
+    ("seeker_every_n_ticks",     "int",   3,      "Seeker runs every N sentry ticks",               "timing",   1,    20,    None),
     ("image_cooldown_minutes",   "int",   1440,   "Min minutes between image generations",          "timing",   10,   None,  None),
     # --- Wake Mechanics ---
     ("wake_threshold",           "float", 3.0,    "Charge needed to wake conscious",                "wake",     0.5,  10.0,  None),

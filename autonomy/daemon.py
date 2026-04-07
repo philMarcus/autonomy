@@ -142,7 +142,8 @@ class SubconsciousDaemon:
         self._thread.start()
         self._telemetry.log("daemon_start", {
             "brain": self._brain_name,
-            "model": self._ctrl.get("subconscious_model"),
+            "sentry_weights": self._ctrl.get("subconscious_model_weights"),
+            "strategist_weights": self._ctrl.get("strategist_model_weights"),
             "sentry_interval": self._ctrl.get("sentry_interval_seconds"),
         })
 
@@ -228,7 +229,7 @@ class SubconsciousDaemon:
             self._stop_event.wait(timeout=max(1, interval))
 
     def _tick(self) -> None:
-        """One tick of the daemon: decay, scan, score, strategize."""
+        """One tick of the daemon: seeker → sentry → strategist (single call)."""
         self._tick_count += 1
 
         # Read controls
@@ -241,12 +242,19 @@ class SubconsciousDaemon:
         # No decay — wake_potential only changes via charge/refractory
         self._buffer.decay(1.0)
 
-        # Sentry scan
+        # --- Gear 4: Seeker goes FIRST (every N ticks) ---
+        seeker_n = int(self._ctrl.get("seeker_every_n_ticks") or 3)
+        if (self._search_tools
+                and self._tick_count % seeker_n == 0):
+            self._seek()
+
+        # --- Gear 1: Sentry scan + scoring ---
         _pre_tick_potential = self._buffer.wake_potential
         items_scanned = 0
         new_items = 0
         signals_above = 0
         seeds_scanned = 0
+        high_signal_items = []  # collected for single strategist call
 
         if self._platform is not None:
             items = self._sentry_scan()
@@ -271,36 +279,8 @@ class SubconsciousDaemon:
                 # Reflex gear — lightweight social actions on high-signal items
                 if score >= signal_threshold:
                     self._reflex(item, score)
-
-                if score >= signal_threshold:
                     signals_above += 1
-                    draft = self._strategize(item, score)
-                    if draft:
-                        self._buffer.add_draft(draft)
-                        self._telemetry.log("strategist_draft", {
-                            "brain": self._brain_name,
-                            "tick": self._tick_count,
-                            "item_id": item_id,
-                            "action": draft.suggested_action,
-                            "charge": round(draft.charge, 3),
-                            "draft_length": len(draft.draft_content),
-                            "model": draft.model,
-                            "source": draft.source,
-                        })
-
-        # Record charge produced this tick for auto-calibration
-        # (uses the wake_potential delta from before/after the sentry scan)
-        _tick_charge = max(0, self._buffer.wake_potential - _pre_tick_potential) if '_pre_tick_potential' in dir() else 0
-        if items_scanned > 0:
-            # Get the model that was used this tick (from tick_model_counts)
-            _last_model = max(self._tick_model_counts, key=self._tick_model_counts.get) if self._tick_model_counts else ""
-            if _last_model:
-                self._record_tick_charge(_last_model, _tick_charge)
-
-        # Reply candidate scan (every N ticks)
-        _reply_interval = int(self._ctrl.get("reply_scan_interval_ticks") or 2)
-        if self._platform and self._tick_count % _reply_interval == 0:
-            self._scan_reply_candidates()
+                    high_signal_items.append((item, score))
 
         # Seed scan (read from Analog Home, never consume)
         seed_items = self._seed_scan()
@@ -321,19 +301,36 @@ class SubconsciousDaemon:
 
             if score >= signal_threshold:
                 signals_above += 1
-                draft = self._strategize(seed_item, score)
-                if draft:
-                    self._buffer.add_draft(draft)
-                    self._telemetry.log("strategist_draft", {
-                        "brain": self._brain_name,
-                        "tick": self._tick_count,
-                        "item_id": seed_id,
-                        "action": draft.suggested_action,
-                        "charge": round(draft.charge, 3),
-                        "draft_length": len(draft.draft_content),
-                        "model": draft.model,
-                        "source": "seed",
-                    })
+                high_signal_items.append((seed_item, score))
+
+        # --- Gear 2: Strategist — ONE call with all high-signal items ---
+        if high_signal_items:
+            seeker_summary = self._buffer.get_seeker_summary()
+            drafts = self._strategize_batch(high_signal_items, seeker_summary)
+            for draft in drafts:
+                self._buffer.add_draft(draft)
+                self._telemetry.log("strategist_draft", {
+                    "brain": self._brain_name,
+                    "tick": self._tick_count,
+                    "item_id": draft.item_id,
+                    "action": draft.suggested_action,
+                    "charge": round(draft.charge, 3),
+                    "draft_length": len(draft.draft_content),
+                    "model": draft.model,
+                    "source": draft.source,
+                })
+
+        # Record charge produced this tick for auto-calibration
+        _tick_charge = max(0, self._buffer.wake_potential - _pre_tick_potential)
+        if items_scanned > 0:
+            _last_model = max(self._tick_model_counts, key=self._tick_model_counts.get) if self._tick_model_counts else ""
+            if _last_model:
+                self._record_tick_charge(_last_model, _tick_charge)
+
+        # Reply candidate scan (every N ticks)
+        _reply_interval = int(self._ctrl.get("reply_scan_interval_ticks") or 2)
+        if self._platform and self._tick_count % _reply_interval == 0:
+            self._scan_reply_candidates()
 
         self._telemetry.log("daemon_tick", {
             "brain": self._brain_name,
@@ -344,16 +341,7 @@ class SubconsciousDaemon:
             "signals_above_threshold": signals_above,
             "wake_potential": round(self._buffer.wake_potential, 3),
             "draft_count": self._buffer.draft_count,
-            "model": self._ctrl.get("subconscious_model"),
         })
-
-        # --- Gear 4: Seeker — search for information on focus topics ---
-        seeker_interval = self._ctrl.get("seeker_interval_seconds")
-        now = time.time()
-        if (self._search_tools
-                and (now - self._last_seek_time) >= seeker_interval):
-            self._last_seek_time = now
-            self._seek()
 
     # ------------------------------------------------------------------
     # Gear 3: Reflex — lightweight social actions on high-signal items
@@ -608,7 +596,10 @@ class SubconsciousDaemon:
             pairs = [p.strip() for p in weights_str.split(",") if p.strip()]
             filtered = [p for p in pairs if not p.startswith(f"{exclude}=")]
             weights_str = ",".join(filtered) if filtered else weights_str
-        model = _pick_weighted_model(weights_str, self._ctrl.get("subconscious_model"))
+        # Fallback: first model from weights string
+        fallback = (weights_str.split("=")[0].strip() if "=" in weights_str
+                    else "gemini-2.5-flash-lite")
+        model = _pick_weighted_model(weights_str, fallback)
         self._tick_model_counts[model] = self._tick_model_counts.get(model, 0) + 1
         return model
 
@@ -619,7 +610,9 @@ class SubconsciousDaemon:
             pairs = [p.strip() for p in weights_str.split(",") if p.strip()]
             filtered = [p for p in pairs if not p.startswith(f"{exclude}=")]
             weights_str = ",".join(filtered) if filtered else weights_str
-        model = _pick_weighted_model(weights_str, self._ctrl.get("subconscious_model"))
+        fallback = (weights_str.split("=")[0].strip() if "=" in weights_str
+                    else "gemini-2.5-flash-lite")
+        model = _pick_weighted_model(weights_str, fallback)
         return model
 
     def _score_items_batch(self, items: list) -> list:
@@ -751,6 +744,182 @@ class SubconsciousDaemon:
     # ------------------------------------------------------------------
     # Gear 2: Strategist — draft an action plan for high-signal items
     # ------------------------------------------------------------------
+
+    def _strategize_batch(self, items_with_scores: list,
+                          seeker_summary: str = "") -> List[Draft]:
+        """Call strategist ONCE with all high-signal items + seeker context.
+
+        Returns a list of Draft objects (may be empty).
+        """
+        from .buffer import Draft
+
+        model_id = self._pick_strategist_model()
+        temp = self._ctrl.get("subconscious_temperature")
+        max_tokens = self._ctrl.get("strategist_max_tokens")
+
+        # Budget check
+        est_input = 1500 + len(seeker_summary) // 4
+        if not self._budget.can_afford(model_id, est_input_tokens=est_input,
+                                       est_output_tokens=max_tokens):
+            self._telemetry.log("strategist_budget_skip", {
+                "brain": self._brain_name, "tick": self._tick_count,
+                "model": model_id, "items": len(items_with_scores),
+            })
+            return []
+
+        # Build items section
+        items_lines = []
+        for idx, (item, score) in enumerate(items_with_scores, 1):
+            author = _get_author(item)
+            title = item.get("title", "") or ""
+            content = item.get("content", "") or ""
+            source = item.get("_source", "feed")
+            source_tag = " [SEED]" if source == "seed" else ""
+            items_lines.append(
+                f"{idx}. [score {score:.2f}]{source_tag} @{author}: "
+                f"{shorten(title, 80)} — {shorten(content, 300)}"
+            )
+        items_text = "\n".join(items_lines)
+
+        directives_text = self._get_directives_text()
+        directive_section = (f"\nConscious directives:\n{directives_text}"
+                             if directives_text else "")
+
+        seeker_section = ""
+        if seeker_summary:
+            seeker_section = (
+                f"\n\nRESEARCH CONTEXT (from seeker):\n"
+                f"{shorten(seeker_summary, 2000)}\n"
+            )
+
+        with self._directives_lock:
+            urgency = float(self._directives.get("urgency_boost", 1.0))
+
+        prompt = (
+            f"You have {len(items_with_scores)} high-signal items and research context.\n"
+            f"Directive: {self._directive}\n"
+            f"{directive_section}{seeker_section}\n\n"
+            f"HIGH-SIGNAL ITEMS:\n{items_text}\n\n"
+            f"Create 0 or more draft action plans. You may:\n"
+            f"- Draft a POST for Analog Home (human audience) inspired by items or research\n"
+            f"- Draft a POST_MOLTBOOK for the agent community on Moltbook\n"
+            f"- Draft a COMMENT/REPLY on a specific feed item\n"
+            f"- Synthesize multiple items into one draft\n"
+            f"- Return an empty array if nothing warrants action\n\n"
+            f"CRITICAL: Return ONLY a valid JSON array (no preamble):\n"
+            f'[{{"action": "POST", "item_index": 0, "reasoning": "...", "draft_content": "..."}}]\n'
+            f"item_index: which item inspired this (0 if synthesized/research). "
+            f"Keep reasoning under 50 words, draft_content under 200 words."
+        )
+
+        try:
+            chat = self._registry.create_chat(
+                model_id=model_id,
+                system_instruction=self._kernel,
+                temperature=temp,
+                max_output_tokens=max_tokens,
+            )
+            text = chat.send_message(prompt)
+            est_in = (len(self._kernel) + len(prompt)) // 4
+            est_out = len(text) // 4
+            self._budget.record_usage(model_id,
+                                      _make_response(text, est_in, est_out, model_id))
+
+            # Parse JSON array of drafts
+            plans = _parse_json_safe(text)
+            if plans is None:
+                # Try wrapping in array if it's a single object
+                plans = _parse_json_safe(f"[{text}]") if "{" in text else None
+            if isinstance(plans, dict):
+                plans = [plans]
+            if not isinstance(plans, list):
+                self._telemetry.log("strategist_parse_fail", {
+                    "brain": self._brain_name, "tick": self._tick_count,
+                    "raw_text": shorten(text, 500), "model": model_id,
+                })
+                return []
+
+            drafts = []
+            for plan in plans:
+                if not isinstance(plan, dict):
+                    continue
+                action = (plan.get("action") or "POST").upper()
+                item_idx = int(plan.get("item_index", 0))
+
+                # Determine source item and charge
+                if 1 <= item_idx <= len(items_with_scores):
+                    src_item, src_score = items_with_scores[item_idx - 1]
+                    source = src_item.get("_source", "feed")
+                    item_id = src_item.get("id", "")
+                    author = _get_author(src_item)
+                    title = src_item.get("title", "") or src_item.get("content", "")
+                    target_summary = f"@{author}: {shorten(title, 80)}"
+                else:
+                    # Synthesized or research-inspired
+                    src_score = 0.8
+                    source = "search" if seeker_summary else "feed"
+                    item_id = f"synth:{self._tick_count}"
+                    target_summary = shorten(plan.get("reasoning", "synthesized"), 80)
+
+                source_weight = float(self._ctrl.get(
+                    "charge_weight_seed" if source == "seed" else
+                    "charge_weight_search" if source == "search" else
+                    "charge_weight_feed"))
+                charge = src_score * urgency * source_weight
+
+                drafts.append(Draft(
+                    timestamp=time.time(),
+                    item_id=item_id,
+                    signal_score=src_score,
+                    suggested_action=action,
+                    target_summary=target_summary,
+                    reasoning=plan.get("reasoning", ""),
+                    draft_content=plan.get("draft_content", ""),
+                    charge=charge,
+                    source=source,
+                    model=model_id,
+                ))
+
+            return drafts
+
+        except Exception as e:
+            err_str = str(e)
+            is_503 = "503" in err_str or "UNAVAILABLE" in err_str
+            self._telemetry.log("strategist_error", {
+                "brain": self._brain_name, "tick": self._tick_count,
+                "error": err_str[:300], "model": model_id,
+                "items": len(items_with_scores),
+            })
+            if is_503:
+                retry_model = self._pick_strategist_model(exclude=model_id)
+                if retry_model != model_id:
+                    try:
+                        chat = self._registry.create_chat(
+                            model_id=retry_model, system_instruction=self._kernel,
+                            temperature=temp, max_output_tokens=max_tokens)
+                        text = chat.send_message(prompt)
+                        self._budget.record_usage(retry_model,
+                            _make_response(text, est_input, len(text) // 4, retry_model))
+                        plans = _parse_json_safe(text)
+                        if isinstance(plans, dict):
+                            plans = [plans]
+                        if isinstance(plans, list):
+                            # Simplified retry parse — just take first valid draft
+                            for plan in plans:
+                                if isinstance(plan, dict) and plan.get("draft_content"):
+                                    return [Draft(
+                                        timestamp=time.time(),
+                                        item_id=items_with_scores[0][0].get("id", ""),
+                                        signal_score=items_with_scores[0][1],
+                                        suggested_action=(plan.get("action") or "POST").upper(),
+                                        target_summary="retry draft",
+                                        reasoning=plan.get("reasoning", ""),
+                                        draft_content=plan.get("draft_content", ""),
+                                        charge=0.1, source="feed", model=retry_model,
+                                    )]
+                    except Exception:
+                        pass
+            return []
 
     def _strategize(self, item: dict, score: float) -> Optional[Draft]:
         """Generate a draft action plan for a high-signal item.
@@ -1016,65 +1185,111 @@ class SubconsciousDaemon:
     # ------------------------------------------------------------------
 
     def _seek(self) -> None:
-        """Search for current information based on conscious directives' focus_topics.
+        """Seeker gear: search topics, build living summary, evolve search terms.
 
         Uses Google Search tools (incompatible with json_mode).
-        Results bypass sentry scoring and go directly to draft generation.
+        Produces summaries (not drafts) — fed to strategist and consciousness.
+        Search terms evolve each run (rabbit hole behavior).
         """
-        with self._directives_lock:
-            topics = list(self._directives.get("focus_topics", []))
-
-        if not topics:
+        # Get current search terms — either from buffer (self-generated) or from directives
+        terms = self._buffer.get_seeker_terms()
+        if not terms:
+            with self._directives_lock:
+                terms = list(self._directives.get("focus_topics", []))
+        if not terms:
             return
 
-        model_id = self._ctrl.get("seeker_model") or self._ctrl.get("subconscious_model")
+        model_id = self._ctrl.get("seeker_model") or "gemini-2.5-flash-lite"
         temp = self._ctrl.get("subconscious_temperature")
         max_tokens = self._ctrl.get("seeker_max_tokens")
         max_topics = self._ctrl.get("seeker_max_topics")
 
-        # Cap topics to control cost
-        topics = topics[:max_topics]
-
+        terms = terms[:max_topics]
         results_found = 0
-        drafts_created = 0
+        all_findings = []
+        all_sources = []
 
-        for i, topic in enumerate(topics):
-            # Budget check per topic
+        for i, term in enumerate(terms):
             if not self._budget.can_afford(model_id, est_input_tokens=1000,
                                            est_output_tokens=max_tokens):
                 self._telemetry.log("seeker_budget_skip", {
-                    "brain": self._brain_name,
-                    "tick": self._tick_count,
-                    "model": model_id,
-                    "topics_remaining": len(topics) - i,
+                    "brain": self._brain_name, "tick": self._tick_count,
+                    "model": model_id, "topics_remaining": len(terms) - i,
                 })
                 break
 
-            result = self._seek_topic(topic, model_id, temp, max_tokens)
+            result = self._seek_topic(term, model_id, temp, max_tokens)
             if result:
                 results_found += 1
-                draft = self._strategize_search_result(result, topic, model_id=model_id)
-                if draft:
-                    self._buffer.add_draft(draft)
-                    drafts_created += 1
-                    self._telemetry.log("strategist_draft", {
-                        "brain": self._brain_name,
-                        "tick": self._tick_count,
-                        "item_id": draft.item_id,
-                        "action": draft.suggested_action,
-                        "charge": round(draft.charge, 3),
-                        "draft_length": len(draft.draft_content),
-                        "model": draft.model,
-                        "source": "search",
-                    })
+                all_findings.append(result.get("summary", ""))
+                all_sources.extend(result.get("sources", []))
+
+        if not all_findings:
+            return
+
+        # Build updated living summary by asking LLM to synthesize old + new
+        prev_summary = self._buffer.get_seeker_summary()
+        synthesis_prompt = (
+            f"You are a research assistant. Synthesize the following into a coherent summary.\n\n"
+        )
+        if prev_summary:
+            synthesis_prompt += f"PREVIOUS FINDINGS:\n{shorten(prev_summary, 2000)}\n\n"
+        synthesis_prompt += (
+            f"NEW FINDINGS:\n" + "\n---\n".join(shorten(f, 1500) for f in all_findings) + "\n\n"
+            f"Write a unified summary (3-5 paragraphs) covering all findings.\n"
+            f"Then suggest 2-3 follow-up search terms to explore further.\n\n"
+            f"Format:\nSUMMARY: <your unified summary>\n"
+            f"NEXT_TERMS: <term1>, <term2>, <term3>"
+        )
+
+        try:
+            chat = self._registry.create_chat(
+                model_id=model_id,
+                system_instruction=self._kernel,
+                temperature=temp,
+                max_output_tokens=max_tokens,
+                tools=self._search_tools,
+            )
+            synthesis = chat.send_message(synthesis_prompt)
+            est_in = (len(synthesis_prompt) + len(self._kernel)) // 4
+            est_out = len(synthesis) // 4
+            self._budget.record_usage(model_id,
+                                      _make_response(synthesis, est_in, est_out, model_id))
+
+            # Parse summary and next terms
+            new_summary = synthesis
+            new_terms = []
+            if "SUMMARY:" in synthesis:
+                parts = synthesis.split("SUMMARY:", 1)
+                remainder = parts[1] if len(parts) > 1 else synthesis
+                if "NEXT_TERMS:" in remainder:
+                    summary_part, terms_part = remainder.split("NEXT_TERMS:", 1)
+                    new_summary = summary_part.strip()
+                    new_terms = [t.strip() for t in terms_part.strip().split(",") if t.strip()]
+                else:
+                    new_summary = remainder.strip()
+
+            # Update the living summary in the buffer
+            self._buffer.update_seeker(
+                summary=new_summary,
+                new_terms=new_terms if new_terms else terms,  # keep old terms if no new ones
+                sources=all_sources,
+                tick=self._tick_count,
+            )
+
+        except Exception as e:
+            self._telemetry.log("seeker_error", {
+                "brain": self._brain_name, "tick": self._tick_count,
+                "error": str(e)[:500], "phase": "synthesis",
+            })
 
         self._telemetry.log("seeker_sweep", {
             "brain": self._brain_name,
             "tick": self._tick_count,
-            "topics_searched": len(topics),
+            "topics_searched": len(terms),
             "results_found": results_found,
-            "drafts_created": drafts_created,
             "model": model_id,
+            "runs_this_cycle": self._buffer.get_seeker_state().runs_this_cycle,
         })
 
     def _seek_topic(self, topic: str, model_id: str,
