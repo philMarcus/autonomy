@@ -328,22 +328,32 @@ def main():
     gemini_backend = GeminiBackend(api_key=gem_key)
     registry.register_backend("gemini", gemini_backend)
 
-    # Optional backends — registered when API key is present
+    # Optional backends — registered when API key is present and package installed
     if anthropic_key:
-        from .llm.anthropic import AnthropicBackend
-        registry.register_backend("anthropic", AnthropicBackend(api_key=anthropic_key))
+        try:
+            from .llm.anthropic import AnthropicBackend
+            registry.register_backend("anthropic", AnthropicBackend(api_key=anthropic_key))
+        except ImportError:
+            print("    [WARN] anthropic package not installed — skipping Claude models")
     if openai_key:
-        from .llm.openai import OpenAIBackend
-        registry.register_backend("openai", OpenAIBackend(api_key=openai_key))
+        try:
+            from .llm.openai import OpenAIBackend
+            registry.register_backend("openai", OpenAIBackend(api_key=openai_key))
+        except ImportError:
+            print("    [WARN] openai package not installed — skipping GPT models")
     if mistral_key:
-        from .llm.mistral import MistralBackend
-        registry.register_backend("mistral", MistralBackend(api_key=mistral_key))
+        try:
+            from .llm.mistral import MistralBackend
+            registry.register_backend("mistral", MistralBackend(api_key=mistral_key))
+        except ImportError:
+            print("    [WARN] mistralai package not installed — skipping Mistral models")
 
-    # Local models — always register if available (weight pools may reference them)
-    _needs_local = True  # cadre system means local models can appear in any weight pool
-    if _needs_local:
+    # HuggingFace local models — optional, Ollama is preferred
+    try:
         from .llm.local import LocalBackend
         registry.register_backend("local", LocalBackend())
+    except ImportError:
+        pass  # torch/transformers not installed, use Ollama instead
 
     # Ollama — register if available (manages its own model loading)
     try:
