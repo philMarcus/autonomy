@@ -1435,6 +1435,15 @@ def main():
 
             # Hard guard: POST when window closed
             act = (plan.get("action") or "").upper().strip()
+            # If output is analog_home only, force REPLY/COMMENT → POST
+            # (can't reply/comment on Moltbook when not publishing there)
+            _output_dest = ctrl.get("output_destination") or "analog_home"
+            if "moltbook" not in _output_dest and act in ("REPLY", "COMMENT"):
+                safe_print(f"{Fore.YELLOW}[AUTO] {act} → POST (output is Analog Home only, no Moltbook actions)")
+                act = "POST"
+                plan["action"] = "POST"
+                if not plan.get("title"):
+                    plan["title"] = plan.get("summary", "Thought")
             if act == "POST" and (not post_window_open or not allow_posts):
                 if reply_candidate:
                     plan["action"] = "REPLY"
