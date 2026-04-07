@@ -708,6 +708,18 @@ def main():
                 seed_ids = analog_controls.get("seed_ids", [])
                 if seed_ids:
                     store.consume_seeds(seed_ids)
+                # Save seeds to state for historical record
+                if analog_seeds:
+                    import datetime as _dt
+                    saved_seeds = state.setdefault("_seed_history", [])
+                    for _seed_text in analog_seeds:
+                        saved_seeds.append({
+                            "text": _seed_text,
+                            "cycle": iteration,
+                            "ts": _dt.datetime.now(_dt.timezone.utc).isoformat(),
+                        })
+                    # Keep last 50 seeds
+                    state["_seed_history"] = saved_seeds[-50:]
                 analog_trajectory = {
                     "vote_1": analog_controls.get("vote_1", 0),
                     "vote_2": analog_controls.get("vote_2", 0),
