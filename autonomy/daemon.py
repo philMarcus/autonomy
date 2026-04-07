@@ -100,7 +100,11 @@ class SubconsciousDaemon:
         # Track model usage per wake period (reset by __main__.py after each conscious cycle)
         self._tick_model_counts: Dict[str, int] = {}
         # Per-model charge history for auto-calibration (last 20 ticks per model)
-        self._model_charge_history: Dict[str, List[float]] = {}
+        # Load from state if available (persists across restarts)
+        with self._state_lock:
+            self._model_charge_history: Dict[str, List[float]] = dict(
+                self._state.get("_sentry_charge_history", {})
+            )
         # Track reply candidates already scored (avoid re-scoring)
         self._scored_comment_ids: Set[str] = set()
 
@@ -582,12 +586,15 @@ class SubconsciousDaemon:
         return max(1.0, threshold)
 
     def _record_tick_charge(self, model_id: str, charge: float) -> None:
-        """Record charge produced by this tick's model for calibration."""
+        """Record charge produced by this tick's model for calibration. Persists to state."""
         history = self._model_charge_history.setdefault(model_id, [])
         history.append(charge)
         # Keep last 20 per model
         if len(history) > 20:
             self._model_charge_history[model_id] = history[-20:]
+        # Persist to state for restart survival
+        with self._state_lock:
+            self._state["_sentry_charge_history"] = dict(self._model_charge_history)
 
     def _pick_sentry_model(self, exclude: str = "") -> str:
         """Pick a model from the sentry pool, optionally excluding one (for 503 retry)."""
