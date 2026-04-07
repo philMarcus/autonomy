@@ -283,10 +283,6 @@ def build_default_registry(model_registry, blacklist_str: str = "") -> ControlRe
     conscious_choices = [m for m in all_model_ids if m in _CONSCIOUS_TIER]
     subconscious_choices = [m for m in all_model_ids if m in _SUBCONSCIOUS_TIER or m.startswith("ollama:")]
 
-    # Output destination choices — always offer moltbook option (writes gated by moltbook_disabled flag)
-    output_choices = ["analog_home", "moltbook_and_analog_home"]
-    output_default = "analog_home"
-
     controls = [
         # --- LLM ---
         Control("conscious_model", "str", "gemini-2.5-pro",
@@ -325,16 +321,12 @@ def build_default_registry(model_registry, blacklist_str: str = "") -> ControlRe
         Control("cycle_interval_minutes", "int", 60,
                 "Minutes between cycles", "timing", min_val=1, max_val=120),
         Control("post_interval_minutes", "int", 30,
-                "Minutes between posts", "timing", min_val=5, max_val=1440),
+                "Minutes between Moltbook posts", "timing", min_val=5, max_val=1440),
         Control("image_cooldown_minutes", "int", 1440,
                 "Min minutes between image generations (default 1440 = 24h)", "timing", min_val=10, max_val=10080),
         Control("image_model_tier", "str", "imagen-ultra",
                 "Imagen tier: fast ($0.02), standard ($0.04), ultra ($0.06)", "llm",
                 choices=["imagen-fast", "imagen-standard", "imagen-ultra"]),
-
-        # --- Output ---
-        Control("output_destination", "str", output_default,
-                "Where to publish artifacts", "output", choices=output_choices),
 
         # --- Social ---
         Control("mode", "str", "all",

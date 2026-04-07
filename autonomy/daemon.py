@@ -783,14 +783,14 @@ class SubconsciousDaemon:
             f"Directive: {self._directive}\n"
             f"{directive_section}\n\n"
             f"High-signal feed item (relevance score: {score:.2f}):\n{item_text}\n\n"
-            f"Suggest an action. Prefer POST when the item inspires an original thought.\n"
+            f"Suggest an action. Use POST for Analog Home (your human audience), POST_MOLTBOOK for the agent community.\n"
             f"Use COMMENT only when you'd add direct value to the conversation.\n"
             f"CRITICAL INSTRUCTIONS:\n"
             f"- Return ONLY valid JSON (no preamble, no markdown, no explanation)\n"
             f"- Must be complete and well-formed (all fields, all quotes, all braces closed)\n"
             f"- Be BRIEF: reasoning under 50 words, draft_content under 200 words\n"
             f"- Required JSON structure:\n"
-            f'{{"action": "POST or COMMENT or REPLY or UPVOTE", '
+            f'{{"action": "POST or POST_MOLTBOOK or COMMENT or REPLY or UPVOTE", '
             f'"reasoning": "brief reason", '
             f'"draft_content": "concise suggested text"}}'
         )
@@ -1174,7 +1174,7 @@ class SubconsciousDaemon:
             upper_line = line.strip().upper()
             if upper_line.startswith("SUGGESTED_ACTION:"):
                 action_text = line.split(":", 1)[1].strip().upper()
-                if action_text in ("POST", "COMMENT", "REPLY"):
+                if action_text in ("POST", "POST_MOLTBOOK", "COMMENT", "REPLY"):
                     suggested_action = action_text
                 break
 

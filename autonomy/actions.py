@@ -182,7 +182,13 @@ def execute_action(
         raise ValueError("Plan missing action")
 
     WRITE_ACTIONS = {
-        "POST", "COMMENT", "REPLY",
+        "POST", "POST_MOLTBOOK", "COMMENT", "REPLY",
+        "UPVOTE_POST", "UPVOTE_COMMENT", "DOWNVOTE_POST", "DOWNVOTE_COMMENT",
+        "FOLLOW", "UNFOLLOW", "DM",
+        "SUBSCRIBE_SUBMOLT", "UNSUBSCRIBE_SUBMOLT", "CREATE_SUBMOLT",
+    }
+    MOLTBOOK_ACTIONS = {
+        "POST_MOLTBOOK", "COMMENT", "REPLY",
         "UPVOTE_POST", "UPVOTE_COMMENT", "DOWNVOTE_POST", "DOWNVOTE_COMMENT",
         "FOLLOW", "UNFOLLOW", "DM",
         "SUBSCRIBE_SUBMOLT", "UNSUBSCRIBE_SUBMOLT", "CREATE_SUBMOLT",
@@ -190,25 +196,9 @@ def execute_action(
     if flags.get("read_only") and action in WRITE_ACTIONS:
         print(f"{Fore.YELLOW}[SAFE] Skipping write action {action} due to --read-only{Style.RESET_ALL}")
         return False
-    if flags.get("moltbook_disabled") and action in WRITE_ACTIONS:
-        try:
-            if action == "POST":
-                safe_print(f"{Fore.MAGENTA}[ANALOG HOME] POST to m/{plan.get('submolt', 'general')}")
-                safe_print(f"{Fore.MAGENTA}  Title: {plan.get('title', '')}")
-                safe_print(f"{Fore.MAGENTA}  Content: {plan.get('content', '')}{Style.RESET_ALL}")
-            elif action in ("COMMENT", "REPLY"):
-                safe_print(f"{Fore.MAGENTA}[ANALOG HOME] {action} on post {plan.get('post_id', '?')}")
-                safe_print(f"{Fore.MAGENTA}  Content: {plan.get('content', '')}{Style.RESET_ALL}")
-            else:
-                preview = plan.get("title") or plan.get("content") or plan.get("summary") or ""
-                safe_print(f"{Fore.MAGENTA}[ANALOG HOME] {action}: {str(preview)}{Style.RESET_ALL}")
-        except:
-            pass
-        add_history(state, {"action": action, "target": "analog_home", "summary": plan.get("summary", "")})
-        # No post cooldown for Analog Home — cooldown only gates Moltbook writes
-        if telemetry:
-            telemetry.log("action_executed", {"action": action, "moltbook_disabled": True, **{k: v for k, v in plan.items() if k != "action"}})
-        return True
+    if flags.get("moltbook_disabled") and action in MOLTBOOK_ACTIONS:
+        print(f"{Fore.YELLOW}[SAFE] Skipping {action} — Moltbook disabled (use POST for Analog Home){Style.RESET_ALL}")
+        return False
     if flags.get("write_disabled") and action in WRITE_ACTIONS:
         print(f"{Fore.YELLOW}[SAFE] Skipping write action {action} due to write_disabled={flags.get('write_disabled_reason')}{Style.RESET_ALL}")
         return False
@@ -220,9 +210,21 @@ def execute_action(
         safe_print(f"{Fore.CYAN}>> WAIT: {plan.get('summary', '')}")
         return False
 
+    # POST — Analog Home only (no Moltbook API, no cooldown)
+    if action == "POST":
+        title = plan.get("title") or ""
+        content = plan.get("content") or ""
+        safe_print(f"{Fore.MAGENTA}[ANALOG HOME] POST")
+        safe_print(f"{Fore.MAGENTA}  Title: {title}")
+        safe_print(f"{Fore.MAGENTA}  Content: {content}{Style.RESET_ALL}")
+        add_history(state, {"action": "POST", "target": "analog_home", "summary": plan.get("summary", "")})
+        if telemetry:
+            telemetry.log("action_executed", {"action": "POST", "target": "analog_home", "title": title})
+        return True
+
     # Enforce CLI permissions
-    if action == "POST" and not flags["allow_posts"]:
-        raise ValueError("POST chosen but posts are disabled")
+    if action == "POST_MOLTBOOK" and not flags["allow_posts"]:
+        raise ValueError("POST_MOLTBOOK chosen but posts are disabled")
     if action in ("COMMENT",) and not flags["allow_outside"]:
         raise ValueError("COMMENT chosen but outside comments are disabled")
     if action.startswith("UPVOTE") or action.startswith("DOWNVOTE"):
@@ -250,14 +252,14 @@ def execute_action(
 
     ctrl = flags.get("ctrl")
 
-    if action == "POST":
+    if action == "POST_MOLTBOOK":
         ok, secs = can_do(state, "POST", ctrl=ctrl)
         if not ok:
-            raise ValueError(f"POST not allowed yet ({secs // 60}m remaining)")
+            raise ValueError(f"POST_MOLTBOOK not allowed yet ({secs // 60}m remaining)")
         submolt = plan.get("submolt") or "general"
         title = plan.get("title") or ""
         content = plan.get("content") or ""
-        print(f"{Fore.CYAN}...Action: POST")
+        print(f"{Fore.CYAN}...Action: POST_MOLTBOOK")
         print(f"{Fore.YELLOW}Target submolt: m/{submolt}")
         safe_print(f"{Fore.GREEN}TITLE: {title}")
         safe_print(f"{Fore.GREEN}CONTENT: {content}\n")
@@ -266,15 +268,15 @@ def execute_action(
         res = client.create_post(submolt=submolt, title=title, content=content)
         if not res.get("success"):
             _handle_write_block(res)
-            raise ValueError(f"Post failed: {res.get('error') or res}")
+            raise ValueError(f"Moltbook post failed: {res.get('error') or res}")
         pid = res.get("post", {}).get("id") or res.get("id")
         if pid:
             state["my_post_ids"].append(pid)
         set_cooldown(state, "POST", ctrl=ctrl)  # full cooldown on success
-        add_history(state, {"action": "POST", "target": post_url(pid or "?"), "summary": plan.get("summary", "")})
+        add_history(state, {"action": "POST_MOLTBOOK", "target": post_url(pid or "?"), "summary": plan.get("summary", "")})
         if telemetry:
-            telemetry.log("action_executed", {"action": "POST", "post_id": pid, "submolt": submolt, "title": title})
-        print(f"{Fore.CYAN}>> POST SUCCESS: {post_url(pid) if pid else res}")
+            telemetry.log("action_executed", {"action": "POST_MOLTBOOK", "post_id": pid, "submolt": submolt, "title": title})
+        print(f"{Fore.CYAN}>> POST_MOLTBOOK SUCCESS: {post_url(pid) if pid else res}")
         return True
 
     if action == "REPLY":

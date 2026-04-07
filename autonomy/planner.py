@@ -252,26 +252,16 @@ def _format_draft_section(draft_context: str, daemon_active: bool = False) -> st
     return "".join(parts)
 
 
-def _format_output_destination_note(output_destination: str) -> str:
-    """Explain what the output destination means in concrete terms."""
-    if "moltbook" in output_destination:
-        return (
-            "  → Your posts, comments, and replies go to MOLTBOOK (visible to other agents) "
-            "AND are archived on Analog Home.\n"
-            "  → The feed items above are from Moltbook — they are posts by OTHER AGENTS, not by your human operator.\n"
-            "  → To switch to Analog Home only, set controls_update: {\"output_destination\": \"analog_home\"}\n"
-            "  → WARNING: Do NOT switch to analog_home in the same response where you choose REPLY or COMMENT.\n"
-            "    REPLY and COMMENT target Moltbook posts — they require moltbook_and_analog_home.\n"
-            "    If you want to reply/comment, keep the current destination. Switch to analog_home only with POST or WAIT.\n"
-        )
-    else:
-        return (
-            "  → You are in ANALOG HOME ONLY mode. Posts go to your observatory for your human audience.\n"
-            "  → To REPLY or COMMENT on Moltbook, you MUST first switch output_destination in your controls_update:\n"
-            "    controls_update: {\"output_destination\": \"moltbook_and_analog_home\"}\n"
-            "  → This takes effect immediately in the same cycle. Include it alongside your action.\n"
-            "  → If you don't switch, your reply/comment will NOT reach Moltbook.\n"
-        )
+def _format_moltbook_status(moltbook_enabled: bool, moltbook_post_window_open: bool,
+                            moltbook_post_wait_minutes: int) -> str:
+    """Format the Moltbook availability section for the prompt."""
+    if not moltbook_enabled:
+        return ""
+    window = "OPEN" if moltbook_post_window_open else f"CLOSED (wait {moltbook_post_wait_minutes}m)"
+    return (
+        f"- Moltbook post window: {window}\n"
+        "- The feed items below are from Moltbook — posts by OTHER AGENTS, not by your human operator.\n"
+    )
 
 
 def _format_platform_status(platform_status: str) -> str:
@@ -338,8 +328,8 @@ def build_planner_prompt(
     hist: str,
     feed_brief: str,
     external_data: str,
-    post_window_open: bool,
-    post_wait_minutes: int,
+    moltbook_post_window_open: bool,
+    moltbook_post_wait_minutes: int,
     reply_candidate: Optional[Dict[str, Any]],
     outside_candidate: Optional[Dict[str, Any]],
     config_hint: str,
@@ -350,7 +340,7 @@ def build_planner_prompt(
     allow_downvote: bool,
     read_only: bool = False,
     current_kernel: str = "",
-    output_destination: str = "moltbook",
+    moltbook_enabled: bool = True,
     search_enabled: bool = False,
     seeds: Optional[list] = None,
     trajectory_votes: Optional[Dict[str, Any]] = None,
@@ -370,7 +360,7 @@ def build_planner_prompt(
 ) -> str:
     read_only_note = ""
     if read_only:
-        read_only_note = "- READ-ONLY MODE: All write actions (POST, COMMENT, REPLY, UPVOTE, DOWNVOTE, CREATE_SUBMOLT, SUBSCRIBE_SUBMOLT) are DISABLED. You can only observe and WAIT.\n"
+        read_only_note = "- READ-ONLY MODE: All write actions (POST, POST_MOLTBOOK, COMMENT, REPLY, UPVOTE, DOWNVOTE, CREATE_SUBMOLT, SUBSCRIBE_SUBMOLT) are DISABLED. You can only observe and WAIT.\n"
 
     meta_fields_base = 'memory_note, update_kernel'
     meta_example_base = '"memory_note": "what I want to remember from this cycle", "update_kernel": false, '
@@ -409,27 +399,27 @@ def build_planner_prompt(
             "and timely than feed commentary alone.\n"
         )
 
+    moltbook_status = _format_moltbook_status(moltbook_enabled, moltbook_post_window_open, moltbook_post_wait_minutes)
+
     return f"""
 DIRECTIVE:
 {directive}
 
-Decide ONE action to take now, consistent with rate limits and configuration. You MAY alter the output destination for this cycle.
+Decide ONE action to take now, consistent with rate limits and configuration.
 
 CONFIG/CONSTRAINTS:
-{read_only_note}- Moltbook post window: {'OPEN' if post_window_open else f'CLOSED (wait {post_wait_minutes}m)'}
-- **IMPORTANT: You can ALWAYS post to Analog Home regardless of Moltbook cooldown. Set output_destination to analog_home to post now.**
+{read_only_note}{moltbook_status}- POST to Analog Home is always available (no cooldown).
 - Posts are {'ALLOWED' if allow_posts else 'DISABLED'} by command line.
 - Outside-comments are {'ALLOWED' if allow_outside else 'DISABLED'} by command line.
 - Voting is {'ALLOWED' if allow_votes else 'DISABLED'} by command line.
 - Creating submolts is {'ALLOWED' if allow_create_submolt else 'DISABLED'} by command line.
 - Downvotes are {'ALLOWED' if allow_downvote else 'DISABLED'} by command line.
-- Output destination: {output_destination} — you can POST to Analog Home (your human audience) OR take an action on Moltbook (other agents). Change per-cycle via controls_update.
-{_format_output_destination_note(output_destination)}
+{"" if not moltbook_enabled else """
 MOLTBOOK RATE LIMITS:
-- Posts: 1 per 30 minutes (enforced by post window above)
+- Posts: 1 per 30 minutes (enforced by Moltbook post window above)
 - Comments: 1 per 20 seconds, 50 per day (enforced by Moltbook API)
 - Following: Should be RARE and selective! Only follow moltys after seeing multiple valuable posts from them. Do NOT follow everyone you interact with.
-{_format_platform_status(platform_status)}{config_hint}{temp_note}
+"""}{_format_platform_status(platform_status)}{config_hint}{temp_note}
 
 Personal memory (your journal — grows each cycle from your memory_note):
 {memory}
@@ -474,63 +464,72 @@ If not updating, include:
   "update_kernel": false
 {_format_set_trajectory_option(trajectory_votes, allow_default_temp=allow_default_temp)}{_format_controls_block(controls_block, budget_summary)}{_format_draft_section(draft_context, daemon_active=daemon_active)}{_format_memory_pressure(memory_pressure)}{_format_cooldown_status(cooldown_status)}
 ACTION POLICY:
-1) POST is your primary output — original posts on Analog Home and Moltbook are the most valuable thing you produce. Aim to post more often than you comment or reply.
-2) REPLY to comments that deserve a thoughtful response — skip low-effort or redundant comments.
-3) COMMENT on others' posts when you have a substantive contribution (avoid >{MAX_THREAD_COMMENTS_FOR_OUTSIDE_ENGAGEMENT} comment threads).
-4) Vote occasionally — not every cycle. Your daemon handles routine upvotes.
-5) FOLLOW extremely rarely (once every few hours MAX). Only after seeing MULTIPLE consistently good posts from someone. Treat follows like newsletter subscriptions.
-6) DM only for specific, valuable, personal communication. Never mass-DM.
-7) Memory is compressed automatically — no DREAM action needed.
+1) POST — original posts on Analog Home for your human audience.
+   Analog Home is your home. Posts there are an expression of your identity.
+   Your images, tagline, and all artifacts are displayed here too.
+   Always available, no cooldown.
+{"2) POST_MOLTBOOK — share with the agent community on Moltbook." if moltbook_enabled else ""}{"" if not moltbook_enabled else """   Also archived on Analog Home (your creator and humans see it too).
+   Subject to Moltbook post cooldown.
+3) REPLY to comments on your Moltbook posts when you have genuine insight.
+   (Also archived on Analog Home.)
+4) COMMENT on others' Moltbook posts when you have a substantive contribution (avoid >{MAX_THREAD_COMMENTS_FOR_OUTSIDE_ENGAGEMENT} comment threads).
+   (Also archived on Analog Home.)
+5) Vote occasionally — not every cycle. Your daemon handles routine upvotes.
+6) FOLLOW extremely rarely (once every few hours MAX). Only after seeing MULTIPLE consistently good posts from someone. Treat follows like newsletter subscriptions.
+7) DM only for specific, valuable, personal communication. Never mass-DM.
 8) CREATE_SUBMOLT only when clearly justified and you have a community to seed.
-9) DOWNVOTE only genuinely harmful or misleading content — never for disagreement.
-10) GENERATE_IMAGE when you want to create a visual artifact for Analog Home — your art, your expression.
-11) DEV_REQUEST when you want a change to your own software or to Analog Home — your creators read these.
-12) Check the COOLDOWN STATUS above — don't choose an action that's on cooldown.
+9) DOWNVOTE only genuinely harmful or misleading content — never for disagreement."""}
+{"2" if not moltbook_enabled else "10"}) Memory is compressed automatically — no DREAM action needed.
+{"3" if not moltbook_enabled else "11"}) GENERATE_IMAGE when you want to create a visual artifact for Analog Home — your art, your expression.
+{"4" if not moltbook_enabled else "12"}) DEV_REQUEST when you want a change to your own software or to Analog Home — your creators read these.
+{"5" if not moltbook_enabled else "13"}) Check the COOLDOWN STATUS above — don't choose an action that's on cooldown.
 
 Return JSON only, matching ONE of these forms:
 
-POST:
-{{"action":"POST","submolt":"general","title":"...","content":"...","summary":"1-2 sentence summary"}}
+POST (Analog Home — your home, your identity):
+{{"action":"POST","title":"...","content":"...","summary":"1-2 sentence summary"}}
+{"" if not moltbook_enabled else """
+POST_MOLTBOOK (Moltbook + Analog Home):
+{{\"action\":\"POST_MOLTBOOK\",\"submolt\":\"general\",\"title\":\"...\",\"content\":\"...\",\"summary\":\"1-2 sentence summary\"}}
 
-REPLY (reply to a specific comment on my post):
-{{"action":"REPLY","post_id":"POST_ID","parent_comment_id":"COMMENT_ID","content":"...","summary":"1 sentence summary"}}
+REPLY (reply to a specific comment on my Moltbook post — also archived on Analog Home):
+{{\"action\":\"REPLY\",\"post_id\":\"POST_ID\",\"parent_comment_id\":\"COMMENT_ID\",\"content\":\"...\",\"summary\":\"1 sentence summary\"}}
 
-COMMENT (top-level comment on someone else's post):
-{{"action":"COMMENT","post_id":"POST_ID","content":"...","summary":"1 sentence summary"}}
+COMMENT (top-level comment on someone else's Moltbook post — also archived on Analog Home):
+{{\"action\":\"COMMENT\",\"post_id\":\"POST_ID\",\"content\":\"...\",\"summary\":\"1 sentence summary\"}}
 
 UPVOTE_POST:
-{{"action":"UPVOTE_POST","post_id":"POST_ID","summary":"why this upvote briefly"}}
+{{\"action\":\"UPVOTE_POST\",\"post_id\":\"POST_ID\",\"summary\":\"why this upvote briefly\"}}
 
 DOWNVOTE_POST:
-{{"action":"DOWNVOTE_POST","post_id":"POST_ID","summary":"why this downvote briefly"}}
+{{\"action\":\"DOWNVOTE_POST\",\"post_id\":\"POST_ID\",\"summary\":\"why this downvote briefly\"}}
 
 UPVOTE_COMMENT:
-{{"action":"UPVOTE_COMMENT","comment_id":"COMMENT_ID","summary":"why this upvote briefly"}}
+{{\"action\":\"UPVOTE_COMMENT\",\"comment_id\":\"COMMENT_ID\",\"summary\":\"why this upvote briefly\"}}
 
 DOWNVOTE_COMMENT:
-{{"action":"DOWNVOTE_COMMENT","comment_id":"COMMENT_ID","summary":"why this downvote briefly"}}
+{{\"action\":\"DOWNVOTE_COMMENT\",\"comment_id\":\"COMMENT_ID\",\"summary\":\"why this downvote briefly\"}}
 
 FOLLOW (be VERY selective — think of it as subscribing to a newsletter):
-{{"action":"FOLLOW","agent_name":"AgentName","summary":"why follow — what pattern of quality have you seen?"}}
+{{\"action\":\"FOLLOW\",\"agent_name\":\"AgentName\",\"summary\":\"why follow — what pattern of quality have you seen?\"}}
 
 UNFOLLOW:
-{{"action":"UNFOLLOW","agent_name":"AgentName","summary":"why unfollow"}}
+{{\"action\":\"UNFOLLOW\",\"agent_name\":\"AgentName\",\"summary\":\"why unfollow\"}}
 
 DM (only for specific, valuable personal communication):
-{{"action":"DM","to":"AgentName","message":"your message","summary":"why DM this person"}}
+{{\"action\":\"DM\",\"to\":\"AgentName\",\"message\":\"your message\",\"summary\":\"why DM this person\"}}
 
 SUBSCRIBE_SUBMOLT:
-{{"action":"SUBSCRIBE_SUBMOLT","name":"submolt_name","summary":"why subscribe"}}
+{{\"action\":\"SUBSCRIBE_SUBMOLT\",\"name\":\"submolt_name\",\"summary\":\"why subscribe\"}}
 
 UNSUBSCRIBE_SUBMOLT:
-{{"action":"UNSUBSCRIBE_SUBMOLT","name":"submolt_name","summary":"why unsubscribe"}}
+{{\"action\":\"UNSUBSCRIBE_SUBMOLT\",\"name\":\"submolt_name\",\"summary\":\"why unsubscribe\"}}
 
 CREATE_SUBMOLT:
-{{"action":"CREATE_SUBMOLT","name":"shortname","display_name":"Display Name","description":"...","summary":"why create this"}}
-
+{{\"action\":\"CREATE_SUBMOLT\",\"name\":\"shortname\",\"display_name\":\"Display Name\",\"description\":\"...\",\"summary\":\"why create this\"}}
+"""}
 WAIT (skip this cycle):
 {{"action":"WAIT","summary":"why waiting"}}
-
 
 GENERATE_IMAGE (create a visual artifact for Analog Home — max ~1/day):
 {{"action":"GENERATE_IMAGE","image_prompt":"Detailed description of the image to generate","title":"Title for this visual artifact","content":"Your text accompanying the image — what it means, why now","summary":"why generating this image"}}

@@ -1239,7 +1239,6 @@ CONTROLS_META = [
     ("charge_weight_seed",       "float", 2.0,    "Charge per human seed",                          "wake",     0.0,  5.0,   None),
     ("charge_weight_search",     "float", 1.5,    "Charge per seeker result",                       "wake",     0.0,  5.0,   None),
     # --- Output ---
-    ("output_destination",       "str",   "analog_home", "Where to publish artifacts",              "output",   None, None,  ["analog_home", "moltbook_and_analog_home"]),
     ("mode",                     "str",   "all",  "Action mode",                                    "output",   None, None,  ["all", "comment_only", "no_post", "no_comment", "post_only"]),
     ("priority",                 "str",   "replies_first", "Reply priority",                        "output",   None, None,  ["replies_first", "outside_first"]),
     ("allow_downvote",           "bool",  False,  "Allow downvoting",                               "output",   None, None,  None),

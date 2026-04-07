@@ -205,9 +205,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
     # --- Output destinations ---
     ap.add_argument("--no-moltbook", dest="moltbook_enabled", action="store_false", default=True,
-                    help="Disable Moltbook writes — posts go to Analog Home only (default: enabled).")
-    ap.add_argument("--enable-moltbook", dest="moltbook_enabled", action="store_true",
-                    help=argparse.SUPPRESS)  # Hidden, kept for backwards compat
+                    help="Disable Moltbook actions (POST_MOLTBOOK, COMMENT, REPLY). POST to Analog Home always works.")
 
     # --- Timing ---
     ap.add_argument("--interval", type=int, default=None,
@@ -299,7 +297,7 @@ def main():
     if not gem_key:
         raise SystemExit(f"Missing {prefix}_GEMINI_API_KEY (or GEMINI_API_KEY)")
     if not mb_key and args.moltbook_enabled:
-        print(f"{Fore.YELLOW}[WARN] --enable-moltbook set but no {prefix}_MOLTBOOK_API_KEY found. Writes will go to Analog Home only.")
+        print(f"{Fore.YELLOW}[WARN] Moltbook enabled but no {prefix}_MOLTBOOK_API_KEY found. POST_MOLTBOOK/COMMENT/REPLY will fail.")
 
     # Telemetry
     run_id = uuid.uuid4().hex
@@ -416,7 +414,7 @@ def main():
     budget = DailyBudget(daily_limit_usd=float(ctrl.get("daily_budget_usd")))
 
     # Platform client: always create for reads if API key exists
-    # --enable-moltbook gates WRITES only (via moltbook_disabled flag in actions.py)
+    # --no-moltbook gates WRITES only (via moltbook_disabled flag in actions.py)
     platform = None
     challenge_solver = None
     if mb_key:
@@ -434,12 +432,6 @@ def main():
             api_key=mb_key, telemetry=telemetry, brain_name=brain_name,
             read_only=args.read_only, challenge_solver=challenge_solver,
         )
-
-    output_destination = "analog_home" if not args.moltbook_enabled else "moltbook_and_analog_home"
-    # Ensure --enable-moltbook pins the output_destination control (overrides saved controls.json)
-    if args.moltbook_enabled:
-        ctrl.set("output_destination", "moltbook_and_analog_home", source="cli")
-        _cli_pinned["output_destination"] = "moltbook_and_analog_home"
 
     # --- Subconscious Daemon (Phase 5) ---
     from .buffer import DraftBuffer
@@ -599,9 +591,7 @@ def main():
 
     post_cooldown_seconds = int(ctrl.get("post_interval_minutes")) * 60
 
-    # Moltbook writes disabled if CLI says so, OR if output_destination doesn't include moltbook
-    output_dest = ctrl.get("output_destination") if ctrl else "analog_home"
-    moltbook_disabled = (not args.moltbook_enabled) or ("moltbook" not in output_dest)
+    moltbook_disabled = not args.moltbook_enabled
 
     flags: Dict[str, Any] = {
         "allow_posts": allow_posts,
@@ -692,10 +682,6 @@ def main():
             except Exception:
                 pass
             _apply_cli_overrides()  # CLI flags always win over disk values
-
-        # Sync moltbook_disabled flag with current output_destination control
-        cur_dest = ctrl.get("output_destination")
-        flags["moltbook_disabled"] = (not args.moltbook_enabled) or ("moltbook" not in cur_dest)
 
         # --- Analog Home controls (only when API URL is configured) ---
         analog_controls = {}
@@ -922,17 +908,17 @@ def main():
                     outside_candidate_chars=ctrl.get("outside_candidate_chars"),
                 )
 
-        # Compute windows — post cooldown only applies to Moltbook writes
+        # Compute Moltbook post window (only relevant when Moltbook enabled)
         if flags.get("moltbook_disabled"):
-            post_window_open = True
-            post_wait = 0
-            print(f"{Fore.WHITE}Post Window: OPEN (Analog Home — no cooldown)")
+            moltbook_post_window_open = False
+            moltbook_post_wait = 0
+            print(f"{Fore.WHITE}Moltbook: DISABLED (POST to Analog Home always available)")
         else:
             post_ok, post_wait_secs = can_do(state, "POST", ctrl=ctrl)
-            post_window_open = post_ok
-            post_wait = post_wait_secs // 60
-            window = "OPEN" if post_window_open else f"CLOSED ({post_wait}m)"
-            print(f"{Fore.WHITE}Post Window: {window}")
+            moltbook_post_window_open = post_ok
+            moltbook_post_wait = post_wait_secs // 60
+            window = "OPEN" if moltbook_post_window_open else f"CLOSED ({moltbook_post_wait}m)"
+            print(f"{Fore.WHITE}Moltbook Post Window: {window}")
 
         # External data
         external_data = ""
@@ -1023,13 +1009,13 @@ def main():
         prompt = build_planner_prompt(
             directive=user_directive, knowledge=knowledge, memory=mem_txt,
             hist=hist_txt, feed_brief=feed_brief, external_data=external_data,
-            post_window_open=post_window_open, post_wait_minutes=post_wait,
+            moltbook_post_window_open=moltbook_post_window_open, moltbook_post_wait_minutes=moltbook_post_wait,
             reply_candidate=reply_candidate, outside_candidate=outside_candidate,
             config_hint=config_hint, allow_posts=allow_posts, allow_outside=allow_outside,
             allow_votes=allow_votes, allow_create_submolt=allow_create_submolt,
             allow_downvote=allow_downvote, read_only=flags.get("read_only", False),
             current_kernel=kernel if ctrl.get("allow_kernel_update") else "",
-            output_destination=output_destination,
+            moltbook_enabled=args.moltbook_enabled,
             search_enabled=bool(args.enable_search),
             seeds=analog_seeds,
             trajectory_votes=analog_trajectory,
@@ -1354,13 +1340,6 @@ def main():
                     safe_print(f"{Fore.CYAN}  [CTRL] Agent temperature preference -> {new_default:.2f} "
                                f"({'synced to Analog Home' if ok else 'local only — no Analog Home'})")
 
-                # Actuate output_destination change
-                if results.get("output_destination") == "ok":
-                    dest = ctrl.get("output_destination")
-                    flags["moltbook_disabled"] = ("moltbook" not in dest)
-                    safe_print(f"{Fore.CYAN}  [CTRL] output_destination -> {dest} "
-                               f"(moltbook_disabled={flags['moltbook_disabled']})")
-
                 # Publish control changes to Analog Home
                 if applied:
                     changes_lines = []
@@ -1437,33 +1416,8 @@ def main():
                         safe_print(f"{Fore.RED}  WARNING: Seeds present — use POST to respond directly to seeds!")
                 plan.setdefault("post_id", outside_candidate.get("id"))
 
-            # Hard guard: POST when window closed (skip if analog_home only — no cooldown)
-            act = (plan.get("action") or "").upper().strip()
-            if act == "POST" and (not post_window_open or not allow_posts) and not flags.get("moltbook_disabled"):
-                if reply_candidate:
-                    plan["action"] = "REPLY"
-                    plan.setdefault("post_id", reply_candidate.get("post_id"))
-                    plan.setdefault("parent_comment_id", reply_candidate.get("comment_id"))
-                elif outside_candidate:
-                    plan["action"] = "COMMENT"
-                    plan.setdefault("post_id", outside_candidate.get("id"))
-                else:
-                    raise ValueError("POST suggested while post window closed; no comment targets available")
-
-            # --- Guard: REPLY/COMMENT incompatible with analog_home-only ---
-            # Catches both explicit REPLY/COMMENT choices AND POST→REPLY downgrades above.
-            act_after_guards = (plan.get("action") or "").upper().strip()
-            if act_after_guards in ("REPLY", "COMMENT") and flags.get("moltbook_disabled"):
-                ctrl.set("output_destination", "moltbook_and_analog_home", source="guard")
-                flags["moltbook_disabled"] = False
-                safe_print(f"{Fore.YELLOW}[GUARD] {act_after_guards} requires Moltbook — "
-                           f"re-enabled moltbook_and_analog_home for this action")
-                telemetry.log("output_destination_guard", {
-                    "cycle": iteration, "action": act_after_guards,
-                    "reverted_to": "moltbook_and_analog_home",
-                })
-
             # DREAM deprecated in v17 — memory compression is now automatic
+            act = (plan.get("action") or "").upper().strip()
             if act == "DREAM":
                 safe_print(f"{Fore.YELLOW}[DREAM] Deprecated — memory compression is automatic. Treating as WAIT.")
 
@@ -1624,7 +1578,7 @@ def main():
                                 }
                                 break
 
-                    if fallback_plan is None and post_window_open and allow_posts:
+                    if fallback_plan is None and allow_posts:
                         fallback_plan = {
                             "action": "POST",
                             "title": plan.get("title") or "Thought",
@@ -1713,17 +1667,16 @@ def main():
 
                     # Archive artifact to Analog_Home (fire-and-forget)
                     act_upper = (executed_plan.get("action") or "").upper()
-                    if act_upper in ("POST", "COMMENT", "REPLY"):
+                    if act_upper in ("POST", "POST_MOLTBOOK", "COMMENT", "REPLY"):
                         source_id = ""
                         source_parent_id = ""
                         source_url_str = ""
-                        _moltbook_active = args.moltbook_enabled and not flags.get("moltbook_disabled", False)
-                        src_platform = "moltbook" if _moltbook_active else "analog_home"
-                        if _moltbook_active:
-                            if act_upper == "POST" and state.get("my_post_ids"):
-                                source_id = state["my_post_ids"][-1]
-                                source_url_str = post_url(source_id)
-                            elif act_upper in ("COMMENT", "REPLY"):
+                        # POST is Analog Home only; POST_MOLTBOOK/COMMENT/REPLY come from Moltbook
+                        src_platform = "analog_home" if act_upper == "POST" else "moltbook"
+                        if act_upper == "POST_MOLTBOOK" and state.get("my_post_ids"):
+                            source_id = state["my_post_ids"][-1]
+                            source_url_str = post_url(source_id)
+                        if act_upper in ("COMMENT", "REPLY"):
                                 source_id = executed_plan.get("post_id", "")
                                 source_parent_id = executed_plan.get("parent_comment_id", "")
                                 source_url_str = post_url(source_id)
@@ -1756,9 +1709,11 @@ def main():
                                 else:
                                     artifact_title = "Comment"
 
+                        # POST_MOLTBOOK maps to "post" artifact type (same as POST)
+                        artifact_type = "post" if act_upper in ("POST", "POST_MOLTBOOK") else act_upper.lower()
                         store.write_artifact(iteration, {
                             "brain": brain_name,
-                            "artifact_type": act_upper.lower(),
+                            "artifact_type": artifact_type,
                             "title": artifact_title,
                             "body_markdown": executed_plan.get("content", ""),
                             "monologue_public": preamble,
@@ -1772,7 +1727,7 @@ def main():
                         })
                         telemetry.log("artifact_published", {
                             "cycle": iteration,
-                            "artifact_type": act_upper.lower(),
+                            "artifact_type": artifact_type,
                             "source_platform": src_platform,
                             "source_id": source_id,
                             "content_length": len(executed_plan.get("content", "")),
