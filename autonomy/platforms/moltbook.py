@@ -181,6 +181,8 @@ class MoltbookClient(PlatformClient):
                         solution = self.challenge_solver.solve(data)
 
                         if solution and isinstance(solution, dict):
+                            verification_code = solution.get("verification_code")
+                            answer = solution.get("answer")
 
                             if verification_code and answer:
                                 try:
