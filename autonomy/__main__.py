@@ -804,6 +804,8 @@ def main():
         source_errors: Dict[str, str] = {}
         reply_candidate = None
         outside_candidate = None
+        fresh_drafts = []
+        saved_plans = []
 
         if platform is not None:
             try:
