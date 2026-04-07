@@ -287,7 +287,7 @@ def build_default_registry(model_registry, blacklist_str: str = "") -> ControlRe
     }
     # Local models are always available for subconscious
     conscious_choices = [m for m in all_model_ids if m in _CONSCIOUS_TIER]
-    subconscious_choices = [m for m in all_model_ids if m in _SUBCONSCIOUS_TIER or m.startswith("local:")]
+    subconscious_choices = [m for m in all_model_ids if m in _SUBCONSCIOUS_TIER or m.startswith("local:") or m.startswith("ollama:")]
 
     # Output destination choices — always offer moltbook option (writes gated by moltbook_disabled flag)
     output_choices = ["analog_home", "moltbook_and_analog_home"]
