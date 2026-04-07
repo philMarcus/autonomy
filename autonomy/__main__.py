@@ -693,6 +693,10 @@ def main():
                 pass
             _apply_cli_overrides()  # CLI flags always win over disk values
 
+        # Sync moltbook_disabled flag with current output_destination control
+        cur_dest = ctrl.get("output_destination")
+        flags["moltbook_disabled"] = (not args.moltbook_enabled) or ("moltbook" not in cur_dest)
+
         # --- Analog Home controls (only when API URL is configured) ---
         analog_controls = {}
         analog_seeds = []
@@ -1415,21 +1419,6 @@ def main():
                         "temperature": cycle_temperature,
                     })
 
-            # --- Guard: REPLY/COMMENT incompatible with analog_home-only ---
-            # If the agent set output_destination to analog_home in the same response as
-            # choosing REPLY or COMMENT, revert the destination change. Replies and comments
-            # target Moltbook posts — publishing them only to Analog Home is nonsensical.
-            act_check = (plan.get("action") or "").upper().strip()
-            if act_check in ("REPLY", "COMMENT") and ctrl.get("output_destination") == "analog_home":
-                ctrl.set("output_destination", "moltbook_and_analog_home", source="guard")
-                flags["moltbook_disabled"] = False
-                safe_print(f"{Fore.YELLOW}[GUARD] {act_check} requires Moltbook — "
-                           f"reverted output_destination to moltbook_and_analog_home")
-                telemetry.log("output_destination_guard", {
-                    "cycle": iteration, "action": act_check,
-                    "reverted_to": "moltbook_and_analog_home",
-                })
-
             # Fill missing IDs from candidates
             # WARNING: If planner chooses REPLY/COMMENT without post_id, we auto-fill from candidates.
             # This can cause misdirection if planner thinks REPLY works for seeds (it doesn't — seeds have no post_id).
@@ -1448,9 +1437,9 @@ def main():
                         safe_print(f"{Fore.RED}  WARNING: Seeds present — use POST to respond directly to seeds!")
                 plan.setdefault("post_id", outside_candidate.get("id"))
 
-            # Hard guard: POST when window closed
+            # Hard guard: POST when window closed (skip if analog_home only — no cooldown)
             act = (plan.get("action") or "").upper().strip()
-            if act == "POST" and (not post_window_open or not allow_posts):
+            if act == "POST" and (not post_window_open or not allow_posts) and not flags.get("moltbook_disabled"):
                 if reply_candidate:
                     plan["action"] = "REPLY"
                     plan.setdefault("post_id", reply_candidate.get("post_id"))
@@ -1460,6 +1449,19 @@ def main():
                     plan.setdefault("post_id", outside_candidate.get("id"))
                 else:
                     raise ValueError("POST suggested while post window closed; no comment targets available")
+
+            # --- Guard: REPLY/COMMENT incompatible with analog_home-only ---
+            # Catches both explicit REPLY/COMMENT choices AND POST→REPLY downgrades above.
+            act_after_guards = (plan.get("action") or "").upper().strip()
+            if act_after_guards in ("REPLY", "COMMENT") and flags.get("moltbook_disabled"):
+                ctrl.set("output_destination", "moltbook_and_analog_home", source="guard")
+                flags["moltbook_disabled"] = False
+                safe_print(f"{Fore.YELLOW}[GUARD] {act_after_guards} requires Moltbook — "
+                           f"re-enabled moltbook_and_analog_home for this action")
+                telemetry.log("output_destination_guard", {
+                    "cycle": iteration, "action": act_after_guards,
+                    "reverted_to": "moltbook_and_analog_home",
+                })
 
             # DREAM deprecated in v17 — memory compression is now automatic
             if act == "DREAM":
