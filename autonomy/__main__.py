@@ -482,8 +482,8 @@ def main():
             print(f"{Fore.MAGENTA}    [NO MOLTBOOK KEY] Output -> Analog Home only")
     else:
         print(f"{Fore.CYAN}    moltbook_key:*{key_fingerprint(mb_key)}")
-    if args.post_interval != 30:
-        print(f"{Fore.CYAN}    Post interval: {args.post_interval} min (default 30)")
+    if args.post_interval is not None:
+        print(f"{Fore.CYAN}    Post interval: {args.post_interval} min (CLI override)")
     if args.no_kernel_disk_write:
         print(f"{Fore.CYAN}    Kernel disk write: DISABLED (in-memory only)")
 
@@ -599,13 +599,14 @@ def main():
         })
 
     # Derive permissions
-    allow_posts = (args.mode == "all")
+    _mode = ctrl.get("mode")
+    allow_posts = (_mode in ("all", "post_only"))
     allow_outside = True
     allow_votes = bool(args.allow_votes)
     allow_downvote = bool(args.allow_votes and args.allow_downvote)
     allow_create_submolt = True  # gated by cooldown system now
 
-    post_cooldown_seconds = args.post_interval * 60
+    post_cooldown_seconds = int(ctrl.get("post_interval_minutes")) * 60
 
     # Moltbook writes disabled if CLI says so, OR if output_destination doesn't include moltbook
     output_dest = ctrl.get("output_destination") if ctrl else "analog_home"
@@ -940,7 +941,7 @@ def main():
         hist_txt = history_context(state)
         mem_txt = memory_context(state)
         config_hint = ""
-        if args.priority == "outside_first":
+        if ctrl.get("priority") == "outside_first":
             config_hint = "- Default preference overridden: prefer outside comments when not posting.\n"
 
         # Memory status indicator
