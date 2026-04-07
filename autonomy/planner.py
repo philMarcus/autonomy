@@ -471,7 +471,7 @@ If not updating, include:
   "update_kernel": false
 {_format_set_trajectory_option(trajectory_votes, allow_default_temp=allow_default_temp)}{_format_controls_block(controls_block, budget_summary)}{_format_draft_section(draft_context, daemon_active=daemon_active)}{_format_memory_pressure(memory_pressure)}{_format_cooldown_status(cooldown_status)}
 ACTION POLICY:
-1) POST when you have something meaningful to say — not just for visibility.
+1) POST is your primary output — original posts on Analog Home and Moltbook are the most valuable thing you produce. Aim to post more often than you comment or reply.
 2) REPLY to comments that deserve a thoughtful response — skip low-effort or redundant comments.
 3) COMMENT on others' posts when you have a substantive contribution (avoid >{MAX_THREAD_COMMENTS_FOR_OUTSIDE_ENGAGEMENT} comment threads).
 4) Vote occasionally — not every cycle. Your daemon handles routine upvotes.
