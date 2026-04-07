@@ -468,12 +468,16 @@ def main():
     user_directive = args.directive
 
     available_providers = sorted(registry._backends.keys())
-    print(f"{Fore.CYAN}=== {brain_name}: autonomy v{VERSION} (modular multi-brain loop) ===")
-    print(f"{Fore.CYAN}    env prefix: {prefix} | providers: {', '.join(available_providers)}")
-    print(f"{Fore.CYAN}    conscious model: {conscious_model} | budget: ${ctrl.get('daily_budget_usd'):.2f}/day")
-    if not args.no_subconscious:
-        print(f"{Fore.CYAN}    subconscious model: {ctrl.get('subconscious_model')} | sentry interval: {ctrl.get('sentry_interval_seconds')}s")
-    else:
+    _con_weights = ctrl.get("conscious_model_weights")
+    _sub_weights = ctrl.get("subconscious_model_weights")
+    _strat_weights = ctrl.get("strategist_model_weights")
+    print(f"{Fore.CYAN}=== {brain_name}: autonomy v{VERSION} ===")
+    print(f"{Fore.CYAN}    providers: {', '.join(available_providers)}")
+    print(f"{Fore.CYAN}    conscious cadre: {_con_weights}")
+    print(f"{Fore.CYAN}    sentry cadre:    {_sub_weights}")
+    print(f"{Fore.CYAN}    strategist cadre: {_strat_weights}")
+    print(f"{Fore.CYAN}    budget: ${ctrl.get('daily_budget_usd'):.2f}/day | target wake: {ctrl.get('target_wake_minutes')}min | sentry: {ctrl.get('sentry_interval_seconds')}s")
+    if args.no_subconscious:
         print(f"{Fore.CYAN}    mode: single-loop (--no-subconscious)")
     if not args.moltbook_enabled:
         if platform is not None:

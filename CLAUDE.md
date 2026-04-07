@@ -426,20 +426,48 @@ v16_0/ is the stable foundation. **Do not modify archived versions.** All future
 - Agent sees recent action distribution, budget status, sentry model usage, memory stats
 - Computed from state + daemon at cycle start
 
+### Auto-Calibrated Wake Threshold (v17.1)
+- `target_wake_minutes` control (default 60) replaces raw `wake_threshold`
+- Daemon tracks per-model charge history, computes threshold automatically
+- Feed items barely register (charge 0.05), seeds wake instantly (999), replies worth waking (1.5)
+- Reply scanner (Gear 5): daemon scores comments on our posts, worthy ones add wake charge
+- `max_replies_per_post` (default 3) caps reply storms
+
+### Daemon Provides Candidates (v17.1)
+- Outside comment candidate extracted from daemon's best COMMENT draft (sentry-scored)
+- Reply candidate extracted from daemon's reply scanner (sentry-scored comments)
+- Full post/comment text fetched from Moltbook API for planner context
+- Falls back to old functions when daemon has no drafts
+
+### 503 Retry Chain
+- Sentry: tries different model from sentry pool
+- Strategist: tries different model from strategist pool
+- Conscious: tries each model in conscious pool sequentially; if all fail, WAITs (never degrades to local)
+- Verification: primary → backup conscious → ollama:gemma3:12b
+
+### CLI/Controls Refactor (v17.2)
+- Controls.py is the SINGLE SOURCE OF TRUTH for all defaults
+- CLI flags default to None; only override controls when explicitly passed
+- Startup order: parse args → build registry → build controls → load controls.json → apply CLI overrides → read derived values
+- `build_default_registry()` no longer takes `args` parameter
+- Budget, conscious_model, temperature all read from controls after load
+
 ### Dashboard
 - Spend graph (conscious vs subconscious vs image) with thinking-token multiplier estimates
 - Daemon monitor: model distribution per sentry rubric, recent ticks table, avg score by model
-- Controls manager: weight sliders per model, all pool models shown (0-weight locked by default)
+- Controls manager: weight sliders per model, auto-discovers Ollama models
 - Time range: Past day (default), Past week, All time
 
 ## Key Architecture Decisions
 
+- **Controls are source of truth**: controls.py has defaults, controls.json overrides, CLI overrides both. No competing defaults.
 - **One chat per cycle**: Chat is recreated each iteration (`__main__.py`) to avoid token accumulation
-- **BUDGET is a module-level singleton** in `gemini.py` — tracks TPM across all calls
+- **BUDGET is in-memory only**: DailyBudget resets on restart, reads limit from controls
 - **Challenge solver** (`challenges/math_verification.py`) uses `llm_client.generate()` (one-shot, temp=0.0, max_output_tokens=8192), not chat sessions
 - **Telemetry is separate from Store**: TelemetryLogger writes to JSONL independently
 - **Only API touches Postgres**: The agent publishes via HTTP POST to `/publish`. This keeps DB access through the API.
 - **Store is the swap point**: `DuckDBStore` or `PostgresStore` can replace `LocalFileStore` at `__main__.py` with no changes to agent loop or actions.
+- **Ollama preferred over HuggingFace**: Local models served via Ollama REST API (1-6s) not PyTorch (30-250s)
 
 ## Known Issues / Context
 
