@@ -468,7 +468,9 @@ def main():
     available_providers = sorted(registry._backends.keys())
     print(f"{Fore.CYAN}=== {brain_name}: autonomy v{VERSION} (modular multi-brain loop) ===")
     print(f"{Fore.CYAN}    env prefix: {prefix} | providers: {', '.join(available_providers)}")
-    print(f"{Fore.CYAN}    conscious model: {conscious_model} | budget: ${args.daily_budget:.2f}/day")
+    _effective_budget = float(ctrl.get("daily_budget_usd") if ctrl else args.daily_budget)
+    budget.daily_limit_usd = _effective_budget  # sync budget object with controls
+    print(f"{Fore.CYAN}    conscious model: {conscious_model} | budget: ${_effective_budget:.2f}/day")
     if not args.no_subconscious:
         print(f"{Fore.CYAN}    subconscious model: {args.subconscious_model} | sentry interval: {args.sentry_interval}s")
     else:
@@ -1058,49 +1060,34 @@ def main():
                         retry_model = _pick_weighted_model(
                             ctrl.get("conscious_model_weights"), ctrl.get("conscious_model"),
                         )
-                    if retry_model != conscious_model:
-                        safe_print(f"{Fore.YELLOW}[503] {conscious_model} unavailable, retrying with {retry_model}")
+                    # Try each conscious pool model until one works
+                    _all_con = [p.split("=")[0].strip() for p in (ctrl.get("conscious_model_weights") or "").split(",") if "=" in p]
+                    _tried = {conscious_model}
+                    _success = False
+                    for _candidate in _all_con:
+                        if _candidate in _tried:
+                            continue
+                        _tried.add(_candidate)
+                        safe_print(f"{Fore.YELLOW}[503] {conscious_model} unavailable, trying {_candidate}")
                         try:
                             chat = registry.create_chat(
-                                model_id=retry_model,
+                                model_id=_candidate,
                                 system_instruction=kernel,
                                 temperature=cycle_temperature,
                                 max_output_tokens=16384,
                                 tools=search_tools if args.enable_search else None,
                             )
                             plan = plan_next_action(chat, prompt, telemetry=telemetry, brain_name=brain_name, budget=budget)
-                        except Exception as _retry_err:
-                            if "503" in str(_retry_err) or "UNAVAILABLE" in str(_retry_err):
-                                # Both Gemini models down — try Ollama if available
-                                if registry.has_model("ollama:gemma3:12b"):
-                                    safe_print(f"{Fore.YELLOW}[503] Gemini down, falling back to ollama:gemma3:12b")
-                                    chat = registry.create_chat(
-                                        model_id="ollama:gemma3:12b",
-                                        system_instruction=kernel,
-                                        temperature=cycle_temperature,
-                                        max_output_tokens=16384,
-                                    )
-                                    plan = plan_next_action(chat, prompt, telemetry=telemetry, brain_name=brain_name, budget=budget)
-                                else:
-                                    raise
-                            else:
-                                raise
-                    else:
-                        # Same model picked — try the other explicitly, then Ollama
-                        _all_con = [p.split("=")[0].strip() for p in (ctrl.get("conscious_model_weights") or "").split(",") if "=" in p]
-                        _others = [m for m in _all_con if m != conscious_model]
-                        _fallback = _others[0] if _others else ("ollama:gemma3:12b" if registry.has_model("ollama:gemma3:12b") else "")
-                        if _fallback:
-                            safe_print(f"{Fore.YELLOW}[503] {conscious_model} unavailable, trying {_fallback}")
-                            chat = registry.create_chat(
-                                model_id=_fallback,
-                                system_instruction=kernel,
-                                temperature=cycle_temperature,
-                                max_output_tokens=16384,
-                            )
-                            plan = plan_next_action(chat, prompt, telemetry=telemetry, brain_name=brain_name, budget=budget)
-                        else:
-                            raise
+                            _success = True
+                            break
+                        except Exception as _inner_err:
+                            if "503" in str(_inner_err) or "UNAVAILABLE" in str(_inner_err):
+                                continue  # try next model
+                            raise  # non-503 error, propagate
+                    if not _success:
+                        # All conscious models 503'd — WAIT, don't degrade
+                        safe_print(f"{Fore.RED}[503] All conscious models unavailable. Waiting for next cycle.")
+                        plan = {"action": "WAIT", "summary": "All conscious models returned 503. Waiting."}
                 else:
                     raise
 
