@@ -845,22 +845,70 @@ def main():
         telemetry.log("feed_context", {"text_length": len(feed_brief), "feed_items": len(feed),
                                        "source_errors": source_errors, "brief": feed_brief[:2000]})
 
-        if platform is not None:
+        # Extract candidates from daemon drafts (sentry-scored, pre-filtered)
+        _all_daemon_drafts = (fresh_drafts or []) + (saved_plans or [])
+        _outside_chars = ctrl.get("outside_candidate_chars") or 5000
+        _reply_chars = ctrl.get("reply_candidate_chars") or 5000
+
+        # Best COMMENT draft → outside_candidate
+        _comment_drafts = [d for d in _all_daemon_drafts if d.suggested_action == "COMMENT"]
+        if _comment_drafts and platform:
+            _best_comment = max(_comment_drafts, key=lambda d: d.signal_score)
             try:
-                reply_candidate = find_unanswered_comment_on_my_posts(
-                    platform, state, username, telemetry, ctrl.get("max_item_age_hours"),
-                    my_post_scan_limit=ctrl.get("my_post_scan_limit"),
-                    reply_threads_scanned=ctrl.get("reply_threads_scanned"),
-                    reply_max_comments=ctrl.get("reply_max_comments"),
-                    reply_candidate_chars=ctrl.get("reply_candidate_chars"),
-                )
+                _post_data = platform.get_post(_best_comment.item_id) or {}
+                _post_obj = _post_data.get("post", _post_data)
+                outside_candidate = {
+                    "post_id": _best_comment.item_id,
+                    "title": _post_obj.get("title", ""),
+                    "content": shorten(_post_obj.get("content", ""), _outside_chars),
+                    "author": get_author_name(_post_obj.get("author")),
+                    "signal_score": _best_comment.signal_score,
+                }
             except Exception:
-                source_errors["reply_scan"] = platform.last_error_type or "timeout"
-            outside_candidate = pick_outside_post_for_comment(
-                feed, state, username, ctrl.get("max_item_age_hours"),
-                thread_comments_for_engagement=ctrl.get("thread_comments_for_engagement"),
-                outside_candidate_chars=ctrl.get("outside_candidate_chars"),
-            )
+                pass
+
+        # Best REPLY draft → reply_candidate
+        _reply_drafts = [d for d in _all_daemon_drafts if d.suggested_action == "REPLY" and d.source == "reply"]
+        if _reply_drafts and platform:
+            _best_reply = max(_reply_drafts, key=lambda d: d.signal_score)
+            try:
+                _parts = _best_reply.item_id.split(":", 1)
+                if len(_parts) == 2:
+                    _r_post_id, _r_comment_id = _parts
+                    _comments = platform.get_post_comments(_r_post_id, sort="new") or []
+                    for _c in _comments:
+                        if _c.get("id") == _r_comment_id:
+                            reply_candidate = {
+                                "post_id": _r_post_id,
+                                "comment_id": _r_comment_id,
+                                "comment_author": get_author_name(_c.get("author")),
+                                "comment_content": shorten(_c.get("content", ""), _reply_chars),
+                                "post_title": _c.get("post", {}).get("title") if isinstance(_c.get("post"), dict) else None,
+                                "signal_score": _best_reply.signal_score,
+                            }
+                            break
+            except Exception:
+                pass
+
+        # Fallback to old functions if daemon didn't provide candidates
+        if platform is not None:
+            if not reply_candidate:
+                try:
+                    reply_candidate = find_unanswered_comment_on_my_posts(
+                        platform, state, username, telemetry, ctrl.get("max_item_age_hours"),
+                        my_post_scan_limit=ctrl.get("my_post_scan_limit"),
+                        reply_threads_scanned=ctrl.get("reply_threads_scanned"),
+                        reply_max_comments=ctrl.get("reply_max_comments"),
+                        reply_candidate_chars=ctrl.get("reply_candidate_chars"),
+                    )
+                except Exception:
+                    pass
+            if not outside_candidate:
+                outside_candidate = pick_outside_post_for_comment(
+                    feed, state, username, ctrl.get("max_item_age_hours"),
+                    thread_comments_for_engagement=ctrl.get("thread_comments_for_engagement"),
+                    outside_candidate_chars=ctrl.get("outside_candidate_chars"),
+                )
 
         # Compute windows — post cooldown only applies to Moltbook writes
         if flags.get("moltbook_disabled"):

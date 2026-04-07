@@ -966,7 +966,7 @@ class SubconsciousDaemon:
 
                         draft = Draft(
                             timestamp=time.time(),
-                            item_id=cid,
+                            item_id=f"{post_id}:{cid}",
                             signal_score=score,
                             suggested_action="REPLY",
                             target_summary=f"Reply to @{author_name}: {shorten(content, 80)}",
