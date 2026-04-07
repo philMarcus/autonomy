@@ -77,6 +77,7 @@ class LLMClient(ABC):
         max_output_tokens: int = 900,
         model: str = "",
         tools: Optional[list] = None,
+        **kwargs,
     ) -> ChatSession:
         ...
 
@@ -111,6 +112,7 @@ class ModelBackend(ABC):
         temperature: float = 0.7,
         max_output_tokens: int = 4096,
         tools: Optional[list] = None,
+        **kwargs,
     ) -> ChatSession:
         ...
 
@@ -150,6 +152,7 @@ class CompatAdapter(LLMClient):
         max_output_tokens: int = 900,
         model: str = "",
         tools: Optional[list] = None,
+        **kwargs,
     ) -> ChatSession:
         model_id = model or self._default_model_id
         return self._backend.create_chat(
@@ -158,6 +161,7 @@ class CompatAdapter(LLMClient):
             temperature=temperature,
             max_output_tokens=max_output_tokens,
             tools=tools,
+            **kwargs,
         )
 
     def generate(

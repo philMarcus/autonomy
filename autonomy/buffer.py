@@ -61,6 +61,16 @@ class Draft:
         )
 
 
+@dataclass
+class SeekerState:
+    """Living state of the seeker research agent between conscious cycles."""
+    summary: str = ""                              # rewritten each seeker run
+    search_terms: List[str] = field(default_factory=list)  # evolve each run (rabbit hole)
+    sources: List[dict] = field(default_factory=list)      # accumulated source refs
+    runs_this_cycle: int = 0                       # how many times seeker ran since last reset
+    last_run_tick: int = 0
+
+
 # Maximum age (seconds) before a draft is pruned during decay.
 _DRAFT_MAX_AGE = 1800  # 30 minutes
 
@@ -78,6 +88,7 @@ class DraftBuffer:
         self._wake_threshold: float = wake_threshold
         self._max_drafts: int = max_drafts
         self._wake_event = threading.Event()
+        self._seeker = SeekerState()
 
     # ------------------------------------------------------------------
     # Writer side (daemon thread)
@@ -170,3 +181,43 @@ class DraftBuffer:
     def draft_count(self) -> int:
         with self._lock:
             return len(self._drafts)
+
+    # ------------------------------------------------------------------
+    # Seeker state (living summary + rabbit hole terms)
+    # ------------------------------------------------------------------
+
+    def update_seeker(self, summary: str, new_terms: List[str],
+                      sources: List[dict], tick: int = 0) -> None:
+        """Rewrite the living seeker summary and evolve search terms."""
+        with self._lock:
+            self._seeker.summary = summary
+            self._seeker.search_terms = new_terms
+            self._seeker.sources = sources
+            self._seeker.runs_this_cycle += 1
+            self._seeker.last_run_tick = tick
+
+    def get_seeker_summary(self) -> str:
+        """Return the current seeker summary for strategist/consciousness."""
+        with self._lock:
+            return self._seeker.summary
+
+    def get_seeker_terms(self) -> List[str]:
+        """Return current search terms (may be self-generated from rabbit hole)."""
+        with self._lock:
+            return list(self._seeker.search_terms)
+
+    def get_seeker_state(self) -> SeekerState:
+        """Return a snapshot of the full seeker state."""
+        with self._lock:
+            return SeekerState(
+                summary=self._seeker.summary,
+                search_terms=list(self._seeker.search_terms),
+                sources=list(self._seeker.sources),
+                runs_this_cycle=self._seeker.runs_this_cycle,
+                last_run_tick=self._seeker.last_run_tick,
+            )
+
+    def reset_seeker(self, initial_topics: List[str]) -> None:
+        """Reset seeker state — called when consciousness provides new focus_topics."""
+        with self._lock:
+            self._seeker = SeekerState(search_terms=initial_topics)

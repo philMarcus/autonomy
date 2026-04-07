@@ -230,6 +230,7 @@ class LocalBackend(ModelBackend):
         temperature: float = 0.7,
         max_output_tokens: int = 4096,
         tools: Optional[list] = None,
+        **kwargs,
     ) -> LocalChatSession:
         loaded = self._ensure_loaded(model_id)
         return LocalChatSession(

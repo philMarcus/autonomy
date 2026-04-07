@@ -524,6 +524,7 @@ class SubconsciousDaemon:
                 system_instruction="You are a feed-scanning daemon. Score items concisely.",
                 temperature=temp,
                 max_output_tokens=self._ctrl.get("sentry_max_tokens"),
+                disable_thinking=True,
             )
             chat = self._registry.create_chat(**chat_kwargs)
             text = chat.send_message(prompt)
@@ -663,6 +664,7 @@ class SubconsciousDaemon:
                 system_instruction=sentry_instruction,
                 temperature=temp,
                 max_output_tokens=max(64, 10 * len(items)),
+                disable_thinking=True,
             )
             text = chat.send_message(prompt)
 
@@ -721,6 +723,7 @@ class SubconsciousDaemon:
                             system_instruction=sentry_instruction,
                             temperature=temp,
                             max_output_tokens=max(64, 10 * len(items)),
+                            disable_thinking=True,
                         )
                         text = chat.send_message(prompt)
                         est_in = (len(prompt)) // 4

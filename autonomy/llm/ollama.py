@@ -25,11 +25,13 @@ class OllamaChatSession(ChatSession):
         system_instruction: str = "",
         temperature: float = 0.7,
         max_output_tokens: int = 4096,
+        disable_thinking: bool = False,
     ):
         self.model_name = model_name
         self._base_url = base_url
         self._temperature = temperature
         self._max_output_tokens = max_output_tokens
+        self._disable_thinking = disable_thinking
         self._history: List[Dict[str, str]] = []
         self._last_input_tokens = 0
         self._last_output_tokens = 0
@@ -55,9 +57,8 @@ class OllamaChatSession(ChatSession):
                 "num_predict": self._max_output_tokens,
             },
         }
-        # Disable thinking for reasoning models (deepseek-r1, qwen3.5, etc.)
-        # Thinking mode produces internal reasoning that confuses score parsers
-        if "deepseek-r1" in ollama_model or "qwen3" in ollama_model:
+        # Disable thinking when requested (e.g. sentry scoring — thinking blocks confuse parsers)
+        if self._disable_thinking:
             payload["think"] = False
         if json_mode:
             payload["format"] = "json"
@@ -135,6 +136,8 @@ class OllamaBackend(ModelBackend):
         temperature: float = 0.7,
         max_output_tokens: int = 4096,
         tools: Optional[list] = None,
+        disable_thinking: bool = False,
+        **kwargs,
     ) -> OllamaChatSession:
         return OllamaChatSession(
             base_url=self._base_url,
@@ -142,6 +145,7 @@ class OllamaBackend(ModelBackend):
             system_instruction=system_instruction,
             temperature=temperature,
             max_output_tokens=max_output_tokens,
+            disable_thinking=disable_thinking,
         )
 
     def generate(
