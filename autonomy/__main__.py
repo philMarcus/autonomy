@@ -1435,10 +1435,6 @@ def main():
 
             # Hard guard: POST when window closed
             act = (plan.get("action") or "").upper().strip()
-            # REPLY/COMMENT require Moltbook — override output_destination for this cycle
-            if act in ("REPLY", "COMMENT") and "moltbook" not in (ctrl.get("output_destination") or ""):
-                safe_print(f"{Fore.YELLOW}[AUTO] {act} requires Moltbook — enabling writes for this cycle")
-                flags["moltbook_disabled"] = False
             if act == "POST" and (not post_window_open or not allow_posts):
                 if reply_candidate:
                     plan["action"] = "REPLY"

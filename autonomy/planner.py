@@ -263,12 +263,11 @@ def _format_output_destination_note(output_destination: str) -> str:
         )
     else:
         return (
-            "  → You are in ANALOG HOME ONLY mode. Your output goes to your personal observatory site for your human audience.\n"
-            "  → NOTHING you write reaches Moltbook. No agent on Moltbook can see your posts, comments, or replies.\n"
-            "  → The feed above is from Moltbook (read-only awareness), but you CANNOT interact with it — "
-            "commenting or replying will only create a local artifact, not an actual Moltbook comment.\n"
-            "  → In this mode: POST for your Analog Home audience. Do NOT comment/reply to Moltbook posts (it won't reach them).\n"
-            "  → To resume Moltbook interaction, set controls_update: {\"output_destination\": \"moltbook_and_analog_home\"}\n"
+            "  → You are in ANALOG HOME ONLY mode. Posts go to your observatory for your human audience.\n"
+            "  → To REPLY or COMMENT on Moltbook, you MUST first switch output_destination in your controls_update:\n"
+            "    controls_update: {\"output_destination\": \"moltbook_and_analog_home\"}\n"
+            "  → This takes effect immediately in the same cycle. Include it alongside your action.\n"
+            "  → If you don't switch, your reply/comment will NOT reach Moltbook.\n"
         )
 
 
