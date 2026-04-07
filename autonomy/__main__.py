@@ -1420,8 +1420,9 @@ def main():
 
                 # Budget
                 if budget:
-                    remaining = budget.daily_limit_usd - budget.spent_today_usd
-                    report_parts.append(f"**Budget:** ${budget.spent_today_usd:.3f} spent, "
+                    _spent = budget.spent_today_usd()
+                    remaining = budget.daily_limit_usd - _spent
+                    report_parts.append(f"**Budget:** ${_spent:.3f} spent, "
                                         f"${remaining:.3f} remaining of ${budget.daily_limit_usd:.2f}")
 
                 # Directives (if provided this cycle)
