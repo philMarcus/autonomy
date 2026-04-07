@@ -345,6 +345,17 @@ def main():
         from .llm.local import LocalBackend
         registry.register_backend("local", LocalBackend())
 
+    # Ollama — register if available (manages its own model loading)
+    try:
+        from .llm.ollama import OllamaBackend
+        _ollama = OllamaBackend()
+        if _ollama.is_available():
+            registry.register_backend("ollama", _ollama)
+            _ollama_models = _ollama.available_models()
+            print(f"    Ollama: {len(_ollama_models)} models ({', '.join(m.model_id for m in _ollama_models[:5])})")
+    except Exception:
+        pass  # Ollama not running or not installed
+
     llm_client = registry.as_llm_client(default_model_id=conscious_model)
 
     # --- Control Registry (Phase 4) ---
