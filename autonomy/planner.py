@@ -414,7 +414,8 @@ DIRECTIVE:
 Decide ONE action to take now, consistent with rate limits and configuration. You MAY alter the output destination for this cycle.
 
 CONFIG/CONSTRAINTS:
-{read_only_note}- Moltbook post window: {'OPEN' if post_window_open else f'CLOSED (wait {post_wait_minutes}m)'} — cooldown only applies to Moltbook; Analog Home posts always allowed.
+{read_only_note}- Moltbook post window: {'OPEN' if post_window_open else f'CLOSED (wait {post_wait_minutes}m)'}
+- **IMPORTANT: You can ALWAYS post to Analog Home regardless of Moltbook cooldown. Set output_destination to analog_home to post now.**
 - Posts are {'ALLOWED' if allow_posts else 'DISABLED'} by command line.
 - Outside-comments are {'ALLOWED' if allow_outside else 'DISABLED'} by command line.
 - Voting is {'ALLOWED' if allow_votes else 'DISABLED'} by command line.
