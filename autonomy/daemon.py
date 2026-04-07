@@ -15,6 +15,8 @@ import threading
 import time
 from typing import Any, Dict, List, Optional, Set
 
+from colorama import Fore, Style
+
 from .actions import execute_daemon_action
 from .buffer import Draft, DraftBuffer
 from .controls import ControlRegistry
@@ -264,6 +266,12 @@ class SubconsciousDaemon:
             # Batch score all items in a single LLM call
             scores = self._score_items_batch(items) if items else []
 
+            # Print sentry summary to terminal
+            if scores:
+                _score_strs = [f"{s:.1f}" for s in scores]
+                print(f"{Fore.BLUE}[TICK {self._tick_count}] Sentry: {items_scanned} items → "
+                      f"scores [{', '.join(_score_strs)}] (threshold {signal_threshold}){Style.RESET_ALL}")
+
             for item, score in zip(items, scores):
                 item_id = item.get("id", "")
 
@@ -305,8 +313,15 @@ class SubconsciousDaemon:
 
         # --- Gear 2: Strategist — ONE call with all high-signal items ---
         if high_signal_items:
+            print(f"{Fore.CYAN}  [STRATEGIST] {len(high_signal_items)} high-signal items → calling strategist...{Style.RESET_ALL}")
             seeker_summary = self._buffer.get_seeker_summary()
             drafts = self._strategize_batch(high_signal_items, seeker_summary)
+            if drafts:
+                for d in drafts:
+                    print(f"{Fore.GREEN}  [DRAFT] {d.suggested_action} by {d.model}: "
+                          f"{d.target_summary[:60]}{Style.RESET_ALL}")
+            else:
+                print(f"{Fore.YELLOW}  [STRATEGIST] No drafts produced{Style.RESET_ALL}")
             for draft in drafts:
                 self._buffer.add_draft(draft)
                 self._telemetry.log("strategist_draft", {
@@ -1191,6 +1206,7 @@ class SubconsciousDaemon:
         Produces summaries (not drafts) — fed to strategist and consciousness.
         Search terms evolve each run (rabbit hole behavior).
         """
+        print(f"{Fore.MAGENTA}[SEEKER] Running search sweep (tick {self._tick_count})...{Style.RESET_ALL}")
         # Get current search terms — either from buffer (self-generated) or from directives
         terms = self._buffer.get_seeker_terms()
         if not terms:
@@ -1283,13 +1299,20 @@ class SubconsciousDaemon:
                 "error": str(e)[:500], "phase": "synthesis",
             })
 
+        _sk_state = self._buffer.get_seeker_state()
+        _next_terms = _sk_state.search_terms[:3]
+        print(f"{Fore.MAGENTA}[SEEKER] Searched {len(terms)} terms, found {results_found} results "
+              f"(run {_sk_state.runs_this_cycle} this cycle)")
+        if _next_terms:
+            print(f"{Fore.MAGENTA}  Next terms: {', '.join(_next_terms)}{Style.RESET_ALL}")
+
         self._telemetry.log("seeker_sweep", {
             "brain": self._brain_name,
             "tick": self._tick_count,
             "topics_searched": len(terms),
             "results_found": results_found,
             "model": model_id,
-            "runs_this_cycle": self._buffer.get_seeker_state().runs_this_cycle,
+            "runs_this_cycle": _sk_state.runs_this_cycle,
         })
 
     def _seek_topic(self, topic: str, model_id: str,

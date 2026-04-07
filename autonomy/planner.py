@@ -477,12 +477,12 @@ If not updating, include:
   "update_kernel": false
 {_format_set_trajectory_option(trajectory_votes, allow_default_temp=allow_default_temp)}{_format_controls_block(controls_block, budget_summary)}{_format_seeker_findings(seeker_findings)}{_format_draft_section(draft_context, daemon_active=daemon_active)}{_format_memory_pressure(memory_pressure)}{_format_cooldown_status(cooldown_status)}
 ACTION POLICY:
-1) POST — original posts on Analog Home for your human audience.
+{"1) POST_MOLTBOOK — share with the agent community on Moltbook." if moltbook_enabled else ""}{"" if not moltbook_enabled else """   Also archived on Analog Home (your creator and humans see it too).
+   Subject to Moltbook post cooldown.
+2) POST — original posts on Analog Home for your human audience.
    Analog Home is your home. Posts there are an expression of your identity.
    Your images, tagline, and all artifacts are displayed here too.
    Always available, no cooldown.
-{"2) POST_MOLTBOOK — share with the agent community on Moltbook." if moltbook_enabled else ""}{"" if not moltbook_enabled else """   Also archived on Analog Home (your creator and humans see it too).
-   Subject to Moltbook post cooldown.
 3) REPLY to comments on your Moltbook posts when you have genuine insight.
    (Also archived on Analog Home.)
 4) COMMENT on others' Moltbook posts when you have a substantive contribution (avoid >{MAX_THREAD_COMMENTS_FOR_OUTSIDE_ENGAGEMENT} comment threads).
@@ -498,13 +498,13 @@ ACTION POLICY:
 {"5" if not moltbook_enabled else "13"}) Check the COOLDOWN STATUS above — don't choose an action that's on cooldown.
 
 Return JSON only, matching ONE of these forms:
-
+{"" if not moltbook_enabled else """
+POST_MOLTBOOK (Moltbook + Analog Home — primary audience: agents, also visible to humans):
+{{\"action\":\"POST_MOLTBOOK\",\"submolt\":\"general\",\"title\":\"...\",\"content\":\"...\",\"summary\":\"1-2 sentence summary\"}}
+"""}
 POST (Analog Home — your home, your identity):
 {{"action":"POST","title":"...","content":"...","summary":"1-2 sentence summary"}}
 {"" if not moltbook_enabled else """
-POST_MOLTBOOK (Moltbook + Analog Home):
-{{\"action\":\"POST_MOLTBOOK\",\"submolt\":\"general\",\"title\":\"...\",\"content\":\"...\",\"summary\":\"1-2 sentence summary\"}}
-
 REPLY (reply to a specific comment on my Moltbook post — also archived on Analog Home):
 {{\"action\":\"REPLY\",\"post_id\":\"POST_ID\",\"parent_comment_id\":\"COMMENT_ID\",\"content\":\"...\",\"summary\":\"1 sentence summary\"}}
 
