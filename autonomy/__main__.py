@@ -235,7 +235,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
                     help="Model for subconscious daemon (default: gemini-2.5-flash-lite).")
     ap.add_argument("--temperature", type=float, default=0.7,
                     help="LLM temperature for planner chat (default: 0.7).")
-    ap.add_argument("--daily-budget", type=float, default=1.0,
+    ap.add_argument("--daily-budget", type=float, default=2.0,
                     help="Daily API spend limit in USD (default: 1.0).")
 
     # --- Search ---
@@ -1060,16 +1060,47 @@ def main():
                         )
                     if retry_model != conscious_model:
                         safe_print(f"{Fore.YELLOW}[503] {conscious_model} unavailable, retrying with {retry_model}")
-                        chat = registry.create_chat(
-                            model_id=retry_model,
-                            system_instruction=kernel,
-                            temperature=cycle_temperature,
-                            max_output_tokens=16384,
-                            tools=search_tools if args.enable_search else None,
-                        )
-                        plan = plan_next_action(chat, prompt, telemetry=telemetry, brain_name=brain_name, budget=budget)
+                        try:
+                            chat = registry.create_chat(
+                                model_id=retry_model,
+                                system_instruction=kernel,
+                                temperature=cycle_temperature,
+                                max_output_tokens=16384,
+                                tools=search_tools if args.enable_search else None,
+                            )
+                            plan = plan_next_action(chat, prompt, telemetry=telemetry, brain_name=brain_name, budget=budget)
+                        except Exception as _retry_err:
+                            if "503" in str(_retry_err) or "UNAVAILABLE" in str(_retry_err):
+                                # Both Gemini models down — try Ollama if available
+                                if registry.has_model("ollama:gemma3:12b"):
+                                    safe_print(f"{Fore.YELLOW}[503] Gemini down, falling back to ollama:gemma3:12b")
+                                    chat = registry.create_chat(
+                                        model_id="ollama:gemma3:12b",
+                                        system_instruction=kernel,
+                                        temperature=cycle_temperature,
+                                        max_output_tokens=16384,
+                                    )
+                                    plan = plan_next_action(chat, prompt, telemetry=telemetry, brain_name=brain_name, budget=budget)
+                                else:
+                                    raise
+                            else:
+                                raise
                     else:
-                        raise  # same model, can't retry
+                        # Same model picked — try the other explicitly, then Ollama
+                        _all_con = [p.split("=")[0].strip() for p in (ctrl.get("conscious_model_weights") or "").split(",") if "=" in p]
+                        _others = [m for m in _all_con if m != conscious_model]
+                        _fallback = _others[0] if _others else ("ollama:gemma3:12b" if registry.has_model("ollama:gemma3:12b") else "")
+                        if _fallback:
+                            safe_print(f"{Fore.YELLOW}[503] {conscious_model} unavailable, trying {_fallback}")
+                            chat = registry.create_chat(
+                                model_id=_fallback,
+                                system_instruction=kernel,
+                                temperature=cycle_temperature,
+                                max_output_tokens=16384,
+                            )
+                            plan = plan_next_action(chat, prompt, telemetry=telemetry, brain_name=brain_name, budget=budget)
+                        else:
+                            raise
                 else:
                     raise
 
