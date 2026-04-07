@@ -160,4 +160,20 @@ CRITICAL: Follow the format instructions EXACTLY. If it asks for a number with 2
                         return {"verification_code": verification_code, "answer": answer}
                 except Exception:
                     pass
+            # 2nd backup: ollama:gemma3:12b (free, local)
+            if is_503 and hasattr(self, 'backup_llm_2') and self.backup_llm_2:
+                try:
+                    print(f"{Fore.YELLOW}[VERIFICATION] Retrying with local Ollama model{Style.RESET_ALL}")
+                    raw_response = self.backup_llm_2.generate(prompt, temperature=0.0, max_output_tokens=1024).strip()
+                    lines = [l.strip() for l in raw_response.splitlines() if l.strip()]
+                    answer = lines[-1] if lines else ""
+                    answer = answer.strip('"\'` \n\r\t')
+                    for prefix in ("ANSWER:", "Answer:", "answer:", "STEP 4", "Step 4"):
+                        if answer.startswith(prefix):
+                            answer = answer[len(prefix):].strip().strip(":").strip()
+                    if answer:
+                        print(f"{Fore.GREEN}[VERIFICATION] Ollama answer: {answer}{Style.RESET_ALL}")
+                        return {"verification_code": verification_code, "answer": answer}
+                except Exception:
+                    pass
             return None
