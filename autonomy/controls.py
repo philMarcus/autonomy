@@ -302,7 +302,7 @@ def build_default_registry(model_registry, blacklist_str: str = "") -> ControlRe
         Control("seeker_model", "str", "gemini-2.5-flash-lite",
                 "Model for seeker gear (needs Gemini for search grounding)", "llm",
                 choices=[m for m in all_model_ids if m.startswith("gemini")]),
-        Control("conscious_model_weights", "weights", "gemini-2.5-pro=1,gemini-3.1-pro-preview=1",
+        Control("conscious_model_weights", "weights", "gemini-2.5-pro=1",
                 "Weighted model pool for conscious (pro-tier only)", "llm",
                 choices=conscious_choices),
         Control("subconscious_model_weights", "weights",

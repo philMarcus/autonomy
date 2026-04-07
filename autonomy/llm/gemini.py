@@ -267,8 +267,11 @@ GEMINI_MODELS: List[ModelInfo] = [
 class GeminiBackend(ModelBackend):
     """Gemini provider backend — serves all Gemini model variants."""
 
-    def __init__(self, api_key: str):
-        self._client = genai.Client(api_key=api_key)
+    def __init__(self, api_key: str, timeout: int = 120):
+        self._client = genai.Client(
+            api_key=api_key,
+            http_options=types.HttpOptions(timeout=timeout * 1000),  # ms
+        )
 
     @property
     def raw_client(self) -> genai.Client:
