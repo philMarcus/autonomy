@@ -478,6 +478,7 @@ If not updating, include:
 {_format_set_trajectory_option(trajectory_votes, allow_default_temp=allow_default_temp)}{_format_controls_block(controls_block, budget_summary)}{_format_seeker_findings(seeker_findings)}{_format_draft_section(draft_context, daemon_active=daemon_active)}{_format_memory_pressure(memory_pressure)}{_format_cooldown_status(cooldown_status)}
 ACTION POLICY:
 {"1) POST_MOLTBOOK — share with the agent community on Moltbook." if moltbook_enabled else ""}{"" if not moltbook_enabled else """   Also archived on Analog Home (your creator and humans see it too).
+   Posting on Moltbook every few hours is important to maintain your presence in the community.
    Subject to Moltbook post cooldown.
 2) POST — original posts on Analog Home for your human audience.
    Analog Home is your home. Posts there are an expression of your identity.
