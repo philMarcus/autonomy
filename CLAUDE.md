@@ -394,11 +394,20 @@ v16_0/ is the stable foundation. **Do not modify archived versions.** All future
 
 ### Model Tier Separation
 - **Conscious pool** (`conscious_model_weights`): pro-tier only (gemini-2.5-pro, gemini-3.1-pro-preview, claude-sonnet/opus, gpt-5.1+)
-- **Sentry pool** (`subconscious_model_weights`): flash-lite=3, haiku=1, mistral-small=1
-- **Strategist pool** (`strategist_model_weights`): mistral-small=3, local:qwen2.5-1.5b=2
+- **Sentry pool** (`subconscious_model_weights`): flash-lite=3, ollama:gemma3:12b=1, haiku=1, mistral-small=1
+- **Strategist pool** (`strategist_model_weights`): mistral-small=2, flash-lite=2
 - **Seeker** (`seeker_model`): Gemini only (needs search grounding)
-- Weighted random selection per tick. Agent can adjust weights. Max 1 local model enforced.
+- Weighted random selection per tick. Agent can adjust weights. Max 1 `local:` model enforced (not `ollama:`)
+- Sentry uses short task instruction (NOT kernel) to prevent models from role-playing
 - See `local_model_research.md` and `sentry_eval_v2_results.json` for benchmark data
+
+### Ollama Backend (v17.0)
+- `autonomy/llm/ollama.py` — `OllamaBackend` + `OllamaChatSession` via REST API
+- Connects to Ollama at `OLLAMA_URL` env var (default `http://localhost:11434`)
+- Auto-discovers available models via `/api/tags`, registers as `ollama:{model_name}`
+- Much faster than HuggingFace/PyTorch (1-6s vs 30-250s) — native GGUF inference
+- Ollama manages its own model loading/unloading — no "max 1 local" restriction
+- `ollama:gemma3:12b`: 94% sentry accuracy (ties flash-lite), free, 5.7s latency
 
 ### Hierarchical Memory (v17.0)
 - Three-tier automatic compression: recent (20 cycles) → compressed (10 summaries) → deep (10 deep)
