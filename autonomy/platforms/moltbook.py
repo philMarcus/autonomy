@@ -181,8 +181,6 @@ class MoltbookClient(PlatformClient):
                         solution = self.challenge_solver.solve(data)
 
                         if solution and isinstance(solution, dict):
-                            verification_code = solution.get("verification_code")
-                            answer = solution.get("answer")
 
                             if verification_code and answer:
                                 try:
@@ -218,28 +216,24 @@ class MoltbookClient(PlatformClient):
                                         print(f"{Fore.RED}[VERIFICATION] Wrong answer ({answer}): {fail_msg}{Style.RESET_ALL}")
                                     except:
                                         pass
-                                    # Retry with backup models
-                                    for _backup_attr in ("backup_llm", "backup_llm_2"):
-                                        _backup = getattr(self.challenge_solver, _backup_attr, None)
-                                        if not _backup:
+                                    # One retry with backup model (if available)
+                                    for _battr in ("backup_llm", "backup_llm_2"):
+                                        _bllm = getattr(self.challenge_solver, _battr, None)
+                                        if not _bllm:
                                             continue
                                         try:
                                             print(f"{Fore.YELLOW}[VERIFICATION] Retrying with backup model...{Style.RESET_ALL}")
-                                            _retry_solution = self.challenge_solver.__class__(
-                                                llm_client=_backup, telemetry=self.challenge_solver.telemetry
-                                            ).solve(data)
-                                            if _retry_solution and _retry_solution.get("answer"):
-                                                _retry_answer = _retry_solution["answer"]
-                                                _retry_result = self._req(
-                                                    "POST", "/verify",
-                                                    json_body={"verification_code": verification_code, "answer": _retry_answer},
-                                                )
+                                            _bs = self.challenge_solver.__class__(
+                                                llm_client=_bllm, telemetry=self.challenge_solver.telemetry).solve(data)
+                                            if _bs and _bs.get("answer") and _bs["answer"] != answer:
+                                                _retry_result = self._req("POST", "/verify",
+                                                    json_body={"verification_code": verification_code, "answer": _bs["answer"]})
                                                 if _retry_result.get("success"):
-                                                    print(f"{Fore.GREEN}[VERIFICATION] Backup succeeded with {_retry_answer}!{Style.RESET_ALL}")
+                                                    print(f"{Fore.GREEN}[VERIFICATION] Backup answer {_bs['answer']} succeeded!{Style.RESET_ALL}")
                                                     data["verification_status"] = "verified"
                                                     break
                                                 else:
-                                                    print(f"{Fore.RED}[VERIFICATION] Backup also wrong ({_retry_answer}){Style.RESET_ALL}")
+                                                    print(f"{Fore.RED}[VERIFICATION] Backup answer {_bs['answer']} also wrong{Style.RESET_ALL}")
                                         except Exception:
                                             pass
                             else:
