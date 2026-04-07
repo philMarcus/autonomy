@@ -873,10 +873,18 @@ def render_controls_tab(brain_filter: str):
                             "gemini-3-flash-preview", "gemini-3.1-flash-lite-preview",
                             "claude-haiku-4-5", "mistral-small-latest",
                             "gpt-5-nano", "gpt-5-mini",
-                            "local:qwen2.5-1.5b", "local:qwen2.5-7b",
-                            "local:llama-3.2-3b", "local:llama-3.1-8b",
-                            "local:mistral-7b",
                         ]
+                        # Auto-discover Ollama models
+                        try:
+                            import requests as _req
+                            _ollama_url = os.environ.get("OLLAMA_URL", "http://localhost:11434")
+                            _ollama_resp = _req.get(f"{_ollama_url}/api/tags", timeout=2)
+                            if _ollama_resp.ok:
+                                for _om in _ollama_resp.json().get("models", []):
+                                    _ALL_SUBCONSCIOUS.append(f"ollama:{_om['name']}")
+                        except Exception:
+                            # Ollama not reachable — add known models as fallback
+                            _ALL_SUBCONSCIOUS.extend(["ollama:gemma3:12b", "ollama:deepseek-r1:8b"])
                         if "conscious" in key:
                             all_models = _ALL_CONSCIOUS
                         else:
