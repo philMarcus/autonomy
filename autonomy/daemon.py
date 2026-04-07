@@ -24,7 +24,6 @@ from .llm.base import LLMResponse
 from .scoring import (
     build_sentry_prompt, build_simple_batch_prompt,
     parse_rubric_response, parse_simple_batch_response,
-    compute_score, weights_from_controls,
 )
 from .telemetry import TelemetryLogger
 from .utils import shorten, is_item_too_old, norm_key
@@ -527,8 +526,7 @@ class SubconsciousDaemon:
             self._budget.record_usage(model_id, _make_response(text, est_in, est_out, model_id))
 
             rubric = parse_rubric_response(text)
-            weights = weights_from_controls(self._ctrl)
-            score = compute_score(rubric, weights)
+            score = rubric.get("relevance", 0) / 3.0  # normalize 0-3 to 0-1
 
             # Log per-criterion scores for observability
             self._telemetry.log("sentry_rubric", {
