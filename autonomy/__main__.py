@@ -314,10 +314,10 @@ def main():
         "moltbook_disabled": not args.moltbook_enabled,
         "model": conscious_model,
         "subconscious_model": args.subconscious_model or "gemini-2.5-flash-lite",
-        "temperature": float(ctrl.get("temperature") if ctrl else 0.7),
+        "temperature": args.temperature or 0.7,
         "search_enabled": bool(args.enable_search),
         "allow_kernel_update": bool(args.allow_kernel_update),
-        "daily_budget_usd": args.daily_budget,
+        "daily_budget_usd": args.daily_budget or 2.0,
         "no_subconscious": args.no_subconscious,
     })
 
