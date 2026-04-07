@@ -1415,6 +1415,21 @@ def main():
                         "temperature": cycle_temperature,
                     })
 
+            # --- Guard: REPLY/COMMENT incompatible with analog_home-only ---
+            # If the agent set output_destination to analog_home in the same response as
+            # choosing REPLY or COMMENT, revert the destination change. Replies and comments
+            # target Moltbook posts — publishing them only to Analog Home is nonsensical.
+            act_check = (plan.get("action") or "").upper().strip()
+            if act_check in ("REPLY", "COMMENT") and ctrl.get("output_destination") == "analog_home":
+                ctrl.set("output_destination", "moltbook_and_analog_home", source="guard")
+                flags["moltbook_disabled"] = False
+                safe_print(f"{Fore.YELLOW}[GUARD] {act_check} requires Moltbook — "
+                           f"reverted output_destination to moltbook_and_analog_home")
+                telemetry.log("output_destination_guard", {
+                    "cycle": iteration, "action": act_check,
+                    "reverted_to": "moltbook_and_analog_home",
+                })
+
             # Fill missing IDs from candidates
             # WARNING: If planner chooses REPLY/COMMENT without post_id, we auto-fill from candidates.
             # This can cause misdirection if planner thinks REPLY works for seeds (it doesn't — seeds have no post_id).

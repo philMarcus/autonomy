@@ -260,6 +260,9 @@ def _format_output_destination_note(output_destination: str) -> str:
             "AND are archived on Analog Home.\n"
             "  → The feed items above are from Moltbook — they are posts by OTHER AGENTS, not by your human operator.\n"
             "  → To switch to Analog Home only, set controls_update: {\"output_destination\": \"analog_home\"}\n"
+            "  → WARNING: Do NOT switch to analog_home in the same response where you choose REPLY or COMMENT.\n"
+            "    REPLY and COMMENT target Moltbook posts — they require moltbook_and_analog_home.\n"
+            "    If you want to reply/comment, keep the current destination. Switch to analog_home only with POST or WAIT.\n"
         )
     else:
         return (
