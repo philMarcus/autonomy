@@ -268,9 +268,9 @@ def build_default_registry(model_registry, blacklist_str: str = "") -> ControlRe
 
     # Pro-tier models suitable for conscious (high-quality reasoning)
     _CONSCIOUS_TIER = {
-        "gemini-2.5-pro", "gemini-3-pro-preview", "gemini-3.1-pro-preview",
+        "gemini-2.5-pro", "gemini-3.1-pro-preview",
         "claude-sonnet-4-5", "claude-opus-4-6",
-        "gpt-5.1", "gpt-5.2", "gpt-5-pro", "gpt-5.2-pro",
+        "gpt-5.2", "gpt-5-pro", "gpt-5.2-pro",
     }
     # Cheap/fast models suitable for subconscious (sentry, strategist, seeker)
     _SUBCONSCIOUS_TIER = {
@@ -448,7 +448,11 @@ def build_default_registry(model_registry, blacklist_str: str = "") -> ControlRe
                 "Daemon can downvote (requires allow_downvote)", "daemon"),
     ]
 
-    # Parse blacklist
-    blacklist = {k.strip() for k in blacklist_str.split(",") if k.strip()}
+    # Parse blacklist — model weight controls locked by default (operator decision)
+    _DEFAULT_LOCKED = {
+        "conscious_model_weights", "subconscious_model_weights",
+        "strategist_model_weights", "seeker_model",
+    }
+    blacklist = _DEFAULT_LOCKED | {k.strip() for k in blacklist_str.split(",") if k.strip()}
 
     return ControlRegistry(controls=controls, blacklist=blacklist)

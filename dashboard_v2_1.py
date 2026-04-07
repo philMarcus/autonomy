@@ -864,9 +864,9 @@ def render_controls_tab(brain_filter: str):
 
                         # Full pool of available models for this weight control
                         _ALL_CONSCIOUS = [
-                            "gemini-2.5-pro", "gemini-3-pro-preview", "gemini-3.1-pro-preview",
+                            "gemini-2.5-pro", "gemini-3.1-pro-preview",
                             "claude-sonnet-4-5", "claude-opus-4-6",
-                            "gpt-5.1", "gpt-5.2", "gpt-5-pro",
+                            "gpt-5.2", "gpt-5-pro", "gpt-5.2-pro",
                         ]
                         _ALL_SUBCONSCIOUS = [
                             "gemini-2.5-flash-lite", "gemini-2.5-flash",
@@ -1236,8 +1236,9 @@ CONTROLS_META = [
     ("wake_refractory",          "float", -2.0,   "Wake potential reset after firing (negative = cooldown)", "wake", -10.0, 0.0, None),
     ("signal_threshold",         "float", 0.5,    "Sentry score cutoff to trigger strategist",      "wake",     0.0,  1.0,   None),
     ("charge_weight_feed",       "float", 0.3,    "Charge per qualifying feed item",                "wake",     0.0,  5.0,   None),
-    ("charge_weight_seed",       "float", 2.0,    "Charge per human seed",                          "wake",     0.0,  5.0,   None),
-    ("charge_weight_search",     "float", 1.5,    "Charge per seeker result",                       "wake",     0.0,  5.0,   None),
+    ("charge_weight_seed",       "float", 999.0,  "Charge for human seeds (999 = instant wake)",    "wake",     0.0,  1000.0, None),
+    ("charge_weight_reply",      "float", 1.5,    "Charge for reply-worthy comments",               "wake",     0.0,  10.0,  None),
+    ("charge_weight_search",     "float", 0.2,    "Charge per seeker result",                       "wake",     0.0,  5.0,   None),
     # --- Output ---
     ("mode",                     "str",   "all",  "Action mode",                                    "output",   None, None,  ["all", "comment_only", "no_post", "no_comment", "post_only"]),
     ("priority",                 "str",   "replies_first", "Reply priority",                        "output",   None, None,  ["replies_first", "outside_first"]),

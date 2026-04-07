@@ -284,6 +284,8 @@ class SubconsciousDaemon:
                             "action": draft.suggested_action,
                             "charge": round(draft.charge, 3),
                             "draft_length": len(draft.draft_content),
+                            "model": draft.model,
+                            "source": draft.source,
                         })
 
         # Record charge produced this tick for auto-calibration
@@ -329,6 +331,7 @@ class SubconsciousDaemon:
                         "action": draft.suggested_action,
                         "charge": round(draft.charge, 3),
                         "draft_length": len(draft.draft_content),
+                        "model": draft.model,
                         "source": "seed",
                     })
 
@@ -1058,6 +1061,7 @@ class SubconsciousDaemon:
                         "action": draft.suggested_action,
                         "charge": round(draft.charge, 3),
                         "draft_length": len(draft.draft_content),
+                        "model": draft.model,
                         "source": "search",
                     })
 

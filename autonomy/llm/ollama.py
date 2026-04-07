@@ -55,6 +55,10 @@ class OllamaChatSession(ChatSession):
                 "num_predict": self._max_output_tokens,
             },
         }
+        # Disable thinking for reasoning models (deepseek-r1, qwen3.5, etc.)
+        # Thinking mode produces internal reasoning that confuses score parsers
+        if "deepseek-r1" in ollama_model or "qwen3" in ollama_model:
+            payload["think"] = False
         if json_mode:
             payload["format"] = "json"
 
