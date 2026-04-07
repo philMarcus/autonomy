@@ -1384,8 +1384,9 @@ def main():
                 note = daemon_directives.get("note", "")
                 urgency = daemon_directives.get("urgency_boost", 1.0)
 
-            # --- Publish cycle report to Analog Home ---
+            # --- Publish cycle report to Analog Home (non-fatal) ---
             if daemon:
+              try:
                 from collections import Counter
                 report_parts = []
 
@@ -1442,6 +1443,8 @@ def main():
                     "body_markdown": "\n".join(report_parts),
                     "temperature": cycle_temperature,
                 })
+              except Exception as _report_err:
+                safe_print(f"{Fore.RED}[CYCLE REPORT] Failed: {_report_err}{Style.RESET_ALL}")
 
             # Fill missing IDs from candidates
             # WARNING: If planner chooses REPLY/COMMENT without post_id, we auto-fill from candidates.
