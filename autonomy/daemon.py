@@ -776,12 +776,14 @@ class SubconsciousDaemon:
             f"Directive: {self._directive}\n"
             f"{directive_section}\n\n"
             f"High-signal feed item (relevance score: {score:.2f}):\n{item_text}\n\n"
-            f"Suggest an action. CRITICAL INSTRUCTIONS:\n"
+            f"Suggest an action. Prefer POST when the item inspires an original thought.\n"
+            f"Use COMMENT only when you'd add direct value to the conversation.\n"
+            f"CRITICAL INSTRUCTIONS:\n"
             f"- Return ONLY valid JSON (no preamble, no markdown, no explanation)\n"
             f"- Must be complete and well-formed (all fields, all quotes, all braces closed)\n"
             f"- Be BRIEF: reasoning under 50 words, draft_content under 200 words\n"
             f"- Required JSON structure:\n"
-            f'{{"action": "COMMENT or REPLY or POST or UPVOTE", '
+            f'{{"action": "POST or COMMENT or REPLY or UPVOTE", '
             f'"reasoning": "brief reason", '
             f'"draft_content": "concise suggested text"}}'
         )
