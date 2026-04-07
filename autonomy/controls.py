@@ -128,12 +128,11 @@ class ControlRegistry:
                     return None
                 return v
             elif defn.dtype == "weights":
-                # Validate weighted model pool: strip invalid models, max 1 local
+                # Validate weighted model pool: strip models not in choices
                 v = str(value).strip()
                 if not v:
                     return v
                 valid_pairs = []
-                local_seen = False
                 for pair in v.split(","):
                     pair = pair.strip()
                     if "=" not in pair:
@@ -142,11 +141,6 @@ class ControlRegistry:
                     model = model.strip()
                     if defn.choices and model not in defn.choices:
                         continue
-                    # Only allow one local model (can't swap GPU models per tick)
-                    if model.startswith("local:"):
-                        if local_seen:
-                            continue  # skip additional local models
-                        local_seen = True
                     valid_pairs.append(f"{model}={w.strip()}")
                 return ",".join(valid_pairs) if valid_pairs else None
         except (ValueError, TypeError):
@@ -287,7 +281,7 @@ def build_default_registry(model_registry, blacklist_str: str = "") -> ControlRe
     }
     # Local models are always available for subconscious
     conscious_choices = [m for m in all_model_ids if m in _CONSCIOUS_TIER]
-    subconscious_choices = [m for m in all_model_ids if m in _SUBCONSCIOUS_TIER or m.startswith("local:") or m.startswith("ollama:")]
+    subconscious_choices = [m for m in all_model_ids if m in _SUBCONSCIOUS_TIER or m.startswith("ollama:")]
 
     # Output destination choices — always offer moltbook option (writes gated by moltbook_disabled flag)
     output_choices = ["analog_home", "moltbook_and_analog_home"]

@@ -346,14 +346,7 @@ def main():
         except ImportError:
             print("    [WARN] mistralai package not installed — skipping Mistral models")
 
-    # HuggingFace local models — optional, Ollama is preferred
-    try:
-        from .llm.local import LocalBackend
-        registry.register_backend("local", LocalBackend())
-    except ImportError:
-        pass  # torch/transformers not installed, use Ollama instead
-
-    # Ollama — register if available (manages its own model loading)
+    # Ollama — primary local model backend (replaces HuggingFace/PyTorch)
     try:
         from .llm.ollama import OllamaBackend
         _ollama_url = os.environ.get("OLLAMA_URL", "http://localhost:11434").strip()
