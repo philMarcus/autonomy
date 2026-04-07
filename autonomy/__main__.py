@@ -1305,6 +1305,13 @@ def main():
                     })
                     if ok:
                         state["_last_tagline_cycle"] = iteration
+                        store.write_artifact(iteration, {
+                            "brain": brain_name,
+                            "artifact_type": "system_tagline_update",
+                            "title": "Tagline Updated",
+                            "body_markdown": new_tagline,
+                            "temperature": cycle_temperature,
+                        })
 
             # --- Handle controls_update from planner ---
             control_updates = plan.pop("controls_update", None)
