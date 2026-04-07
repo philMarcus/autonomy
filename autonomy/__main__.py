@@ -457,7 +457,7 @@ def main():
     from .daemon import SubconsciousDaemon
 
     draft_buffer = DraftBuffer(
-        wake_threshold=ctrl.get("wake_threshold"),
+        wake_threshold=5.0,  # initial value — daemon auto-calibrates from target_wake_minutes
         max_drafts=ctrl.get("max_drafts"),
     )
     daemon = None
@@ -982,7 +982,7 @@ def main():
                 safe_print(f"{Fore.MAGENTA}[SAVED] {len(saved_plans)} plan(s) from previous cycles")
             if fresh_drafts or saved_plans:
                 draft_context = _format_draft_context(
-                    fresh_drafts, saved_plans, wake_pot, ctrl.get("wake_threshold"),
+                    fresh_drafts, saved_plans, wake_pot, draft_buffer._wake_threshold,
                 )
 
         # Platform write status for planner awareness
@@ -1775,7 +1775,7 @@ def main():
         sleep_minutes = ctrl.get("cycle_interval_minutes")
         if daemon:
             # Update buffer thresholds from controls (conscious may have changed them)
-            draft_buffer.update_threshold(ctrl.get("wake_threshold"))
+            # Threshold is auto-calibrated by daemon — no manual update needed
             draft_buffer.update_max_drafts(ctrl.get("max_drafts"))
             # Wait for daemon to signal wake, or timeout at cycle interval
             print(f"{Fore.WHITE}Waiting for daemon wake or {sleep_minutes} min timeout...")

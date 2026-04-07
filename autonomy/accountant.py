@@ -65,19 +65,15 @@ def estimate_daily_cost(ctrl) -> Dict[str, float]:
     sentry_calls = (24 * 3600) / sentry_interval
     feed_batch = max(1, int(ctrl.get("feed_batch_size") or 8))
     signal_thresh = float(ctrl.get("signal_threshold") or 0.5)
-    wake_thresh = float(ctrl.get("wake_threshold") or 3.0)
-    charge_wt = float(ctrl.get("charge_weight_feed") or 0.3)
+    target_wake = float(ctrl.get("target_wake_minutes") or 60)
+    charge_wt = float(ctrl.get("charge_weight_feed") or 0.05)
 
     # Estimate what fraction of feed items pass signal_threshold
     pass_rate = max(0.05, 1.0 - signal_thresh)  # rough: higher threshold = fewer pass
     strategist_calls = sentry_calls * pass_rate
 
-    # Estimate daemon-triggered wakes: each sentry tick adds charge_wt * pass_rate * feed_batch
-    charge_per_tick = charge_wt * pass_rate * feed_batch
-    ticks_to_wake = wake_thresh / max(0.01, charge_per_tick)
-    seconds_to_wake = ticks_to_wake * sentry_interval
-    # Conscious fires at min(cycle_interval, daemon wake interval)
-    effective_interval_min = min(cycle_interval, seconds_to_wake / 60)
+    # With auto-calibrated threshold, effective interval ≈ target_wake_minutes
+    effective_interval_min = min(cycle_interval, target_wake)
     conscious_calls = (24 * 60) / max(1, effective_interval_min)
 
     # Estimated tokens per call
@@ -125,7 +121,7 @@ def build_budget_plan_prompt(
         f"subconscious_model: {ctrl.get('subconscious_model')}",
         f"sentry_interval_seconds: {ctrl.get('sentry_interval_seconds')}",
         f"cycle_interval_minutes: {ctrl.get('cycle_interval_minutes')} (NOTE: this is the MAX sleep — the daemon usually wakes conscious earlier)",
-        f"wake_threshold: {ctrl.get('wake_threshold')} (charge needed for daemon to wake conscious)",
+        f"target_wake_minutes: {ctrl.get('target_wake_minutes')} (auto-calibrated wake interval)",
         f"signal_threshold: {ctrl.get('signal_threshold')} (sentry score cutoff — higher = more selective = fewer strategist calls = less charge)",
         f"charge_weight_feed: {ctrl.get('charge_weight_feed')} (charge per qualifying feed item)",
         f"daily_budget_usd: {ctrl.get('daily_budget_usd')}",
@@ -162,13 +158,13 @@ def build_budget_plan_prompt(
         "",
         "IMPORTANT — How conscious invocations actually work:",
         "The daemon's sentry scans the feed and scores items. High-scoring items trigger the",
-        "strategist, which adds charge to wake_potential. When wake_potential >= wake_threshold,",
+        "strategist, which adds charge to wake_potential. The wake threshold is auto-calibrated",
         "conscious fires — usually BEFORE cycle_interval_minutes elapses. This means the daemon",
         "wake mechanism is the primary driver of conscious cost, not the cycle interval.",
         "",
         "Budget conservation priority (try in this order):",
         "1. Increase sentry_interval_seconds — fewer scans = fewer charge events",
-        "2. Raise wake_threshold — requires more accumulated charge to wake conscious",
+        "2. Raise target_wake_minutes — longer intervals between conscious cycles",
         "3. Raise signal_threshold — sentry becomes more selective, fewer items reach strategist",
         "4. Reduce charge_weight_feed — each qualifying item contributes less wake charge",
         "5. Increase cycle_interval_minutes — only affects the guaranteed max sleep between wakes",
@@ -184,7 +180,7 @@ def build_budget_plan_prompt(
         '  "subconscious_model": "model-id",',
         '  "sentry_interval_seconds": <int>,',
         '  "cycle_interval_minutes": <int>,',
-        '  "wake_threshold": <float>,',
+        '  "target_wake_minutes": <int>,',
         '  "signal_threshold": <float>,',
         '  "charge_weight_feed": <float>,',
         '  "reasoning": "brief explanation of your budget strategy"',
@@ -227,7 +223,7 @@ def apply_budget_plan(plan: Dict[str, Any], ctrl) -> Dict[str, str]:
     updatable = [
         "conscious_model", "subconscious_model",
         "sentry_interval_seconds", "cycle_interval_minutes",
-        "wake_threshold", "signal_threshold", "charge_weight_feed",
+        "target_wake_minutes", "signal_threshold", "charge_weight_feed",
     ]
 
     for key in updatable:
