@@ -966,11 +966,12 @@ def main():
                 if model_counts:
                     model_summary = ", ".join(f"{m}: {c}" for m, c in model_counts.most_common())
                     safe_print(f"{Fore.CYAN}  Draft models: {model_summary}")
-            # Show daemon tick stats (model usage since last wake)
+            # Capture daemon tick stats (model usage since last wake) — save for cycle report
+            _sentry_model_counts = {}
             if hasattr(daemon, '_tick_model_counts'):
-                mc = daemon._tick_model_counts
-                if mc:
-                    tick_summary = ", ".join(f"{m}: {c}" for m, c in sorted(mc.items(), key=lambda x: -x[1]))
+                _sentry_model_counts = dict(daemon._tick_model_counts)
+                if _sentry_model_counts:
+                    tick_summary = ", ".join(f"{m}: {c}" for m, c in sorted(_sentry_model_counts.items(), key=lambda x: -x[1]))
                     safe_print(f"{Fore.CYAN}  Sentry ticks by model: {tick_summary}")
                     daemon._tick_model_counts = {}  # reset for next wake period
             # Drain seeker findings (living summary from research rabbit hole)
@@ -1374,41 +1375,73 @@ def main():
                 telemetry.log("daemon_directives", {
                     "cycle": iteration, "directives": daemon_directives,
                 })
-                safe_print(f"{Fore.CYAN}[DAEMON DIRECTIVES]")
                 focus = daemon_directives.get("focus_topics", [])
                 if focus:
                     safe_print(f"{Fore.GREEN}  Focus: {', '.join(str(t) for t in focus)}")
                     # Reset seeker with new topics — starts fresh rabbit hole
                     draft_buffer.reset_seeker(focus)
                 ignore = daemon_directives.get("ignore_authors", [])
-                if ignore:
-                    safe_print(f"{Fore.YELLOW}  Ignore: {', '.join(str(a) for a in ignore)}")
-                urgency = daemon_directives.get("urgency_boost", 1.0)
-                if urgency != 1.0:
-                    safe_print(f"{Fore.MAGENTA}  Urgency: {urgency:.1f}x")
                 note = daemon_directives.get("note", "")
-                if note:
-                    safe_print(f"{Fore.WHITE}  Note: {note}")
-                safe_print(f"{Fore.CYAN}---")
+                urgency = daemon_directives.get("urgency_boost", 1.0)
 
-                # Publish daemon directives to Analog Home
-                body_parts = []
-                if focus:
-                    body_parts.append("**Focus:** " + ", ".join(str(t) for t in focus))
-                if ignore:
-                    body_parts.append("**Ignore:** " + ", ".join(str(a) for a in ignore))
-                if urgency != 1.0:
-                    body_parts.append(f"**Urgency:** {urgency:.1f}x")
-                if note:
-                    body_parts.append(f"**Note:** {note}")
-                if body_parts:
-                    store.write_artifact(iteration, {
-                        "brain": brain_name,
-                        "artifact_type": "system_daemon_directives",
-                        "title": "Daemon Directives",
-                        "body_markdown": "\n".join(body_parts),
-                        "temperature": cycle_temperature,
-                    })
+            # --- Publish cycle report to Analog Home ---
+            if daemon:
+                from collections import Counter
+                report_parts = []
+
+                # Conscious model
+                _con_model = ctrl.get("conscious_model")
+                report_parts.append(f"**Conscious model:** {_con_model}")
+
+                # Sentry stats
+                if _sentry_model_counts:
+                    sentry_lines = ", ".join(f"{m}: {c}" for m, c in
+                                             sorted(_sentry_model_counts.items(), key=lambda x: -x[1]))
+                    report_parts.append(f"**Sentry calls by model:** {sentry_lines}")
+
+                # Strategist stats
+                if fresh_drafts:
+                    draft_models = Counter(d.model for d in fresh_drafts if d.model)
+                    draft_lines = ", ".join(f"{m}: {c}" for m, c in draft_models.most_common())
+                    report_parts.append(f"**Strategist drafts:** {len(fresh_drafts)} ({draft_lines})")
+                else:
+                    report_parts.append("**Strategist drafts:** 0")
+
+                # Seeker stats
+                _sk = draft_buffer.get_seeker_state()
+                if _sk.runs_this_cycle > 0:
+                    report_parts.append(f"**Seeker runs:** {_sk.runs_this_cycle} | "
+                                        f"terms: {', '.join(_sk.search_terms[:5]) if _sk.search_terms else 'none'}")
+
+                # Wake info
+                if fresh_drafts:
+                    report_parts.append(f"**Wake potential:** {wake_pot:.2f} / {draft_buffer._wake_threshold:.1f}")
+
+                # Budget
+                if budget:
+                    remaining = budget.daily_limit_usd - budget.total_spent_usd
+                    report_parts.append(f"**Budget:** ${budget.total_spent_usd:.3f} spent, "
+                                        f"${remaining:.3f} remaining of ${budget.daily_limit_usd:.2f}")
+
+                # Directives (if provided this cycle)
+                if daemon_directives and isinstance(daemon_directives, dict):
+                    report_parts.append("")  # blank line separator
+                    if focus:
+                        report_parts.append("**Directives — Focus:** " + ", ".join(str(t) for t in focus))
+                    if ignore:
+                        report_parts.append("**Directives — Ignore:** " + ", ".join(str(a) for a in ignore))
+                    if urgency != 1.0:
+                        report_parts.append(f"**Directives — Urgency:** {urgency:.1f}x")
+                    if note:
+                        report_parts.append(f"**Directives — Note:** {note}")
+
+                store.write_artifact(iteration, {
+                    "brain": brain_name,
+                    "artifact_type": "system_cycle_report",
+                    "title": "Cycle Report",
+                    "body_markdown": "\n".join(report_parts),
+                    "temperature": cycle_temperature,
+                })
 
             # Fill missing IDs from candidates
             # WARNING: If planner chooses REPLY/COMMENT without post_id, we auto-fill from candidates.
