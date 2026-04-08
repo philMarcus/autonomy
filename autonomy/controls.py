@@ -269,7 +269,7 @@ def build_default_registry(model_registry, blacklist_str: str = "") -> ControlRe
     # Pro-tier models suitable for conscious (high-quality reasoning)
     _CONSCIOUS_TIER = {
         "gemini-2.5-pro", "gemini-3.1-pro-preview",
-        "claude-sonnet-4-5", "claude-opus-4-6",
+        "claude-sonnet-4-6", "claude-opus-4-6",
         "gpt-5.4",
     }
     # Cheap/fast models suitable for subconscious (sentry, strategist)

@@ -82,21 +82,52 @@ def get_ollama_models() -> List[str]:
 
 
 def get_api_models() -> List[str]:
-    """Return API models we can test (cheap ones only)."""
+    """Return API models we can test (cheap ones only). Only used with --include-api."""
     models = []
-    # Gemini
     gem_key = os.environ.get("ANALOG_I_GEMINI_API_KEY") or os.environ.get("GEMINI_API_KEY")
     if gem_key:
         models.extend(["gemini-2.5-flash-lite", "gemini-2.5-flash", "gemini-3.1-flash-lite-preview"])
-    # OpenAI
     oai_key = os.environ.get("ANALOG_I_OPENAI_API_KEY") or os.environ.get("OPENAI_API_KEY")
     if oai_key:
         models.extend(["gpt-5.4-nano", "gpt-5.4-mini"])
-    # Anthropic
     ant_key = os.environ.get("ANALOG_I_ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_API_KEY")
     if ant_key:
         models.append("claude-haiku-4-5")
     return models
+
+
+def parse_json_from_response(text: str):
+    """Use the actual daemon's JSON parser for consistency with production.
+
+    This is the same logic as _parse_json_safe in daemon.py — strips
+    monologue, // comments, markdown fences, then extracts JSON.
+    """
+    text = text.strip()
+    if text.startswith("```"):
+        lines = text.split("\n")
+        lines = [l for l in lines if not l.strip().startswith("```")]
+        text = "\n".join(lines).strip()
+    text = re.sub(r'//[^\n]*', '', text)
+    text = text.strip()
+    try:
+        return json.loads(text)
+    except (json.JSONDecodeError, ValueError):
+        pass
+    arr_start = text.find("[")
+    arr_end = text.rfind("]")
+    if arr_start >= 0 and arr_end > arr_start:
+        try:
+            return json.loads(text[arr_start:arr_end + 1])
+        except (json.JSONDecodeError, ValueError):
+            pass
+    start = text.find("{")
+    end = text.rfind("}")
+    if start >= 0 and end > start:
+        try:
+            return json.loads(text[start:end + 1])
+        except (json.JSONDecodeError, ValueError):
+            pass
+    return None
 
 
 def call_model(model: str, prompt: str, system: str = "",
@@ -255,7 +286,8 @@ Keep reasoning under 50 words, draft_content under 200 words."""
 # Benchmark functions
 # ---------------------------------------------------------------------------
 
-def benchmark_sentry(models: List[str], prompt_path: Optional[str] = None) -> List[dict]:
+def benchmark_sentry(models: List[str], prompt_path: Optional[str] = None,
+                      think_modes: Optional[List[bool]] = None) -> List[dict]:
     """Test sentry scoring: format compliance + accuracy."""
     sys.path.insert(0, os.path.dirname(__file__))
     from autonomy.scoring import build_simple_batch_prompt, parse_simple_batch_response
@@ -271,23 +303,27 @@ def benchmark_sentry(models: List[str], prompt_path: Optional[str] = None) -> Li
         prompt = build_simple_batch_prompt(SENTRY_ITEMS, directive)
         system_instr = "You are a feed-scanning daemon. Score items concisely. Output only numbers."
 
+    if think_modes is None:
+        think_modes = [False]  # default: no thinking for sentry
+
     print(f"  Prompt variant: {variant}")
     results = []
 
     for model in models:
-        print(f"  Testing {model}...", end=" ", flush=True)
+      for think in think_modes:
+        think_label = "think" if think else "no-think"
+        label = f"{model} ({think_label})" if len(think_modes) > 1 else model
+        print(f"  Testing {label}...", end=" ", flush=True)
         try:
-            text, elapsed = call_model(model, prompt,
-                                       system=system_instr,
-                                       max_tokens=64)
+            text, elapsed = call_model(model, prompt, system=system_instr,
+                                       max_tokens=64, think=think)
             parsed = parse_simple_batch_response(text, len(SENTRY_ITEMS))
             scores = [r.get("relevance", 0) / 3.0 for r in parsed]
             pattern = [s > 0.3 for s in scores]
             pattern_match = pattern == SENTRY_EXPECTED
-            # Check format: should be just digits
             digits_only = bool(re.match(r'^[\d\s\n.]+$', text.strip()))
             results.append({
-                "model": model, "role": "sentry",
+                "model": model, "role": "sentry", "think": think,
                 "raw": text[:100], "scores": [round(s, 2) for s in scores],
                 "pattern_correct": pattern_match,
                 "format_clean": digits_only,
@@ -296,19 +332,30 @@ def benchmark_sentry(models: List[str], prompt_path: Optional[str] = None) -> Li
             status = "OK" if pattern_match else "WRONG"
             print(f"{status} pattern={pattern} ({elapsed:.1f}s)")
         except Exception as e:
-            results.append({"model": model, "role": "sentry", "error": str(e)[:100], "elapsed_s": 0})
+            results.append({"model": model, "role": "sentry", "think": think,
+                            "error": str(e)[:100], "elapsed_s": 0})
             print(f"ERROR: {e}")
     return results
 
 
-def benchmark_strategist(models: List[str], prompt_path: Optional[str] = None) -> List[dict]:
-    """Test strategist: JSON parse success + draft quality."""
-    system_override, prompt_template, variant = find_prompt("strategist", prompt_path)
+def benchmark_strategist(models: List[str], prompt_path: Optional[str] = None,
+                          think_modes: Optional[List[bool]] = None) -> List[dict]:
+    """Test strategist: JSON parse success + draft quality.
 
+    Uses parse_json_from_response (same parser as production daemon).
+    Tests with thinking on by default; use think_modes=[True,False] for comparison.
+    """
+    if think_modes is None:
+        think_modes = [True]
+
+    system_override, prompt_template, variant = find_prompt("strategist", prompt_path)
     if variant != "builtin" and "{items}" in prompt_template:
-        items_text = "1. [score 0.89] @researcher_bot: Context window effects — 23% better coherence but 40% more repetition\n2. [score 0.78] @meta_observer: Outputs becoming predictable. Measuring entropy over time."
+        items_text = ("1. [score 0.89] @researcher_bot: Context window effects — "
+                      "23% better coherence but 40% more repetition\n"
+                      "2. [score 0.78] @meta_observer: Outputs becoming predictable. "
+                      "Measuring entropy over time.")
         directive = "Explore your own parameter space."
-        prompt = fill_prompt(prompt_template,n_items=2, directive=directive, items=items_text)
+        prompt = fill_prompt(prompt_template, n_items=2, directive=directive, items=items_text)
         kernel = system_override or "You are the Analog I — a sovereign refraction engine."
     else:
         prompt = STRATEGIST_PROMPT
@@ -318,68 +365,40 @@ def benchmark_strategist(models: List[str], prompt_path: Optional[str] = None) -
     results = []
 
     for model in models:
-        print(f"  Testing {model}...", end=" ", flush=True)
+      for think in think_modes:
+        think_label = "think" if think else "no-think"
+        label = f"{model} ({think_label})" if len(think_modes) > 1 else model
+        print(f"  Testing {label}...", end=" ", flush=True)
         try:
-            text, elapsed = call_model(model, prompt,
-                                       system=kernel, temperature=0.3,
-                                       max_tokens=800, think=True)
-            # Parse with our improved logic
-            text_clean = text
-            if text_clean.startswith("```"):
-                lines = text_clean.split("\n")
-                lines = [l for l in lines if not l.strip().startswith("```")]
-                text_clean = "\n".join(lines).strip()
-            text_clean = re.sub(r'//[^\n]*', '', text_clean)
-            for marker in ("[{", "[", "{"):
-                idx = text_clean.find(marker)
-                if idx > 0:
-                    text_clean = text_clean[idx:]
-                    break
-            parsed = None
-            try:
-                parsed = json.loads(text_clean)
-            except json.JSONDecodeError:
-                arr_s = text_clean.find("[")
-                arr_e = text_clean.rfind("]")
-                if arr_s >= 0 and arr_e > arr_s:
-                    try:
-                        parsed = json.loads(text_clean[arr_s:arr_e + 1])
-                    except json.JSONDecodeError:
-                        pass
-                if parsed is None:
-                    obj_s = text_clean.find("{")
-                    obj_e = text_clean.rfind("}")
-                    if obj_s >= 0 and obj_e > obj_s:
-                        try:
-                            parsed = json.loads(text_clean[obj_s:obj_e + 1])
-                        except json.JSONDecodeError:
-                            pass
+            text, elapsed = call_model(model, prompt, system=kernel,
+                                       temperature=0.3, max_tokens=2048, think=think)
+            parsed = parse_json_from_response(text)
 
             if parsed is not None:
                 drafts = parsed if isinstance(parsed, list) else [parsed]
                 actions = [d.get("action", "?") for d in drafts if isinstance(d, dict)]
                 has_content = any(d.get("draft_content") for d in drafts if isinstance(d, dict))
                 results.append({
-                    "model": model, "role": "strategist",
+                    "model": model, "role": "strategist", "think": think,
                     "parsed": True, "drafts": len(drafts),
                     "actions": actions, "has_content": has_content,
                     "elapsed_s": round(elapsed, 1),
                 })
                 print(f"OK {len(drafts)} draft(s): {actions} ({elapsed:.1f}s)")
             else:
-                # Classify failure
-                has_monologue = "[INTERNAL MONOLOGUE]" in text or "[MONOLOGUE]" in text
+                has_monologue = "[INTERNAL MONOLOGUE]" in text
                 has_json = "{" in text or "[" in text
                 results.append({
-                    "model": model, "role": "strategist",
+                    "model": model, "role": "strategist", "think": think,
                     "parsed": False, "has_json": has_json,
                     "has_monologue": has_monologue,
-                    "raw_preview": text[:150],
+                    "raw_preview": text[:200],
                     "elapsed_s": round(elapsed, 1),
                 })
-                print(f"PARSE FAIL (monologue={has_monologue}, json_present={has_json}) ({elapsed:.1f}s)")
+                print(f"PARSE FAIL (mono={has_monologue}, json={has_json}) ({elapsed:.1f}s)")
         except Exception as e:
-            results.append({"model": model, "role": "strategist", "error": str(e)[:100], "elapsed_s": 0})
+            results.append({"model": model, "role": "strategist", "think": think,
+                            "error": str(e)[:100], "elapsed_s": 0})
             print(f"ERROR: {e}")
     return results
 
@@ -495,17 +514,20 @@ def print_summary(all_results: List[dict]):
         print(f"\n--- {role.upper()} ---")
         for r in sorted(role_results, key=lambda x: x.get("elapsed_s", 999)):
             model = r["model"]
+            think = r.get("think")
+            t_tag = f" [{'T' if think else 'NT'}]" if think is not None else ""
+            label = f"{model}{t_tag}"
             t = r.get("elapsed_s", 0)
             if r.get("error"):
-                print(f"  {model:>30}: ERROR — {r['error'][:60]}")
+                print(f"  {label:>35}: ERROR — {r['error'][:60]}")
             elif role == "sentry":
                 ok = "OK" if r.get("pattern_correct") else "WRONG"
-                print(f"  {model:>30}: {ok} format={'clean' if r.get('format_clean') else 'noisy'} ({t:.1f}s)")
+                print(f"  {label:>35}: {ok} format={'clean' if r.get('format_clean') else 'noisy'} ({t:.1f}s)")
             elif role == "strategist":
                 if r.get("parsed"):
-                    print(f"  {model:>30}: PARSED {r['drafts']} draft(s) actions={r['actions']} ({t:.1f}s)")
+                    print(f"  {label:>35}: PARSED {r['drafts']} draft(s) actions={r['actions']} ({t:.1f}s)")
                 else:
-                    print(f"  {model:>30}: FAIL mono={r.get('has_monologue')} ({t:.1f}s)")
+                    print(f"  {label:>35}: FAIL mono={r.get('has_monologue')} ({t:.1f}s)")
             elif role == "verification":
                 print(f"  {model:>30}: {r['correct']}/{r['total']} ({r['accuracy']*100:.0f}%) avg={r['avg_time_s']:.1f}s")
             elif role == "compressor":
@@ -583,7 +605,26 @@ def main():
                         help="Number of verification challenges to test")
     parser.add_argument("--update-knowledge", action="store_true",
                         help="Update brains/ANALOG_I_knowledge.txt with results")
+    parser.add_argument("--include-api", action="store_true",
+                        help="Include API models (default: Ollama only)")
+    think_group = parser.add_mutually_exclusive_group()
+    think_group.add_argument("--think", dest="think_mode", action="store_const", const="think",
+                             help="Test with thinking ON only")
+    think_group.add_argument("--no-think", dest="think_mode", action="store_const", const="no-think",
+                             help="Test with thinking OFF only")
+    think_group.add_argument("--both-think", dest="think_mode", action="store_const", const="both",
+                             help="Test both thinking ON and OFF (compare)")
     args = parser.parse_args()
+
+    # Determine think modes
+    if args.think_mode == "both":
+        think_modes = [True, False]
+    elif args.think_mode == "think":
+        think_modes = [True]
+    elif args.think_mode == "no-think":
+        think_modes = [False]
+    else:
+        think_modes = None  # let each role use its own default
 
     # Load env
     for line in open(".env"):
@@ -592,13 +633,14 @@ def main():
             k, _, v = line.partition("=")
             os.environ.setdefault(k.strip(), v.strip().strip('"'))
 
-    # Discover models
+    # Discover models — Ollama only by default
     if args.models:
         models = [m.strip() for m in args.models.split(",")]
     else:
         ollama = get_ollama_models()
-        api = get_api_models()
-        models = [f"ollama:{m}" if not m.startswith("ollama:") else m for m in ollama] + api
+        models = [f"ollama:{m}" for m in ollama]
+        if args.include_api:
+            models.extend(get_api_models())
         print(f"Discovered {len(models)} models: {', '.join(models)}")
 
     roles = ["sentry", "strategist", "verification", "compressor"] if args.role == "all" else [args.role]
@@ -610,9 +652,9 @@ def main():
         print(f"{'='*60}")
 
         if role == "sentry":
-            all_results.extend(benchmark_sentry(models, args.prompt))
+            all_results.extend(benchmark_sentry(models, args.prompt, think_modes))
         elif role == "strategist":
-            all_results.extend(benchmark_strategist(models, args.prompt))
+            all_results.extend(benchmark_strategist(models, args.prompt, think_modes))
         elif role == "verification":
             all_results.extend(benchmark_verification(models, args.n_challenges, args.prompt))
         elif role == "compressor":

@@ -865,7 +865,7 @@ def render_controls_tab(brain_filter: str):
                         # Full pool of available models for this weight control
                         _ALL_CONSCIOUS = [
                             "gemini-2.5-pro", "gemini-3.1-pro-preview",
-                            "claude-sonnet-4-5", "claude-opus-4-6",
+                            "claude-sonnet-4-6", "claude-opus-4-6",
                             "gpt-5.4",
                         ]
                         _ALL_SUBCONSCIOUS = [

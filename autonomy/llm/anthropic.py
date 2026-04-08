@@ -12,6 +12,7 @@ from .base import ChatSession, LLMResponse, ModelBackend, ModelInfo
 
 # All Anthropic models this backend serves
 ANTHROPIC_MODELS: List[ModelInfo] = [
+    # Pricing per 1M tokens: haiku $1/$5, sonnet $3/$15, opus $5/$25
     ModelInfo(
         model_id="claude-haiku-4-5",
         provider="anthropic",
@@ -21,9 +22,9 @@ ANTHROPIC_MODELS: List[ModelInfo] = [
         max_context_tokens=200_000,
     ),
     ModelInfo(
-        model_id="claude-sonnet-4-5",
+        model_id="claude-sonnet-4-6",
         provider="anthropic",
-        display_name="Claude Sonnet 4.5",
+        display_name="Claude Sonnet 4.6",
         input_cost_per_1k=0.003,
         output_cost_per_1k=0.015,
         max_context_tokens=200_000,
