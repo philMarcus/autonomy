@@ -266,11 +266,11 @@ class SubconsciousDaemon:
             # Batch score all items in a single LLM call
             scores = self._score_items_batch(items) if items else []
 
-            # Print sentry summary to terminal
+            # Print sentry scores to terminal
             if scores:
                 _score_strs = [f"{s:.1f}" for s in scores]
-                print(f"{Fore.BLUE}[TICK {self._tick_count}] Sentry: {items_scanned} items → "
-                      f"scores [{', '.join(_score_strs)}] (threshold {signal_threshold}){Style.RESET_ALL}")
+                print(f"{Fore.BLUE}  Sentry scores: [{', '.join(_score_strs)}] "
+                      f"(threshold {signal_threshold}){Style.RESET_ALL}")
 
             for item, score in zip(items, scores):
                 item_id = item.get("id", "")
@@ -346,6 +346,14 @@ class SubconsciousDaemon:
         _reply_interval = int(self._ctrl.get("reply_scan_interval_ticks") or 2)
         if self._platform and self._tick_count % _reply_interval == 0:
             self._scan_reply_candidates()
+
+        # Tick summary (always prints)
+        _wp = self._buffer.wake_potential
+        _dc = self._buffer.draft_count
+        _parts = [f"scanned={items_scanned}", f"signals={signals_above}", f"drafts={_dc}", f"wake={_wp:.2f}"]
+        if seeds_scanned:
+            _parts.append(f"seeds={seeds_scanned}")
+        print(f"{Fore.BLUE}[TICK {self._tick_count}] {' | '.join(_parts)}{Style.RESET_ALL}")
 
         self._telemetry.log("daemon_tick", {
             "brain": self._brain_name,
@@ -1528,8 +1536,11 @@ def _parse_score(text: str) -> float:
     return 0.0
 
 
-def _parse_json_safe(text: str) -> Optional[dict]:
-    """Try to parse JSON from text, handling markdown fences, junk, and truncation."""
+def _parse_json_safe(text: str):
+    """Try to parse JSON from text, handling markdown fences, junk, and truncation.
+
+    Returns dict, list, or None.
+    """
     text = text.strip()
     # Strip markdown code fences
     if text.startswith("```"):
@@ -1540,6 +1551,14 @@ def _parse_json_safe(text: str) -> Optional[dict]:
         return json.loads(text)
     except (json.JSONDecodeError, ValueError):
         pass
+    # Try to find JSON array in text
+    arr_start = text.find("[")
+    arr_end = text.rfind("]")
+    if arr_start >= 0 and arr_end > arr_start:
+        try:
+            return json.loads(text[arr_start:arr_end + 1])
+        except (json.JSONDecodeError, ValueError):
+            pass
     # Try to find JSON object in text
     start = text.find("{")
     end = text.rfind("}")
