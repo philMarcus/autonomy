@@ -292,7 +292,7 @@ def build_default_registry(model_registry, blacklist_str: str = "") -> ControlRe
                 "Weighted model pool for conscious (pro-tier only)", "llm",
                 choices=conscious_choices),
         Control("subconscious_model_weights", "weights",
-                "ollama:gemma3:12b=3,ollama:qwen3.5:9b=1,ollama:phi4:latest=0.5,gemini-2.5-flash-lite=0.2",
+                "ollama:gemma3:12b=3,ollama:qwen3.5:9b=1,ollama:phi4:latest=0.5",
                 "Weighted model pool for SENTRY scoring", "llm",
                 choices=subconscious_choices),
         Control("strategist_model_weights", "weights",

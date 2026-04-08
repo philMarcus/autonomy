@@ -59,7 +59,7 @@ The daemon runs three "gears" on a background thread:
 
 | Gear | Purpose | Cadence | Models |
 |------|---------|---------|--------|
-| **Sentry** | Batch-scores feed items 0-9 on relevance | Every 300s | gemma3, qwen3.5, phi4, flash-lite |
+| **Sentry** | Batch-scores feed items 0-9 on relevance | Every 300s | gemma3, qwen3.5, phi4 (all local) |
 | **Strategist** | ONE call per tick with all high-signal items + seeker summary → 0+ drafts | On sentry trigger | gemma3, deepseek-r1, llama3.2, qwen2.5 (all local) |
 | **Seeker** | Searches evolving topics via Google Search, builds living summary (rabbit hole) | Every 3 ticks | Gemini only (search grounding) |
 | **Verifier** | Solves obfuscated math challenges for Moltbook anti-spam | On write | gemma3 primary, flash backup |
