@@ -1391,8 +1391,7 @@ def main():
                 report_parts = []
 
                 # Conscious model
-                _con_model = ctrl.get("conscious_model")
-                report_parts.append(f"**Conscious model:** {_con_model}")
+                report_parts.append(f"**Conscious model:** {conscious_model}")
 
                 # Sentry stats
                 if _sentry_model_counts:
