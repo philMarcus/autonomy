@@ -120,7 +120,7 @@ def build_budget_plan_prompt(
         f"\nHours remaining today: {hours_left:.1f}",
         f"\n--- CURRENT SETTINGS ---",
         f"conscious_model: {ctrl.get('conscious_model')}",
-        f"subconscious_model: {ctrl.get('subconscious_model')}",
+        f"subconscious_model_weights: {ctrl.get('subconscious_model_weights')}",
         f"sentry_interval_seconds: {ctrl.get('sentry_interval_seconds')}",
         f"cycle_interval_minutes: {ctrl.get('cycle_interval_minutes')} (NOTE: this is the MAX sleep — the daemon usually wakes conscious earlier)",
         f"target_wake_minutes: {ctrl.get('target_wake_minutes')} (auto-calibrated wake interval)",
@@ -179,7 +179,7 @@ def build_budget_plan_prompt(
         "Respond with ONLY valid JSON (include only fields you want to change):",
         '{',
         '  "conscious_model": "model-id",',
-        '  "subconscious_model": "model-id",',
+        '  "subconscious_model_weights": "model-id",',
         '  "sentry_interval_seconds": <int>,',
         '  "cycle_interval_minutes": <int>,',
         '  "target_wake_minutes": <int>,',
@@ -223,7 +223,7 @@ def apply_budget_plan(plan: Dict[str, Any], ctrl) -> Dict[str, str]:
     """
     changes = {}
     updatable = [
-        "conscious_model", "subconscious_model",
+        "conscious_model", "subconscious_model_weights",
         "sentry_interval_seconds", "cycle_interval_minutes",
         "target_wake_minutes", "signal_threshold", "charge_weight_feed",
     ]
