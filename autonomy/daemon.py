@@ -11,6 +11,7 @@ daemon carries the same personality/identity as the conscious layer.
 
 import json
 import random
+import re
 import threading
 import time
 from typing import Any, Dict, List, Optional, Set
