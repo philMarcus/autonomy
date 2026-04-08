@@ -245,6 +245,9 @@ class SubconsciousDaemon:
         # No decay — wake_potential only changes via charge/refractory
         self._buffer.decay(1.0)
 
+        # ── Tick header ──
+        print(f"{Fore.BLUE}── TICK {self._tick_count} {'─' * 38}{Style.RESET_ALL}")
+
         # --- Gear 4: Seeker goes FIRST (every N ticks) ---
         seeker_n = int(self._ctrl.get("seeker_every_n_ticks") or 3)
         if (self._search_tools
@@ -267,12 +270,6 @@ class SubconsciousDaemon:
             # Batch score all items in a single LLM call
             scores = self._score_items_batch(items) if items else []
 
-            # Print sentry scores to terminal
-            if scores:
-                _score_strs = [f"{s:.1f}" for s in scores]
-                print(f"{Fore.BLUE}  Sentry scores: [{', '.join(_score_strs)}] "
-                      f"(threshold {signal_threshold}){Style.RESET_ALL}")
-
             for item, score in zip(items, scores):
                 item_id = item.get("id", "")
 
@@ -290,6 +287,15 @@ class SubconsciousDaemon:
                     self._reflex(item, score)
                     signals_above += 1
                     high_signal_items.append((item, score))
+
+            # Print sentry summary
+            if scores:
+                _sentry_model = max(self._tick_model_counts, key=self._tick_model_counts.get) if self._tick_model_counts else "?"
+                _score_digits = [str(min(9, int(s * 9))) for s in scores]
+                print(f"{Fore.BLUE}  SENTRY ({_sentry_model}) {items_scanned} items{Style.RESET_ALL}")
+                print(f"{Fore.BLUE}    Scores: [{','.join(_score_digits)}] → {signals_above} signals{Style.RESET_ALL}")
+        else:
+            print(f"{Fore.BLUE}  (no feed){Style.RESET_ALL}")
 
         # Seed scan — scored by sentry but with lower threshold and higher charge
         # Good-faith seeds wake the agent; garbage ("Hello!") does not
@@ -319,23 +325,23 @@ class SubconsciousDaemon:
                     self._buffer._wake_potential += seed_charge
                     if self._buffer._wake_potential >= self._buffer._wake_threshold:
                         self._buffer._wake_event.set()
-                print(f"{Fore.GREEN}  [SEED] score={score:.2f} '{seed_item.get('title', seed_item.get('content', '?'))[:60]}' → "
-                      f"charge +{seed_charge}{Style.RESET_ALL}")
+                _seed_text = seed_item.get('title', seed_item.get('content', '?'))[:50]
+                print(f"{Fore.GREEN}  SEED: \"{_seed_text}\" → score={score:.1f} → charge +{seed_charge}{Style.RESET_ALL}")
             else:
-                print(f"{Fore.YELLOW}  [SEED] score={score:.2f} below threshold — ignored: "
-                      f"'{seed_item.get('title', seed_item.get('content', '?'))[:60]}'{Style.RESET_ALL}")
+                _seed_text = seed_item.get('title', seed_item.get('content', '?'))[:50]
+                print(f"{Fore.YELLOW}  SEED: \"{_seed_text}\" → score={score:.1f} (below {seed_threshold}){Style.RESET_ALL}")
 
         # --- Gear 2: Strategist — ONE call with all high-signal items ---
         if high_signal_items:
-            print(f"{Fore.CYAN}  [STRATEGIST] {len(high_signal_items)} high-signal items → calling strategist...{Style.RESET_ALL}")
             seeker_summary = self._buffer.get_seeker_summary()
             drafts = self._strategize_batch(high_signal_items, seeker_summary)
+            _strat_model = drafts[0].model if drafts else "?"
+            print(f"{Fore.CYAN}  STRATEGIST ({_strat_model}) {len(high_signal_items)} items{Style.RESET_ALL}")
             if drafts:
                 for d in drafts:
-                    print(f"{Fore.GREEN}  [DRAFT] {d.suggested_action} by {d.model}: "
-                          f"{d.target_summary[:60]}{Style.RESET_ALL}")
+                    print(f"{Fore.GREEN}    → {d.suggested_action}: {d.target_summary[:60]}{Style.RESET_ALL}")
             else:
-                print(f"{Fore.YELLOW}  [STRATEGIST] No drafts produced{Style.RESET_ALL}")
+                print(f"{Fore.YELLOW}    (no drafts){Style.RESET_ALL}")
             for draft in drafts:
                 self._buffer.add_draft(draft)
                 self._telemetry.log("strategist_draft", {
@@ -361,13 +367,12 @@ class SubconsciousDaemon:
         if self._platform and self._tick_count % _reply_interval == 0:
             self._scan_reply_candidates()
 
-        # Tick summary (always prints)
+        # ── Tick footer ──
         _wp = self._buffer.wake_potential
         _dc = self._buffer.draft_count
-        _parts = [f"scanned={items_scanned}", f"signals={signals_above}", f"drafts={_dc}", f"wake={_wp:.2f}"]
-        if seeds_scanned:
-            _parts.append(f"seeds={seeds_scanned}")
-        print(f"{Fore.BLUE}[TICK {self._tick_count}] {' | '.join(_parts)}{Style.RESET_ALL}")
+        _thresh = self._buffer._wake_threshold
+        print(f"{Fore.BLUE}  wake={_wp:.2f} | drafts={_dc} | threshold={_thresh:.1f}{Style.RESET_ALL}")
+        print(f"{Fore.BLUE}{'─' * 46}{Style.RESET_ALL}")
 
         self._telemetry.log("daemon_tick", {
             "brain": self._brain_name,
@@ -1228,7 +1233,7 @@ class SubconsciousDaemon:
         Produces summaries (not drafts) — fed to strategist and consciousness.
         Search terms evolve each run (rabbit hole behavior).
         """
-        print(f"{Fore.MAGENTA}[SEEKER] Running search sweep (tick {self._tick_count})...{Style.RESET_ALL}")
+        # Seeker output is inside the tick block (called from _tick)
         # Get current search terms — either from buffer (self-generated) or from directives
         terms = self._buffer.get_seeker_terms()
         if not terms:
@@ -1324,10 +1329,10 @@ class SubconsciousDaemon:
 
         _sk_state = self._buffer.get_seeker_state()
         _next_terms = _sk_state.search_terms[:3]
-        print(f"{Fore.MAGENTA}[SEEKER] Searched {len(terms)} terms, found {results_found} results "
-              f"(run {_sk_state.runs_this_cycle} this cycle)")
+        print(f"{Fore.MAGENTA}  SEEKER ({model_id}){Style.RESET_ALL}")
+        print(f"{Fore.MAGENTA}    Searched {len(terms)} terms → {results_found} results{Style.RESET_ALL}")
         if _next_terms:
-            print(f"{Fore.MAGENTA}  Next terms: {', '.join(_next_terms)}{Style.RESET_ALL}")
+            print(f"{Fore.MAGENTA}    Next: {', '.join(_next_terms)}{Style.RESET_ALL}")
 
         self._telemetry.log("seeker_sweep", {
             "brain": self._brain_name,
