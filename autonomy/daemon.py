@@ -1561,6 +1561,14 @@ def _parse_json_safe(text: str):
         lines = text.split("\n")
         lines = [l for l in lines if not l.strip().startswith("```")]
         text = "\n".join(lines).strip()
+    # Strip // comments (deepseek-r1 adds them to JSON)
+    text = re.sub(r'//[^\n]*', '', text)
+    # Strip monologue/thinking text before JSON (models sometimes role-play before producing JSON)
+    for marker in ('[{', '[', '{'):
+        idx = text.find(marker)
+        if idx > 0 and idx < len(text) - 1:
+            text = text[idx:]
+            break
     try:
         return json.loads(text)
     except (json.JSONDecodeError, ValueError):
