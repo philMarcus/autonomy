@@ -290,30 +290,39 @@ class SubconsciousDaemon:
                     signals_above += 1
                     high_signal_items.append((item, score))
 
-        # Seed scan — seeds BYPASS sentry scoring (human-planted = always high priority)
+        # Seed scan — scored by sentry but with lower threshold and higher charge
+        # Good-faith seeds wake the agent; garbage ("Hello!") does not
         seed_items = self._seed_scan()
         seeds_scanned = len(seed_items)
+        seed_threshold = 0.3  # much lower than feed threshold — just filter obvious garbage
         for seed_item in seed_items:
             seed_id = seed_item.get("id", "")
             seed_item["_source"] = "seed"
-            # Seeds always count as high-signal (score 1.0, no sentry needed)
-            signals_above += 1
-            high_signal_items.append((seed_item, 1.0))
-            # Add instant wake charge for seeds
-            seed_charge = float(self._ctrl.get("charge_weight_seed") or 999.0)
-            self._buffer._wake_potential += seed_charge
-            if self._buffer._wake_potential >= self._buffer._wake_threshold:
-                self._buffer._wake_event.set()
-            print(f"{Fore.GREEN}  [SEED] '{seed_item.get('title', seed_item.get('content', '?'))[:60]}' → "
-                  f"charge +{seed_charge} (instant wake){Style.RESET_ALL}")
+            score = self._score_item(seed_item)
+
             self._telemetry.log("sentry_signal", {
                 "brain": self._brain_name,
                 "tick": self._tick_count,
                 "item_id": seed_id,
-                "score": 1.0,
-                "above_threshold": True,
+                "score": round(score, 3),
+                "above_threshold": score >= seed_threshold,
                 "source": "seed",
             })
+
+            if score >= seed_threshold:
+                signals_above += 1
+                high_signal_items.append((seed_item, score))
+                # Seeds that pass get high charge (configurable, default 999 = instant wake)
+                seed_charge = float(self._ctrl.get("charge_weight_seed") or 999.0)
+                with self._buffer._lock:
+                    self._buffer._wake_potential += seed_charge
+                    if self._buffer._wake_potential >= self._buffer._wake_threshold:
+                        self._buffer._wake_event.set()
+                print(f"{Fore.GREEN}  [SEED] score={score:.2f} '{seed_item.get('title', seed_item.get('content', '?'))[:60]}' → "
+                      f"charge +{seed_charge}{Style.RESET_ALL}")
+            else:
+                print(f"{Fore.YELLOW}  [SEED] score={score:.2f} below threshold — ignored: "
+                      f"'{seed_item.get('title', seed_item.get('content', '?'))[:60]}'{Style.RESET_ALL}")
 
         # --- Gear 2: Strategist — ONE call with all high-signal items ---
         if high_signal_items:
