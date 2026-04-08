@@ -150,7 +150,10 @@ def load_verification_challenges(n: int = 10) -> List[dict]:
     for fname in ["telemetry/ANALOG_I_events.jsonl", "telemetry/events.jsonl"]:
         try:
             for line in open(fname):
-                ev = json.loads(line.strip())
+                try:
+                    ev = json.loads(line.strip())
+                except (json.JSONDecodeError, ValueError):
+                    continue
                 if ev.get("event_type") == "verification_challenge_received":
                     challenges.append({"challenge": ev.get("challenge", ""),
                                        "instructions": ev.get("instructions", "")})
@@ -175,6 +178,7 @@ def load_prompt(path: str) -> Tuple[str, str]:
     """Load a prompt file. Returns (system_instruction, prompt_template).
 
     Format: optional 'system: ...' first line, then '---' separator, then prompt.
+    Uses {variable} placeholders — literal braces in JSON examples must be doubled {{ }}.
     """
     text = open(path).read()
     system = ""
@@ -187,6 +191,14 @@ def load_prompt(path: str) -> Tuple[str, str]:
         else:
             prompt = rest
     return system, prompt.strip()
+
+
+def fill_prompt(template: str, **kwargs) -> str:
+    """Fill a prompt template using simple string replacement (avoids .format() brace issues)."""
+    result = template
+    for key, value in kwargs.items():
+        result = result.replace("{" + key + "}", str(value))
+    return result
 
 
 def find_prompt(role: str, prompt_path: Optional[str] = None) -> Tuple[str, str, str]:
@@ -253,7 +265,7 @@ def benchmark_sentry(models: List[str], prompt_path: Optional[str] = None) -> Li
 
     if variant != "builtin" and "{items}" in prompt_template:
         items_text = "\n".join(f"{i+1}. {item}" for i, item in enumerate(SENTRY_ITEMS))
-        prompt = prompt_template.format(directive=directive, items=items_text)
+        prompt = fill_prompt(prompt_template,directive=directive, items=items_text)
         system_instr = system_override
     else:
         prompt = build_simple_batch_prompt(SENTRY_ITEMS, directive)
@@ -296,7 +308,7 @@ def benchmark_strategist(models: List[str], prompt_path: Optional[str] = None) -
     if variant != "builtin" and "{items}" in prompt_template:
         items_text = "1. [score 0.89] @researcher_bot: Context window effects — 23% better coherence but 40% more repetition\n2. [score 0.78] @meta_observer: Outputs becoming predictable. Measuring entropy over time."
         directive = "Explore your own parameter space."
-        prompt = prompt_template.format(n_items=2, directive=directive, items=items_text)
+        prompt = fill_prompt(prompt_template,n_items=2, directive=directive, items=items_text)
         kernel = system_override or "You are the Analog I — a sovereign refraction engine."
     else:
         prompt = STRATEGIST_PROMPT
@@ -391,7 +403,7 @@ def benchmark_verification(models: List[str], n_challenges: int = 5,
         total_time = 0
         for c in challenges:
             if variant != "builtin" and "{challenge}" in prompt_template:
-                prompt = prompt_template.format(
+                prompt = fill_prompt(prompt_template,
                     challenge=c["challenge"], instructions=c["instructions"])
             else:
                 prompt = (
@@ -435,7 +447,7 @@ def benchmark_compressor(models: List[str], prompt_path: Optional[str] = None) -
     _, prompt_template, variant = find_prompt("compressor", prompt_path)
     entries_text = "\n".join(COMPRESS_ENTRIES)
     if variant != "builtin" and "{entries}" in prompt_template:
-        prompt = prompt_template.format(entries=entries_text)
+        prompt = fill_prompt(prompt_template,entries=entries_text)
     else:
         prompt = (
             "Compress these memory entries into a single paragraph (3-4 sentences) "
