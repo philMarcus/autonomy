@@ -99,6 +99,20 @@ class LocalFileStore(Store):
             log.warning("analog_home read_controls error: %s", e)
             return {}
 
+    def read_audience(self) -> Dict[str, Any]:
+        """Read audience engagement stats from Analog Home API."""
+        if not self._analog_home_url:
+            return {}
+        try:
+            import requests
+            url = urljoin(self._analog_home_url.rstrip("/") + "/", "audience")
+            resp = requests.get(url, timeout=10)
+            if resp.status_code >= 400:
+                return {}
+            return resp.json()
+        except Exception:
+            return {}
+
     def consume_seeds(self, seed_ids: list) -> bool:
         """DELETE seeds by ID after the agent has read them."""
         if not self._analog_home_url or not seed_ids:

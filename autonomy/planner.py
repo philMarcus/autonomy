@@ -182,11 +182,31 @@ def _format_trajectory(trajectory_votes: Optional[Dict[str, Any]]) -> str:
     v1 = trajectory_votes.get("vote_1", 0)
     v2 = trajectory_votes.get("vote_2", 0)
     v3 = trajectory_votes.get("vote_3", 0)
+    # Audience engagement stats (if available)
+    audience_line = ""
+    unique_voters = trajectory_votes.get("unique_voters", 0)
+    unique_seeders = trajectory_votes.get("unique_seeders", 0)
+    last_vote = trajectory_votes.get("last_vote_at")
+    last_seed = trajectory_votes.get("last_seed_at")
+    if unique_voters or unique_seeders:
+        parts = []
+        if unique_voters:
+            parts.append(f"{unique_voters} unique voters")
+        if unique_seeders:
+            parts.append(f"{unique_seeders} seed planters")
+        audience_line = f"Audience engagement: {', '.join(parts)}."
+        if last_vote:
+            audience_line += f" Last vote: {last_vote[:19]}."
+        if last_seed:
+            audience_line += f" Last seed: {last_seed[:19]}."
+        audience_line += "\n"
+
     return (
         f"\nTRAJECTORY VOTES (audience sentiment from Analog Home):\n"
         f'- "{label_1}": {v1} votes\n'
         f'- "{label_2}": {v2} votes\n'
         f'- "{label_3}": {v3} votes\n'
+        f"{audience_line}"
         "These votes reflect what your audience wants to see more of. "
         "Let them influence (but not dictate) your creative direction.\n"
     )
