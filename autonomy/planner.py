@@ -483,8 +483,7 @@ Candidate outside post (if any — commenting on others' posts is lower priority
 {json.dumps(outside_candidate, ensure_ascii=False) if outside_candidate else "None"}
 
 KERNEL UPDATE (Meta-cognitive):
-Current kernel prompt:
-{current_kernel}
+Your current kernel prompt is your system instruction above ({len(current_kernel)} chars). Review it if considering an update.
 
 Should you update your kernel prompt to better achieve the directive?
 - Kernels define your personality, style, and core behavioral rules
