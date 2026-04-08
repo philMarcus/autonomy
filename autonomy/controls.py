@@ -270,7 +270,7 @@ def build_default_registry(model_registry, blacklist_str: str = "") -> ControlRe
     _CONSCIOUS_TIER = {
         "gemini-2.5-pro", "gemini-3.1-pro-preview",
         "claude-sonnet-4-5", "claude-opus-4-6",
-        "gpt-5.4", "gpt-5.4-pro",
+        "gpt-5.4",
     }
     # Cheap/fast models suitable for subconscious (sentry, strategist)
     _SUBCONSCIOUS_TIER = {
@@ -376,7 +376,7 @@ def build_default_registry(model_registry, blacklist_str: str = "") -> ControlRe
                 "Compressed memories before deep compression", "context", min_val=3, max_val=20),
         Control("memory_deep_capacity", "int", 10,
                 "Deep memories before further compression", "context", min_val=3, max_val=20),
-        Control("compressor_model", "str", "gemini-2.5-flash",
+        Control("compressor_model", "str", "ollama:qwen2.5:1.5b",
                 "Model for automatic memory compression", "context"),
         Control("max_drafts", "int", 10,
                 "Max drafts in buffer before pruning oldest", "daemon", min_val=1, max_val=50),

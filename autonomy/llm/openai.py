@@ -16,12 +16,13 @@ _NO_TEMPERATURE = {"gpt-5-nano", "gpt-5-mini"}
 
 OPENAI_MODELS: List[ModelInfo] = [
     # GPT 5.4 family (latest, March 2026)
+    # Pricing per 1K tokens (from per-million: nano $0.20/$1.25, mini $0.75/$4.50, 5.4 $2.50/$15)
     ModelInfo(
         model_id="gpt-5.4-nano",
         provider="openai",
         display_name="GPT-5.4 Nano",
-        input_cost_per_1k=0.00005,
-        output_cost_per_1k=0.0004,
+        input_cost_per_1k=0.0002,
+        output_cost_per_1k=0.00125,
         max_context_tokens=128_000,
         supports_json_mode=True,
     ),
@@ -29,8 +30,8 @@ OPENAI_MODELS: List[ModelInfo] = [
         model_id="gpt-5.4-mini",
         provider="openai",
         display_name="GPT-5.4 Mini",
-        input_cost_per_1k=0.00025,
-        output_cost_per_1k=0.002,
+        input_cost_per_1k=0.00075,
+        output_cost_per_1k=0.0045,
         max_context_tokens=128_000,
         supports_json_mode=True,
     ),
@@ -38,17 +39,8 @@ OPENAI_MODELS: List[ModelInfo] = [
         model_id="gpt-5.4",
         provider="openai",
         display_name="GPT-5.4",
-        input_cost_per_1k=0.00175,
-        output_cost_per_1k=0.014,
-        max_context_tokens=128_000,
-        supports_json_mode=True,
-    ),
-    ModelInfo(
-        model_id="gpt-5.4-pro",
-        provider="openai",
-        display_name="GPT-5.4 Pro",
-        input_cost_per_1k=0.021,
-        output_cost_per_1k=0.168,
+        input_cost_per_1k=0.0025,
+        output_cost_per_1k=0.015,
         max_context_tokens=128_000,
         supports_json_mode=True,
     ),
