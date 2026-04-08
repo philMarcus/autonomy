@@ -448,14 +448,16 @@ def main():
     platform = None
     challenge_solver = None
     if mb_key:
-        # Use conscious model for verification challenges — cheap models (Flash-Lite)
-        # can't reliably parse obfuscated text + do arithmetic.
-        # Challenges are rare (only on Moltbook writes), so cost is negligible.
-        # Use Flash for verification — 5/5 on math benchmarks, cheaper than Pro
-        challenge_llm = registry.as_llm_client(default_model_id="gemini-2.5-flash")
+        # Use verification cadre for challenges — picks from weighted pool
+        from .daemon import _pick_weighted_model
+        _verif_weights = ctrl.get("verification_model_weights") or "gemini-2.5-flash=1"
+        _verif_model = _pick_weighted_model(_verif_weights, "gemini-2.5-flash")
+        challenge_llm = registry.as_llm_client(default_model_id=_verif_model)
         challenge_solver = MathVerificationSolver(llm_client=challenge_llm, telemetry=telemetry)
-        # Backup chain for verification: Pro (if Flash 503s), then Gemma
-        challenge_solver.backup_llm = registry.as_llm_client(default_model_id="gemini-2.5-pro")
+        # Backup: try another model from pool, then Gemma (local, free, 5/5 on simple prompt)
+        _verif_backup = _pick_weighted_model(_verif_weights, "gemini-2.5-pro")
+        if _verif_backup != _verif_model:
+            challenge_solver.backup_llm = registry.as_llm_client(default_model_id=_verif_backup)
         if registry.has_model("ollama:gemma3:12b"):
             challenge_solver.backup_llm_2 = registry.as_llm_client(default_model_id="ollama:gemma3:12b")
         platform = MoltbookClient(

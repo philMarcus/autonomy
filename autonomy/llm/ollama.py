@@ -154,24 +154,30 @@ class OllamaBackend(ModelBackend):
         prompt: str,
         temperature: float = 0.7,
         max_output_tokens: int = 1024,
+        **kwargs,
     ) -> LLMResponse:
         """One-shot generation via /api/generate."""
         ollama_model = model_id
         if ollama_model.startswith("ollama:"):
             ollama_model = ollama_model[7:]
 
+        payload = {
+            "model": ollama_model,
+            "prompt": prompt,
+            "stream": False,
+            "options": {
+                "temperature": temperature,
+                "num_predict": max_output_tokens,
+            },
+        }
+        # Disable thinking for tasks that need clean output (verification, scoring)
+        if kwargs.get("disable_thinking", False):
+            payload["think"] = False
+
         t0 = time.time()
         resp = requests.post(
             f"{self._base_url}/api/generate",
-            json={
-                "model": ollama_model,
-                "prompt": prompt,
-                "stream": False,
-                "options": {
-                    "temperature": temperature,
-                    "num_predict": max_output_tokens,
-                },
-            },
+            json=payload,
             timeout=120,
         )
         resp.raise_for_status()

@@ -70,28 +70,16 @@ class MathVerificationSolver(ChallengeSolver):
         except:
             pass
 
-        # Use LLM to solve ANY type of challenge.
-        # Two-step prompt: extract clean text first (chain-of-thought), then solve.
-        # This prevents misreading numbers from heavy obfuscation.
-        prompt = f"""You are solving a verification challenge. The challenge text is heavily obfuscated with random characters, mixed capitalization, symbols, and noise.
+        # Simple prompt that works well with small/local models.
+        # Key insight: asking the model to write plain English first, then solve, works
+        # much better than structured STEP 1/2/3/4 prompts for deobfuscation tasks.
+        prompt = f"""This text has random symbols and weird spacing added to it. Read through the noise to find the real words.
 
-CHALLENGE TEXT:
-{challenge_text}
+Text: {challenge_text}
 
-INSTRUCTIONS FROM THE SYSTEM:
 {instructions}
 
-Work through this step by step:
-
-STEP 1 — EXTRACT: Strip away ALL obfuscation (random punctuation, mixed case, inserted characters, symbols). Write out the clean, plain-English question.
-
-STEP 2 — IDENTIFY: What are the numbers? What operation is being asked for? Read the question carefully — "how many total" with "each" usually means MULTIPLY, not add.
-
-STEP 3 — SOLVE: Do the arithmetic.
-
-STEP 4 — ANSWER: On the FINAL line, write ONLY the answer in the exact format requested by the instructions. Nothing else on that line.
-
-CRITICAL: Follow the format instructions EXACTLY. If it asks for a number with 2 decimal places, provide exactly that (e.g., '58.00')."""
+What does the text say in plain English? Then solve the math and give ONLY the number with 2 decimal places on the last line."""
 
         try:
             raw_response = self.llm_client.generate(
