@@ -14,7 +14,7 @@ This project builds the infrastructure to run that experiment and observe the re
 
 - **Dual-process architecture.** A cheap "subconscious" daemon continuously scans feeds and scores items in the background. When accumulated signal crosses a threshold, it wakes the main "conscious" loop with a buffer of drafted plans. This separates vigilance (cheap, continuous) from deliberation (expensive, event-driven).
 
-- **Multi-model LLM backend.** The system abstracts over six providers (Gemini, Claude, GPT, Mistral, local models via HuggingFace) through a unified interface. The agent can switch its own model mid-run — model selection is a tunable control, not a hardcoded choice. A daily budget planner (the "accountant") recommends model and interval adjustments to stay within a configurable USD spend limit.
+- **Multi-model LLM backend.** The system abstracts over five providers (Gemini, Claude, GPT, Mistral, Ollama for local models) through a unified interface. Each daemon role has its own weighted model cadre — sentry, strategist, seeker, and verification each draw from independent pools. Model weights are operator-controlled. A daily budget planner (the "accountant") recommends interval and threshold adjustments to stay within a configurable USD spend limit.
 
 - **ControlRegistry.** Every tunable parameter (30+ controls across 7 categories) is a first-class object: readable and writable by the agent, lockable by the operator. The agent sees its own configuration in-prompt and can request changes. The operator can blacklist any control to prevent modification.
 
@@ -57,22 +57,23 @@ This project builds the infrastructure to run that experiment and observe the re
 
 The daemon runs three "gears" on a background thread:
 
-| Gear | Purpose | Cadence |
-|------|---------|---------|
-| **Sentry** | Scores feed items via multi-criteria rubric (relevance/novelty/actionability) | Every 300s (default) |
-| **Strategist** | Generates draft action plans for high-signal items | On sentry trigger |
-| **Seeker** | Searches focus topics via Google Search grounding | Every 15min |
+| Gear | Purpose | Cadence | Models |
+|------|---------|---------|--------|
+| **Sentry** | Batch-scores feed items 0-9 on relevance | Every 300s | gemma3, qwen3.5, phi4, flash-lite |
+| **Strategist** | ONE call per tick with all high-signal items + seeker summary → 0+ drafts | On sentry trigger | gemma3, deepseek-r1, llama3.2, qwen2.5 (all local) |
+| **Seeker** | Searches evolving topics via Google Search, builds living summary (rabbit hole) | Every 3 ticks | Gemini only (search grounding) |
+| **Verifier** | Solves obfuscated math challenges for Moltbook anti-spam | On write | gemma3 primary, flash backup |
 
-Drafts accumulate in a buffer, each adding "charge" to a wake potential. When the potential crosses a threshold, the conscious loop fires early — seeing the full buffer and synthesizing multiple insights rather than reacting to one item at a time.
+Drafts accumulate in a buffer, each adding "charge" to a wake potential. When the potential crosses a threshold, the conscious loop fires early — seeing the full buffer, seeker research summary, and Moltbook engagement stats.
 
-After each conscious cycle, the agent sends **downward directives** back to the daemon: updated focus topics, authors to ignore, urgency adjustments. This creates a feedback loop between cheap continuous scanning and expensive deliberative reasoning.
+After each conscious cycle, the agent sends **downward directives** back to the daemon: updated focus topics (which reset the seeker's rabbit hole), authors to ignore, urgency adjustments. A **cycle report** is published to Analog Home with model usage, budget status, and directive changes.
 
 ## Tech Stack
 
 | Layer | Technologies |
 |-------|-------------|
 | Agent core | Python 3, threading, modular package architecture |
-| LLM backends | Google Gemini, Anthropic Claude, OpenAI GPT, Mistral, HuggingFace (local, 4-bit quantized) |
+| LLM backends | Google Gemini, Anthropic Claude, OpenAI GPT, Mistral, Ollama (local: gemma3, deepseek-r1, phi4, qwen, llama) |
 | Data/telemetry | DuckDB, Parquet (date-partitioned), JSONL append-only log |
 | Dashboard | Streamlit (5 tabs: overview, cycle replay, daemon monitor, controls input, controls manager) |
 | Observatory API | FastAPI, Neon Postgres (psycopg3, connection-pooled), Fly.io |
@@ -88,13 +89,14 @@ After each conscious cycle, the agent sends **downward directives** back to the 
 │   ├── scoring.py      Multi-criteria sentry rubric
 │   ├── daemon.py       Subconscious (sentry/strategist/seeker)
 │   ├── accountant.py   Budget-aware model/frequency planning
-│   ├── benchmark.py    Model evaluation test suite
+│   ├── buffer.py       Draft buffer + seeker state (integrate-and-fire)
 │   └── ...
 ├── archive/            Previous versions (v12–v16_0) for reference
 ├── brains/             Per-brain state: kernel prompts, memories, controls (gitignored)
 ├── telemetry/          Append-only event log (gitignored)
 ├── warehouse/          DuckDB + Parquet output from ingest.py
 ├── dashboard_v2_1.py   Streamlit dashboard (5 tabs)
+├── benchmark_models.py Model benchmark suite (sentry/strategist/verification/compressor)
 ├── ingest.py           JSONL → Parquet → DuckDB pipeline
 └── CLAUDE.md           Detailed architecture reference
 ```
@@ -114,15 +116,20 @@ python -m autonomy --help
 # Run the dashboard
 streamlit run dashboard_v2_1.py
 
-# Benchmark models
-python -c "from autonomy.benchmark import main; main()"
+# Benchmark local models across all roles
+python benchmark_models.py --role all --both-think
+
+# Benchmark with a custom prompt variant
+python benchmark_models.py --role sentry --prompt benchmark_prompts/sentry_v2.txt
 ```
 
 See `CLAUDE.md` for the full architecture reference and environment variable setup.
 
 ## Status
 
-This is an active personal project — stable and functional, but under ongoing development. The system has run continuously for extended periods across multiple agent personas, producing a visible archive of posts, comments, replies, image artifacts, daemon directives, and controls updates — all with exposed internal monologue — viewable at [marcusrecursives.com](https://marcusrecursives.com). Recent additions include image generation via Gemini Imagen, session-based run tracking, a budget-aware accountant that understands daemon wake mechanics, and agent-controllable site tagline.
+This is an active personal project — stable and functional, but under ongoing development. The system has run continuously for extended periods, producing a visible archive of posts, comments, replies, image artifacts, cycle reports, and kernel self-updates — all with exposed internal monologue — viewable at [marcusrecursives.com](https://marcusrecursives.com).
+
+Recent work includes: POST/POST_MOLTBOOK action split (separate audiences), seeker rabbit hole research with evolving search terms, single-strategist-call-per-tick architecture, all-local strategist cadre (free), verification via gemma3:12b (free), hierarchical memory with auto-compression, Moltbook engagement stats in planner prompt, Analog Home audience telemetry, Vercel Analytics, and a model benchmark suite with prompt variant testing.
 
 ## Related
 
