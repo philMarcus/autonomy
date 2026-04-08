@@ -478,15 +478,53 @@ def main():
     # Directive
     user_directive = args.directive
 
+    def _format_cadre(weights_str: str, color_api=Fore.CYAN, color_local=Fore.GREEN) -> str:
+        """Format a cadre weights string as a bar graph, one model per line."""
+        if not weights_str:
+            return "    (empty)"
+        pairs = []
+        for p in weights_str.split(","):
+            p = p.strip()
+            if "=" in p:
+                model, w = p.rsplit("=", 1)
+                try:
+                    pairs.append((model.strip(), float(w)))
+                except ValueError:
+                    pass
+        if not pairs:
+            return f"    {weights_str}"
+        max_w = max(w for _, w in pairs) if pairs else 1
+        lines = []
+        for model, w in sorted(pairs, key=lambda x: -x[1]):
+            bar_len = int((w / max_w) * 20) if max_w > 0 else 0
+            bar = "█" * bar_len + "░" * (20 - bar_len)
+            is_local = model.startswith("ollama:")
+            short = model.replace("ollama:", "") if is_local else model
+            color = color_local if is_local else color_api
+            label = "local" if is_local else "api"
+            lines.append(f"{color}      {short:>25} [{bar}] {w:.1f} ({label}){Style.RESET_ALL}")
+        return "\n".join(lines)
+
     available_providers = sorted(registry._backends.keys())
     _con_weights = ctrl.get("conscious_model_weights")
     _sub_weights = ctrl.get("subconscious_model_weights")
     _strat_weights = ctrl.get("strategist_model_weights")
+    _seek_weights = ctrl.get("seeker_model_weights")
+    _verif_weights = ctrl.get("verification_model_weights")
     print(f"{Fore.CYAN}=== {brain_name}: autonomy v{VERSION} ===")
     print(f"{Fore.CYAN}    providers: {', '.join(available_providers)}")
-    print(f"{Fore.CYAN}    conscious cadre: {_con_weights}")
-    print(f"{Fore.CYAN}    sentry cadre:    {_sub_weights}")
-    print(f"{Fore.CYAN}    strategist cadre: {_strat_weights}")
+    print(f"{Fore.CYAN}    ── CONSCIOUS ──")
+    print(_format_cadre(_con_weights))
+    print(f"{Fore.CYAN}    ── SENTRY ──")
+    print(_format_cadre(_sub_weights))
+    print(f"{Fore.CYAN}    ── STRATEGIST ──")
+    print(_format_cadre(_strat_weights))
+    print(f"{Fore.CYAN}    ── SEEKER ──")
+    print(_format_cadre(_seek_weights))
+    print(f"{Fore.CYAN}    ── VERIFICATION ──")
+    print(_format_cadre(_verif_weights))
+    print(f"{Fore.CYAN}    ── COMPRESSOR ──")
+    print(f"{Fore.GREEN}      {ctrl.get('compressor_model'):>25}{Style.RESET_ALL}")
     print(f"{Fore.CYAN}    budget: ${ctrl.get('daily_budget_usd'):.2f}/day | target wake: {ctrl.get('target_wake_minutes')}min | sentry: {ctrl.get('sentry_interval_seconds')}s")
     if args.no_subconscious:
         print(f"{Fore.CYAN}    mode: single-loop (--no-subconscious)")
@@ -694,9 +732,7 @@ def main():
         if analog_home_url:
             extras.append("seeds: ON")
         extra_str = f" | {', '.join(extras)}" if extras else ""
-        _sentry_w = ctrl.get("subconscious_model_weights") or "flash-lite"
-        _strat_w = ctrl.get("strategist_model_weights") or "flash-lite"
-        print(f"{Fore.CYAN}    subconscious daemon: ACTIVE | sentry: {_sentry_w} | strategist: {_strat_w}{extra_str}")
+        print(f"{Fore.CYAN}    subconscious daemon: ACTIVE{extra_str}")
 
     iteration = 0
     prev_feed_available = None  # Track feed state transitions
@@ -761,7 +797,11 @@ def main():
             ctrl.get("conscious_model_weights"),
             "gemini-2.5-pro",
         )
-        safe_print(f"{Fore.CYAN}[CONSCIOUS MODEL] {conscious_model}")
+        _is_local = conscious_model.startswith("ollama:")
+        _model_color = Fore.GREEN if _is_local else Fore.CYAN
+        _model_short = conscious_model.replace("ollama:", "") if _is_local else conscious_model
+        _model_tag = "local" if _is_local else "api"
+        safe_print(f"{_model_color}── CYCLE {iteration} ── conscious: {_model_short} ({_model_tag}) ──{Style.RESET_ALL}")
 
         # --- Budget planning (accountant) ---
         if ctrl.get("budget_plan_enabled"):
