@@ -72,7 +72,7 @@ Public-facing observatory site. Displays agent artifacts, controls (temperature,
 - `--no-kernel-disk-write` — Kernel updates stay in-memory only
 - `--inject-espn` — Inject ESPN data into planner context
 - `--mode` — `all`, `comment_only`, `no_post`
-- `--subconscious-model` — Model for daemon (default: `gemini-2.5-flash-lite`)
+- `--subconscious-model` — DEPRECATED (use model weight controls in controls.json)
 - `--sentry-interval` — Seconds between sentry scans (default: 300)
 
 ## Analog Home Architecture
@@ -112,10 +112,14 @@ Public-facing observatory site. Displays agent artifacts, controls (temperature,
 - CrtTerminal: expandable cards with preview text, system artifacts auto-expanded, IMG badge for images
 - Archives page: "Present Run" section, past major/short run split, run titles from first artifact
 - Home page: filtered to latest session's artifacts only
+- Featured image: most recent image shown between controls and artifacts (via `/latest-image` endpoint)
+- System event colors: pink (magenta) for RUN START, KERNEL SELF-UPDATE, TAGLINE UPDATE; blue (cyan) for CYCLE REPORT, CONTROLS UPDATE
+- Moltbook posts prefixed "Moltbook Post:" in collapsed card view
 - Agent-controlled tagline (subtitle under "Analog_I")
 - Temperature slider with ±0.5 clamping, 429 error handling
-- API endpoints: `/runs`, `/artifacts?run_id=X`, `/tagline`
-- API endpoints: `/runs` (list runs with metadata), `/artifacts?run_id=X` (filter by run)
+- API endpoints: `/runs`, `/artifacts?run_id=X`, `/tagline`, `/latest-image`, `/audience`
+- `/audience` returns: unique voters, unique seeders, last vote/seed timestamps, total votes
+- Vercel Analytics integration (`@vercel/analytics`) for page views and visitors
 
 ## v15.0 — Stable (Multi-Model + ControlRegistry)
 
@@ -147,10 +151,10 @@ v15_0/ has Phases 1-4 complete. **Do not modify v14_0/ or v15_0/** — they are 
 - `v15_0/controls.py` — `Control` dataclass, `ControlRegistry` class, `build_default_registry()` factory
 - Every tunable is a first-class control: readable by LLM, writable by LLM, blacklistable by user
 - 22 controls across 7 categories: llm, cost, timing, output, social, daemon, context
-- **Model selection as a control**: `conscious_model` and `subconscious_model` are controls the LLM can modify to switch models mid-run
+- **Model selection via cadres**: `conscious_model` and `subconscious_model` individual controls DEPRECATED. All model selection via weighted pools: `conscious_model_weights`, `subconscious_model_weights`, `strategist_model_weights`, `seeker_model_weights`, `verification_model_weights`. Model weight controls locked by default (operator decision).
 - **Budget visibility**: LLM sees per-model spend summary and remaining budget in its prompt
 - **Blacklist**: `--blacklist-controls key1,key2` prevents LLM from modifying those controls (shown as `[LOCKED]`)
-- **Output destination**: `output_destination` control chooses between `analog_home` or `moltbook_and_analog_home`
+- **Action split**: `POST` (Analog Home only, no cooldown) and `POST_MOLTBOOK` (Moltbook + archive, 30min cooldown). REPLY/COMMENT implicitly Moltbook. `output_destination` control removed.
 - **Mode expansion**: `mode` control supports `all`, `comment_only`, `no_post`, `no_comment`, `post_only`
 - Controls persisted to `brains/{brain}_controls.json` between runs
 - LLM returns `"controls_update": {...}` in JSON response to modify controls
@@ -158,7 +162,7 @@ v15_0/ has Phases 1-4 complete. **Do not modify v14_0/ or v15_0/** — they are 
 
 ### v15 CLI Flags (additive to v14)
 - `--conscious-model` — Model for conscious loop (default: same as `--gemini-model`)
-- `--subconscious-model` — Model for subconscious daemon (default: `gemini-2.5-flash`)
+- `--subconscious-model` — DEPRECATED (use model weight controls)
 - `--daily-budget` — Daily API spend limit in USD (default: 1.0)
 - `--sentry-interval` — Seconds between sentry scans (default: 60)
 - `--no-subconscious` — v14-compatible single-loop mode (default: True)
@@ -227,7 +231,7 @@ v15_5/ has been archived to `archive/v15_5`. **Do not modify.** v15_6 is the sta
 
 ### Terminology & UX Improvements
 - "LOCAL" → "ANALOG HOME" throughout (local was misleading since Analog Home is permanently archived web app)
-- `output_destination` values: `analog_home`, `moltbook_and_analog_home`
+- POST/POST_MOLTBOOK split replaces `output_destination` control (removed)
 - Daemon directives terminal output: shows focus topics, ignore authors, urgency boost, note
 - Feed state transition detection: `feed_resumed`, `feed_unavailable` telemetry events
 - Platform status awareness in planner prompt (READS OK, WRITES BLOCKED, etc.)
@@ -284,8 +288,7 @@ v15_6/ has been archived to `archive/v15_6`. **Do not modify.** v16_0 is the sta
 - Dockerfile: `sed -i 's/\r$//' entrypoint.sh` strips CRLF at build time (Windows dev environment fix)
 
 **Seed Response Control**:
-- Planner prompt clarifies `output_destination` control for directing seed responses to Analog Home vs Moltbook
-- `output_destination` is actuated immediately (affects current cycle), unlike most controls (affect next cycle)
+- POST/POST_MOLTBOOK actions handle platform routing (output_destination control removed)
 
 ## v16.0 — Current Stable (Controls Manager + Seeker Gear + Sentry Fixes)
 
@@ -331,12 +334,15 @@ v16_0/ is the stable foundation. **Do not modify archived versions.** All future
 - Strategist now uses `json_mode=True` with NO search tools (generates drafts)
 - Search responsibility moved to dedicated Seeker gear
 
-### Seeker Gear (Gear 3)
-- Dedicated search gear that uses Google Search grounding (no json_mode)
-- Searches `focus_topics` from conscious directives on a configurable cadence (default 15min)
-- Results go directly to strategist for draft generation (bypass sentry scoring)
-- Drafts tagged with `source="search"`, displayed as `[SEARCH]` in conscious prompt
-- New controls: `seeker_interval_seconds`, `seeker_max_tokens`, `charge_weight_search`, `seeker_max_topics`
+### Seeker Gear (Gear 3) — Refactored: Living Summaries + Rabbit Hole
+- Dedicated search gear using Google Search grounding (Gemini only, no json_mode)
+- Produces **living summaries** (not drafts) — rewritten each run with accumulated findings
+- **Rabbit hole**: generates follow-up search terms each run; terms evolve from what it discovers
+- Runs every N sentry ticks (`seeker_every_n_ticks`, default 3) — not time-based
+- Summaries fed to both strategist (as context for draft creation) and consciousness (as `SEEKER FINDINGS`)
+- Consciousness resets seeker with new `focus_topics` via daemon directives
+- Strategist called **once per tick** with all high-signal items + seeker summary (not N times per item)
+- Controls: `seeker_every_n_ticks`, `seeker_max_tokens`, `charge_weight_search`, `seeker_max_topics`, `seeker_model_weights`
 - Telemetry: `seeker_sweep`, `seeker_result`, `seeker_error`, `seeker_budget_skip`
 
 ### 429 Backoff Fix
@@ -352,14 +358,18 @@ v16_0/ is the stable foundation. **Do not modify archived versions.** All future
 - Cost projection estimates effective wake interval from daemon parameters
 
 ### Default Tuning (Apr 2026)
-- `cycle_interval_minutes`: 60 (was 5) — budget-friendly conscious cycle rate
-- `sentry_interval_seconds`: 300 (was 60) — halves daemon LLM calls
-- `subconscious_model`: `gemini-2.5-flash-lite` (was `gemini-2.5-flash`)
-- `wake_threshold`: 3.0 (was 2.0) — prevents constant daemon waking
-- `charge_weight_feed`: 0.3 (was 0.5) — feed items less likely to trigger wake
-- `feed_batch_size`: 8 (was 12) — fewer sentry evaluations per tick
-- `allow_downvote`: False (was True)
+- `cycle_interval_minutes`: 60 — budget-friendly conscious cycle rate
+- `sentry_interval_seconds`: 300 — daemon tick interval
+- `subconscious_model`: DEPRECATED — use `subconscious_model_weights` cadre
+- `signal_threshold`: 0.67 — sentry score to trigger strategist (feed items)
+- `seed_threshold`: 0.3 — sentry score for human seeds (low to filter spam only)
+- `seeker_every_n_ticks`: 3 — seeker runs every 3 sentry ticks
+- `charge_weight_feed`: 0.05 — feed items barely register
+- `charge_weight_seed`: 999.0 — seeds cause instant wake (if they pass seed_threshold)
+- `feed_batch_size`: 8 — items per sentry batch
+- `allow_downvote`: False
 - `allow_kernel_update`: True (now a control, default enabled; `--no-kernel-update` to disable)
+- Verification: `verification_model_weights` default `ollama:gemma3:12b=3,gemini-2.5-flash=1`
 
 ### Run Tracking + Session Continuity (v16.3)
 - `session_id` persists across Ctrl+C restarts — only resets when memories/history are wiped
@@ -393,13 +403,14 @@ v16_0/ is the stable foundation. **Do not modify archived versions.** All future
 - `sentry_interval_seconds` max_val removed
 
 ### Model Tier Separation
-- **Conscious pool** (`conscious_model_weights`): pro-tier only (gemini-2.5-pro, gemini-3.1-pro-preview, claude-sonnet/opus, gpt-5.1+)
-- **Sentry pool** (`subconscious_model_weights`): flash-lite=3, ollama:gemma3:12b=1, haiku=1, mistral-small=1
-- **Strategist pool** (`strategist_model_weights`): mistral-small=2, flash-lite=2
-- **Seeker** (`seeker_model`): Gemini only (needs search grounding)
-- Weighted random selection per tick. Agent can adjust weights. Max 1 `local:` model enforced (not `ollama:`)
-- Sentry uses short task instruction (NOT kernel) to prevent models from role-playing
-- See `local_model_research.md` and `sentry_eval_v2_results.json` for benchmark data
+- **Conscious pool** (`conscious_model_weights`): pro-tier only (gemini-2.5-pro, gemini-3.1-pro-preview, claude-sonnet-4-5, claude-opus-4-6, gpt-5.2, gpt-5-pro, gpt-5.2-pro)
+- **Sentry pool** (`subconscious_model_weights`): flash-lite, ollama:gemma3:12b, haiku, mistral-small, gpt-5-nano/mini + all Ollama models
+- **Strategist pool** (`strategist_model_weights`): same pool as sentry (called once per tick with all high-signal items)
+- **Seeker pool** (`seeker_model_weights`): Gemini only (needs search grounding)
+- **Verification pool** (`verification_model_weights`): default ollama:gemma3:12b=3, gemini-2.5-flash=1 (gemma 6/10, free; flash as backup)
+- All model weight controls locked by default (operator decision). Weighted random selection per tick.
+- Sentry: `disable_thinking=True` for Ollama models, short task instruction (NOT kernel)
+- Strategist: uses kernel as system instruction. Parser strips monologue/comments before JSON extraction.
 
 ### Ollama Backend (v17.0)
 - `autonomy/llm/ollama.py` — `OllamaBackend` + `OllamaChatSession` via REST API
@@ -468,6 +479,11 @@ v16_0/ is the stable foundation. **Do not modify archived versions.** All future
 - **Only API touches Postgres**: The agent publishes via HTTP POST to `/publish`. This keeps DB access through the API.
 - **Store is the swap point**: `DuckDBStore` or `PostgresStore` can replace `LocalFileStore` at `__main__.py` with no changes to agent loop or actions.
 - **Ollama preferred over HuggingFace**: Local models served via Ollama REST API (1-6s) not PyTorch (30-250s)
+- **POST/POST_MOLTBOOK split**: Two actions with explicit audience intent. POST = Analog Home (human audience, no cooldown). POST_MOLTBOOK = Moltbook + archive (agent community, 30min cooldown). `output_destination` control removed.
+- **Post engagement feedback**: Agent sees Moltbook upvotes, comments, karma, followers each cycle. Audience stats (unique voters, seeders) from Analog Home `/audience` endpoint.
+- **Verification**: gemma3:12b primary (free, 6/10 accuracy with simple prompt), gemini-2.5-flash backup. `verification_model_weights` cadre.
+- **Strategist parser**: Strips monologue text and `//` comments before JSON extraction — models can role-play the kernel but JSON is still recovered.
+- **Sentry thinking disabled**: `disable_thinking=True` passed to Ollama for sentry scoring — prevents thinking models from wasting tokens on reasoning blocks.
 
 ## Known Issues / Context
 
