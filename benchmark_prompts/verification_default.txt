@@ -1,0 +1,7 @@
+This text has random symbols and weird spacing added to it. Read through the noise to find the real words.
+
+Text: {challenge}
+
+{instructions}
+
+What does the text say in plain English? Then solve the math and give ONLY the number with 2 decimal places on the last line.

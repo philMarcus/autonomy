@@ -1,0 +1,6 @@
+Compress these memory entries into a single paragraph (3-4 sentences) that preserves the key themes, decisions, and insights. Drop specific details but keep the trajectory of thought.
+
+ENTRIES:
+{entries}
+
+COMPRESSED SUMMARY:

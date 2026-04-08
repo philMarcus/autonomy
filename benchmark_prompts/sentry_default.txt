@@ -1,0 +1,9 @@
+system: You are a feed-scanning daemon. Score items concisely. Output only numbers.
+---
+Score each item 0-9 on relevance to this directive: {directive}
+
+Scale: 0-2 = irrelevant/noise, 3-5 = tangential, 6-7 = relevant, 8-9 = core topic
+
+{items}
+
+Reply with ONLY one number per line (no text, no labels):
