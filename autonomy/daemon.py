@@ -1223,7 +1223,8 @@ class SubconsciousDaemon:
         if not terms:
             return
 
-        model_id = self._ctrl.get("seeker_model") or "gemini-2.5-flash-lite"
+        _seeker_weights = self._ctrl.get("seeker_model_weights") or "gemini-2.5-flash-lite=1"
+        model_id = _pick_weighted_model(_seeker_weights, "gemini-2.5-flash-lite")
         temp = self._ctrl.get("subconscious_temperature")
         max_tokens = self._ctrl.get("seeker_max_tokens")
         max_topics = self._ctrl.get("seeker_max_topics")

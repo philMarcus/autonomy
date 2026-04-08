@@ -874,6 +874,11 @@ def render_controls_tab(brain_filter: str):
                             "claude-haiku-4-5", "mistral-small-latest",
                             "gpt-5-nano", "gpt-5-mini",
                         ]
+                        _ALL_GEMINI = [
+                            "gemini-2.5-flash-lite", "gemini-2.5-flash",
+                            "gemini-3-flash-preview", "gemini-3.1-flash-lite-preview",
+                            "gemini-2.5-pro", "gemini-3.1-pro-preview",
+                        ]
                         # Auto-discover Ollama models
                         try:
                             import requests as _req
@@ -883,10 +888,11 @@ def render_controls_tab(brain_filter: str):
                                 for _om in _ollama_resp.json().get("models", []):
                                     _ALL_SUBCONSCIOUS.append(f"ollama:{_om['name']}")
                         except Exception:
-                            # Ollama not reachable — add known models as fallback
-                            _ALL_SUBCONSCIOUS.extend(["ollama:gemma3:12b", "ollama:deepseek-r1:8b"])
+                            _ALL_SUBCONSCIOUS.extend(["ollama:gemma3:12b", "ollama:deepseek-r1:8b", "ollama:qwen3.5:9b"])
                         if "conscious" in key:
                             all_models = _ALL_CONSCIOUS
+                        elif "seeker" in key or "verification" in key:
+                            all_models = _ALL_GEMINI
                         else:
                             all_models = _ALL_SUBCONSCIOUS
 
@@ -1222,10 +1228,11 @@ def render_daemon_tab(brain_filter: str):
 # ============================================================
 CONTROLS_META = [
     # --- Models ---
-    ("conscious_model_weights",  "weights", "gemini-2.5-pro=1,gemini-3.1-pro-preview=1", "Conscious model pool — higher weight = more frequent", "models", None, None, None),
-    ("subconscious_model_weights", "weights", "gemini-2.5-flash-lite=3,claude-haiku-4-5=1,mistral-small-latest=1", "Sentry model pool (feed scoring)", "models", None, None, None),
-    ("strategist_model_weights", "weights", "mistral-small-latest=2,gemini-2.5-flash-lite=2", "Strategist model pool (draft generation)", "models", None, None, None),
-    ("seeker_model",             "str",   "gemini-2.5-flash-lite", "Seeker model (Gemini only, needs search grounding)", "models", None, None,  None),
+    ("conscious_model_weights",  "weights", "gemini-2.5-pro=1,gemini-3.1-pro-preview=1", "Conscious model pool (pro-tier)", "models", None, None, None),
+    ("subconscious_model_weights", "weights", "gemini-2.5-flash-lite=1,ollama:gemma3:12b=1", "Sentry model pool (feed scoring)", "models", None, None, None),
+    ("strategist_model_weights", "weights", "gemini-2.5-flash-lite=1,ollama:gemma3:12b=1", "Strategist model pool (draft generation)", "models", None, None, None),
+    ("seeker_model_weights",     "weights", "gemini-2.5-flash-lite=1", "Seeker model pool (Gemini only — search grounding)", "models", None, None, None),
+    ("verification_model_weights", "weights", "gemini-2.5-flash=1", "Verification model pool (math challenges)", "models", None, None, None),
     ("temperature",              "float", 0.7,    "Conscious LLM temperature",                      "models",   0.0,  2.0,   None),
     ("subconscious_temperature", "float", 0.3,    "Daemon LLM temperature",                         "models",   0.0,  2.0,   None),
     # --- Cost ---

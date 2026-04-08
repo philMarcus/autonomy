@@ -272,24 +272,22 @@ def build_default_registry(model_registry, blacklist_str: str = "") -> ControlRe
         "claude-sonnet-4-5", "claude-opus-4-6",
         "gpt-5.2", "gpt-5-pro", "gpt-5.2-pro",
     }
-    # Cheap/fast models suitable for subconscious (sentry, strategist, seeker)
+    # Cheap/fast models suitable for subconscious (sentry, strategist)
     _SUBCONSCIOUS_TIER = {
         "gemini-2.5-flash", "gemini-2.5-flash-lite",
         "gemini-3-flash-preview", "gemini-3.1-flash-lite-preview",
-        "gemini-2.0-flash", "gemini-2.0-flash-lite",
-        "claude-haiku-4-5", "gpt-5-nano", "gpt-5-mini",
+        "claude-haiku-4-5", "mistral-small-latest",
+        "gpt-5-nano", "gpt-5-mini",
     }
-    # Local models are always available for subconscious
+    # Gemini models suitable for search grounding (seeker, verification)
+    _GEMINI_TIER = [m for m in all_model_ids if m.startswith("gemini")]
+
     conscious_choices = [m for m in all_model_ids if m in _CONSCIOUS_TIER]
+    # Subconscious includes tier models + all Ollama models (auto-discovered)
     subconscious_choices = [m for m in all_model_ids if m in _SUBCONSCIOUS_TIER or m.startswith("ollama:")]
 
     controls = [
         # --- LLM ---
-        Control("conscious_model", "str", "gemini-2.5-pro",
-                "Default conscious model", "llm", choices=conscious_choices),
-        Control("seeker_model", "str", "gemini-2.5-flash-lite",
-                "Model for seeker gear (needs Gemini for search grounding)", "llm",
-                choices=[m for m in all_model_ids if m.startswith("gemini")]),
         Control("conscious_model_weights", "weights", "gemini-2.5-pro=1",
                 "Weighted model pool for conscious (pro-tier only)", "llm",
                 choices=conscious_choices),
@@ -301,6 +299,12 @@ def build_default_registry(model_registry, blacklist_str: str = "") -> ControlRe
                 "gemini-2.5-flash-lite=1,ollama:gemma3:12b=1",
                 "Weighted model pool for STRATEGIST drafts", "llm",
                 choices=subconscious_choices),
+        Control("seeker_model_weights", "weights", "gemini-2.5-flash-lite=1",
+                "Weighted model pool for SEEKER research (Gemini only — needs search grounding)", "llm",
+                choices=_GEMINI_TIER),
+        Control("verification_model_weights", "weights", "gemini-2.5-flash=1",
+                "Weighted model pool for math verification challenges", "llm",
+                choices=_GEMINI_TIER),
         Control("temperature", "float", 0.7,
                 "Conscious LLM temperature", "llm", min_val=0.0, max_val=2.0),
         Control("subconscious_temperature", "float", 0.3,
@@ -449,7 +453,8 @@ def build_default_registry(model_registry, blacklist_str: str = "") -> ControlRe
     # Parse blacklist — model weight controls locked by default (operator decision)
     _DEFAULT_LOCKED = {
         "conscious_model_weights", "subconscious_model_weights",
-        "strategist_model_weights", "seeker_model",
+        "strategist_model_weights", "seeker_model_weights",
+        "verification_model_weights",
     }
     blacklist = _DEFAULT_LOCKED | {k.strip() for k in blacklist_str.split(",") if k.strip()}
 

@@ -409,7 +409,7 @@ def main():
     _apply_cli_overrides(verbose=True)
 
     # === PHASE 4: Derived values from controls (single source of truth) ===
-    conscious_model = ctrl.get("conscious_model")
+    conscious_model = "gemini-2.5-pro"
     budget = DailyBudget(daily_limit_usd=float(ctrl.get("daily_budget_usd")))
 
     # Platform client: always create for reads if API key exists
@@ -556,7 +556,7 @@ def main():
     if analog_home_url:
         con_weights = ctrl.get("conscious_model_weights") or conscious_model
         sub_weights = ctrl.get("subconscious_model_weights") or "gemini-2.5-flash-lite"
-        seeker = ctrl.get("seeker_model") or "gemini-2.5-flash-lite"
+        seeker = ctrl.get("seeker_model_weights") or "gemini-2.5-flash-lite=1"
         run_body = (
             f"Version: {VERSION}\n"
             f"Default conscious model: {conscious_model}\n"
@@ -626,13 +626,8 @@ def main():
         # Search tools for daemon: only if --enable-search and subconscious model is Gemini
         daemon_search_tools = None
         if search_tools:
-            seeker_model = ctrl.get("seeker_model") or "gemini-2.5-flash-lite"
-            try:
-                seeker_info = registry.get_info(seeker_model)
-                if seeker_info.provider == "gemini":
-                    daemon_search_tools = search_tools
-            except ValueError:
-                pass
+            # Seeker cadre is Gemini-only by design, so search tools always apply
+            daemon_search_tools = search_tools
 
         state_lock = threading.Lock()
         daemon = SubconsciousDaemon(
@@ -724,7 +719,7 @@ def main():
         from .daemon import _pick_weighted_model
         conscious_model = _pick_weighted_model(
             ctrl.get("conscious_model_weights"),
-            ctrl.get("conscious_model"),
+            "gemini-2.5-pro",
         )
         safe_print(f"{Fore.CYAN}[CONSCIOUS MODEL] {conscious_model}")
 
@@ -756,7 +751,7 @@ def main():
                         state["_last_budget_plan_time"] = time.time()
                         store.save_state(state)
                         # Re-read conscious model in case accountant changed it
-                        conscious_model = ctrl.get("conscious_model")
+                        conscious_model = "gemini-2.5-pro"
                         telemetry.log("budget_plan", {
                             "cycle": iteration,
                             "changes": bp_changes,
@@ -1056,14 +1051,14 @@ def main():
                     # Retry with a different conscious model
                     from .daemon import _pick_weighted_model
                     retry_model = _pick_weighted_model(
-                        ctrl.get("conscious_model_weights"), ctrl.get("conscious_model"),
+                        ctrl.get("conscious_model_weights"), "gemini-2.5-pro",
                     )
                     # Keep retrying until we get a different model (max 3 attempts)
                     for _ in range(3):
                         if retry_model != conscious_model:
                             break
                         retry_model = _pick_weighted_model(
-                            ctrl.get("conscious_model_weights"), ctrl.get("conscious_model"),
+                            ctrl.get("conscious_model_weights"), "gemini-2.5-pro",
                         )
                     # Try each conscious pool model until one works
                     _all_con = [p.split("=")[0].strip() for p in (ctrl.get("conscious_model_weights") or "").split(",") if "=" in p]
@@ -1333,12 +1328,6 @@ def main():
                     elif cv == "blocked":
                         safe_print(f"{Fore.YELLOW}  [CTRL] {ck} BLOCKED (blacklisted)")
 
-                # Actuate model change
-                if results.get("conscious_model") == "ok":
-                    new_model = ctrl.get("conscious_model")
-                    if registry.has_model(new_model):
-                        llm_client = registry.as_llm_client(default_model_id=new_model)
-                        safe_print(f"{Fore.CYAN}  [CTRL] Switched conscious model to {new_model}")
 
                 # Actuate budget change
                 if results.get("daily_budget_usd") == "ok":
