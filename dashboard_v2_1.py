@@ -866,13 +866,13 @@ def render_controls_tab(brain_filter: str):
                         _ALL_CONSCIOUS = [
                             "gemini-2.5-pro", "gemini-3.1-pro-preview",
                             "claude-sonnet-4-5", "claude-opus-4-6",
-                            "gpt-5.2", "gpt-5-pro", "gpt-5.2-pro",
+                            "gpt-5.4", "gpt-5.4-pro",
                         ]
                         _ALL_SUBCONSCIOUS = [
                             "gemini-2.5-flash-lite", "gemini-2.5-flash",
                             "gemini-3-flash-preview", "gemini-3.1-flash-lite-preview",
                             "claude-haiku-4-5", "mistral-small-latest",
-                            "gpt-5-nano", "gpt-5-mini",
+                            "gpt-5.4-nano", "gpt-5.4-mini",
                         ]
                         _ALL_GEMINI = [
                             "gemini-2.5-flash-lite", "gemini-2.5-flash",

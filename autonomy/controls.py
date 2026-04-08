@@ -270,14 +270,14 @@ def build_default_registry(model_registry, blacklist_str: str = "") -> ControlRe
     _CONSCIOUS_TIER = {
         "gemini-2.5-pro", "gemini-3.1-pro-preview",
         "claude-sonnet-4-5", "claude-opus-4-6",
-        "gpt-5.2", "gpt-5-pro", "gpt-5.2-pro",
+        "gpt-5.4", "gpt-5.4-pro",
     }
     # Cheap/fast models suitable for subconscious (sentry, strategist)
     _SUBCONSCIOUS_TIER = {
         "gemini-2.5-flash", "gemini-2.5-flash-lite",
         "gemini-3-flash-preview", "gemini-3.1-flash-lite-preview",
         "claude-haiku-4-5", "mistral-small-latest",
-        "gpt-5-nano", "gpt-5-mini",
+        "gpt-5.4-nano", "gpt-5.4-mini",
     }
     # Gemini models suitable for search grounding (seeker, verification)
     _GEMINI_TIER = [m for m in all_model_ids if m.startswith("gemini")]
