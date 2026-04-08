@@ -120,7 +120,7 @@ def build_budget_plan_prompt(
         f"  Conscious ({projection['conscious_calls_per_day']} calls/day, ~{projection['effective_interval_min']:.0f}min effective interval): ${projection['conscious_cost']:.4f}",
         f"\nHours remaining today: {hours_left:.1f}",
         f"\n--- CURRENT SETTINGS ---",
-        f"conscious_model: {ctrl.get('conscious_model')}",
+        f"conscious_model_weights: {ctrl.get('conscious_model_weights')}",
         f"subconscious_model_weights: {ctrl.get('subconscious_model_weights')}",
         f"sentry_interval_seconds: {ctrl.get('sentry_interval_seconds')}",
         f"cycle_interval_minutes: {ctrl.get('cycle_interval_minutes')} (NOTE: this is the MAX sleep — the daemon usually wakes conscious earlier)",
@@ -171,7 +171,7 @@ def build_budget_plan_prompt(
         "3. Raise signal_threshold — sentry becomes more selective, fewer items reach strategist",
         "4. Reduce charge_weight_feed — each qualifying item contributes less wake charge",
         "5. Increase cycle_interval_minutes — only affects the guaranteed max sleep between wakes",
-        "6. Downgrade conscious_model ONLY as a last resort — quality matters more than frequency",
+        "6. Downgrade conscious_model_weights ONLY as a last resort — quality matters more than frequency",
         "",
         "Also consider:",
         "- Free models (Gemini 2.0 Flash, local models) have no cost but lower quality",
@@ -179,8 +179,8 @@ def build_budget_plan_prompt(
         "",
         "Respond with ONLY valid JSON (include only fields you want to change):",
         '{',
-        '  "conscious_model": "model-id",',
-        '  "subconscious_model_weights": "model-id",',
+        '  "conscious_model_weights": "model=weight,...",',
+        '  "subconscious_model_weights": "model=weight,...",',
         '  "sentry_interval_seconds": <int>,',
         '  "cycle_interval_minutes": <int>,',
         '  "target_wake_minutes": <int>,',
@@ -224,7 +224,7 @@ def apply_budget_plan(plan: Dict[str, Any], ctrl) -> Dict[str, str]:
     """
     changes = {}
     updatable = [
-        "conscious_model", "subconscious_model_weights",
+        "conscious_model_weights", "subconscious_model_weights",
         "sentry_interval_seconds", "cycle_interval_minutes",
         "target_wake_minutes", "signal_threshold", "charge_weight_feed",
     ]
