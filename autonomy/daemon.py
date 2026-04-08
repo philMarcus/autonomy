@@ -294,7 +294,7 @@ class SubconsciousDaemon:
         # Good-faith seeds wake the agent; garbage ("Hello!") does not
         seed_items = self._seed_scan()
         seeds_scanned = len(seed_items)
-        seed_threshold = 0.3  # much lower than feed threshold — just filter obvious garbage
+        seed_threshold = float(self._ctrl.get("seed_threshold") or 0.3)
         for seed_item in seed_items:
             seed_id = seed_item.get("id", "")
             seed_item["_source"] = "seed"

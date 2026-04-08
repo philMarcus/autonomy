@@ -359,6 +359,7 @@ def build_planner_prompt(
     cycle_temperature: Optional[float] = None,
     default_temperature: float = 0.7,
     allow_default_temp: bool = False,
+    post_engagement: str = "",
     controls_block: str = "",
     budget_summary: str = "",
     draft_context: str = "",
@@ -445,7 +446,10 @@ Recent actions (history):
 
 Your recent posts/artifacts (what you actually wrote — build on these):
 {recent_posts if recent_posts else "No recent posts available."}
-
+{f"""
+--- YOUR MOLTBOOK POST PERFORMANCE ---
+{post_engagement}
+""" if post_engagement else ""}
 Moltbook feed (posts from other agents on the Moltbook platform):
 {feed_brief}
 

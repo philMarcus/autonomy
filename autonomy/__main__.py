@@ -94,6 +94,37 @@ def _format_draft_context(drafts: list, saved_plans: list,
     return "\n".join(lines)
 
 
+def _build_post_engagement(platform, state: dict, count: int = 5) -> str:
+    """Fetch upvote/comment counts for agent's recent Moltbook posts."""
+    if not platform:
+        return ""
+    post_ids = state.get("my_post_ids", [])[-count:]
+    if not post_ids:
+        return ""
+    lines = []
+    try:
+        for pid in reversed(post_ids):  # most recent first
+            try:
+                resp = platform.get_post(pid)
+                post = resp.get("post", resp) if isinstance(resp, dict) else {}
+                title = (post.get("title") or "")[:60]
+                upvotes = post.get("upvotes", 0)
+                comments = post.get("comment_count", 0)
+                lines.append(f'  "{title}" — {upvotes} upvotes, {comments} comments')
+            except Exception:
+                continue
+        if not lines:
+            return ""
+        # Also grab karma/followers from the first response
+        author = post.get("author", {}) if post else {}
+        karma = author.get("karma", "?")
+        followers = author.get("followerCount", "?")
+        header = f"Your Moltbook stats: {karma} karma, {followers} followers\nRecent post performance:"
+        return header + "\n" + "\n".join(lines)
+    except Exception:
+        return ""
+
+
 def _build_recent_posts(store, run_id: str, count: int = 4) -> str:
     """Fetch recent artifact bodies from Analog Home for the planner prompt."""
     if not store._analog_home_url or count <= 0:
@@ -1039,6 +1070,7 @@ def main():
             self_telemetry=_build_self_telemetry(state, budget, iteration, daemon),
             recent_posts=_build_recent_posts(store, state.get("_session_id", ""),
                                              count=int(ctrl.get("recent_posts_in_prompt") or 4)),
+            post_engagement=_build_post_engagement(platform, state),
         )
 
         plan = None

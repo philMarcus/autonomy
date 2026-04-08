@@ -1245,7 +1245,8 @@ CONTROLS_META = [
     # --- Wake Mechanics ---
     ("wake_threshold",           "float", 3.0,    "Charge needed to wake conscious",                "wake",     0.5,  10.0,  None),
     ("wake_refractory",          "float", -2.0,   "Wake potential reset after firing (negative = cooldown)", "wake", -10.0, 0.0, None),
-    ("signal_threshold",         "float", 0.5,    "Sentry score cutoff to trigger strategist",      "wake",     0.0,  1.0,   None),
+    ("signal_threshold",         "float", 0.67,   "Sentry score for feed items to trigger strategist", "wake",  0.0,  1.0,   None),
+    ("seed_threshold",           "float", 0.3,    "Sentry score for human seeds (low — filters spam)", "wake",    0.0,  1.0,   None),
     ("charge_weight_feed",       "float", 0.3,    "Charge per qualifying feed item",                "wake",     0.0,  5.0,   None),
     ("charge_weight_seed",       "float", 999.0,  "Charge for human seeds (999 = instant wake)",    "wake",     0.0,  1000.0, None),
     ("charge_weight_reply",      "float", 1.5,    "Charge for reply-worthy comments",               "wake",     0.0,  10.0,  None),
