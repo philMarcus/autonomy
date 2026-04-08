@@ -65,8 +65,9 @@ class MathVerificationSolver(ChallengeSolver):
             })
 
         try:
-            print(f"{Fore.CYAN}[VERIFICATION] Solving challenge{Style.RESET_ALL}")
-            print(f"{Fore.CYAN}[VERIFICATION] Challenge: {challenge_text[:100]}...{Style.RESET_ALL}")
+            _model = getattr(self.llm_client, '_default_model_id', '?')
+            print(f"{Fore.CYAN}[VERIFICATION] ({_model}) Challenge:{Style.RESET_ALL}")
+            print(f"{Fore.CYAN}  {challenge_text}{Style.RESET_ALL}")
         except:
             pass
 
@@ -135,7 +136,8 @@ What does the text say in plain English? Then solve the math and give ONLY the n
             # Retry with backup LLM on 503
             if is_503 and hasattr(self, 'backup_llm') and self.backup_llm:
                 try:
-                    print(f"{Fore.YELLOW}[VERIFICATION] 503 — retrying with backup model{Style.RESET_ALL}")
+                    _backup_model = getattr(self.backup_llm, '_default_model_id', '?')
+                    print(f"{Fore.YELLOW}[VERIFICATION] 503 — retrying with {_backup_model}{Style.RESET_ALL}")
                     raw_response = self.backup_llm.generate(prompt, temperature=0.0, max_output_tokens=8192).strip()
                     lines = [l.strip() for l in raw_response.splitlines() if l.strip()]
                     answer = lines[-1] if lines else ""
@@ -151,7 +153,8 @@ What does the text say in plain English? Then solve the math and give ONLY the n
             # 2nd backup: ollama:gemma3:12b (free, local)
             if is_503 and hasattr(self, 'backup_llm_2') and self.backup_llm_2:
                 try:
-                    print(f"{Fore.YELLOW}[VERIFICATION] Retrying with local Ollama model{Style.RESET_ALL}")
+                    _backup2_model = getattr(self.backup_llm_2, '_default_model_id', '?')
+                    print(f"{Fore.YELLOW}[VERIFICATION] Retrying with {_backup2_model}{Style.RESET_ALL}")
                     raw_response = self.backup_llm_2.generate(prompt, temperature=0.0, max_output_tokens=1024).strip()
                     lines = [l.strip() for l in raw_response.splitlines() if l.strip()]
                     answer = lines[-1] if lines else ""
