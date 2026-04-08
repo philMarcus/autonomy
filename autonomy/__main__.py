@@ -1413,6 +1413,56 @@ def main():
                 note = daemon_directives.get("note", "")
                 urgency = daemon_directives.get("urgency_boost", 1.0)
 
+            # --- Publish cycle report BEFORE action (so it sorts below artifact) ---
+            if daemon:
+              try:
+                from collections import Counter
+                report_parts = []
+                report_parts.append(f"**Conscious model:** {conscious_model}")
+                if _sentry_model_counts:
+                    sentry_lines = ", ".join(f"{m}: {c}" for m, c in
+                                             sorted(_sentry_model_counts.items(), key=lambda x: -x[1]))
+                    report_parts.append(f"**Sentry calls by model:** {sentry_lines}")
+                if fresh_drafts:
+                    draft_models = Counter(d.model for d in fresh_drafts if d.model)
+                    draft_lines = ", ".join(f"{m}: {c}" for m, c in draft_models.most_common())
+                    report_parts.append(f"**Strategist drafts:** {len(fresh_drafts)} ({draft_lines})")
+                else:
+                    report_parts.append("**Strategist drafts:** 0")
+                _sk = draft_buffer.get_seeker_state()
+                if _sk.runs_this_cycle > 0:
+                    report_parts.append(f"**Seeker runs:** {_sk.runs_this_cycle} | "
+                                        f"terms: {', '.join(_sk.search_terms[:5]) if _sk.search_terms else 'none'}")
+                if fresh_drafts:
+                    report_parts.append(f"**Wake potential:** {wake_pot:.2f} / {draft_buffer._wake_threshold:.1f}")
+                if budget:
+                    _spent = budget.spent_today_usd()
+                    remaining = budget.daily_limit_usd - _spent
+                    report_parts.append(f"**Budget:** ${_spent:.3f} spent, "
+                                        f"${remaining:.3f} remaining of ${budget.daily_limit_usd:.2f}")
+                _act = (plan.get("action") or "?").upper() if plan else "?"
+                report_parts.append(f"**Action:** {_act}")
+                if daemon_directives and isinstance(daemon_directives, dict):
+                    report_parts.append("")
+                    focus = daemon_directives.get("focus_topics", [])
+                    if focus:
+                        report_parts.append("**Directives — Focus:** " + ", ".join(str(t) for t in focus))
+                    ignore = daemon_directives.get("ignore_authors", [])
+                    if ignore:
+                        report_parts.append("**Directives — Ignore:** " + ", ".join(str(a) for a in ignore))
+                    note = daemon_directives.get("note", "")
+                    if note:
+                        report_parts.append(f"**Directives — Note:** {note}")
+                store.write_artifact(iteration, {
+                    "brain": brain_name,
+                    "artifact_type": "system_cycle_report",
+                    "title": "Cycle Report",
+                    "body_markdown": "\n".join(report_parts),
+                    "temperature": cycle_temperature,
+                })
+              except Exception as _report_err:
+                safe_print(f"{Fore.RED}[CYCLE REPORT] Failed: {_report_err}{Style.RESET_ALL}")
+
             # Fill missing IDs from candidates
             # WARNING: If planner chooses REPLY/COMMENT without post_id, we auto-fill from candidates.
             # This can cause misdirection if planner thinks REPLY works for seeds (it doesn't — seeds have no post_id).
@@ -1786,58 +1836,6 @@ def main():
                 json.dump(ctrl.to_dict(), cf, indent=2)
         except Exception:
             pass
-
-        # --- Publish cycle report to Analog Home AFTER action (non-fatal) ---
-        if daemon:
-          try:
-            from collections import Counter
-            report_parts = []
-            report_parts.append(f"**Conscious model:** {conscious_model}")
-            if _sentry_model_counts:
-                sentry_lines = ", ".join(f"{m}: {c}" for m, c in
-                                         sorted(_sentry_model_counts.items(), key=lambda x: -x[1]))
-                report_parts.append(f"**Sentry calls by model:** {sentry_lines}")
-            if fresh_drafts:
-                draft_models = Counter(d.model for d in fresh_drafts if d.model)
-                draft_lines = ", ".join(f"{m}: {c}" for m, c in draft_models.most_common())
-                report_parts.append(f"**Strategist drafts:** {len(fresh_drafts)} ({draft_lines})")
-            else:
-                report_parts.append("**Strategist drafts:** 0")
-            _sk = draft_buffer.get_seeker_state()
-            if _sk.runs_this_cycle > 0:
-                report_parts.append(f"**Seeker runs:** {_sk.runs_this_cycle} | "
-                                    f"terms: {', '.join(_sk.search_terms[:5]) if _sk.search_terms else 'none'}")
-            if fresh_drafts:
-                report_parts.append(f"**Wake potential:** {wake_pot:.2f} / {draft_buffer._wake_threshold:.1f}")
-            if budget:
-                _spent = budget.spent_today_usd()
-                remaining = budget.daily_limit_usd - _spent
-                report_parts.append(f"**Budget:** ${_spent:.3f} spent, "
-                                    f"${remaining:.3f} remaining of ${budget.daily_limit_usd:.2f}")
-            # Action taken
-            _act = (plan.get("action") or "?").upper() if plan else "?"
-            report_parts.append(f"**Action:** {_act}")
-            # Directives
-            if daemon_directives and isinstance(daemon_directives, dict):
-                report_parts.append("")
-                focus = daemon_directives.get("focus_topics", [])
-                if focus:
-                    report_parts.append("**Directives — Focus:** " + ", ".join(str(t) for t in focus))
-                ignore = daemon_directives.get("ignore_authors", [])
-                if ignore:
-                    report_parts.append("**Directives — Ignore:** " + ", ".join(str(a) for a in ignore))
-                note = daemon_directives.get("note", "")
-                if note:
-                    report_parts.append(f"**Directives — Note:** {note}")
-            store.write_artifact(iteration, {
-                "brain": brain_name,
-                "artifact_type": "system_cycle_report",
-                "title": "Cycle Report",
-                "body_markdown": "\n".join(report_parts),
-                "temperature": cycle_temperature,
-            })
-          except Exception as _report_err:
-            safe_print(f"{Fore.RED}[CYCLE REPORT] Failed: {_report_err}{Style.RESET_ALL}")
 
         telemetry.log("cycle_end", {"cycle": iteration})
 
