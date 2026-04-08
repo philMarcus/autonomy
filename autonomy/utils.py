@@ -460,10 +460,10 @@ def migrate_memory_to_tiers(state: Dict[str, Any]) -> bool:
     return True
 
 
-COMPRESS_PROMPT = """Synthesize these memory entries into one concise paragraph (under 300 characters).
-Preserve: key discoveries, ongoing experiments, important relationships, unresolved questions.
+COMPRESS_PROMPT = """Synthesize these memory entries into a coherent summary paragraph.
+Preserve: key discoveries, ongoing experiments, important relationships, unresolved questions, decisions made.
 Discard: routine actions, redundant observations.
-Write in first person past tense.
+Write in first person past tense. Be thorough — keep the full substance of what was learned.
 
 Entries:
 {entries_text}
