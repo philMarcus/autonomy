@@ -290,26 +290,30 @@ class SubconsciousDaemon:
                     signals_above += 1
                     high_signal_items.append((item, score))
 
-        # Seed scan (read from Analog Home, never consume)
+        # Seed scan — seeds BYPASS sentry scoring (human-planted = always high priority)
         seed_items = self._seed_scan()
         seeds_scanned = len(seed_items)
         for seed_item in seed_items:
-            score = self._score_item(seed_item)
             seed_id = seed_item.get("id", "")
-
-            if score > 0:
-                self._telemetry.log("sentry_signal", {
-                    "brain": self._brain_name,
-                    "tick": self._tick_count,
-                    "item_id": seed_id,
-                    "score": round(score, 3),
-                    "above_threshold": score >= signal_threshold,
-                    "source": "seed",
-                })
-
-            if score >= signal_threshold:
-                signals_above += 1
-                high_signal_items.append((seed_item, score))
+            seed_item["_source"] = "seed"
+            # Seeds always count as high-signal (score 1.0, no sentry needed)
+            signals_above += 1
+            high_signal_items.append((seed_item, 1.0))
+            # Add instant wake charge for seeds
+            seed_charge = float(self._ctrl.get("charge_weight_seed") or 999.0)
+            self._buffer._wake_potential += seed_charge
+            if self._buffer._wake_potential >= self._buffer._wake_threshold:
+                self._buffer._wake_event.set()
+            print(f"{Fore.GREEN}  [SEED] '{seed_item.get('title', seed_item.get('content', '?'))[:60]}' → "
+                  f"charge +{seed_charge} (instant wake){Style.RESET_ALL}")
+            self._telemetry.log("sentry_signal", {
+                "brain": self._brain_name,
+                "tick": self._tick_count,
+                "item_id": seed_id,
+                "score": 1.0,
+                "above_threshold": True,
+                "source": "seed",
+            })
 
         # --- Gear 2: Strategist — ONE call with all high-signal items ---
         if high_signal_items:
