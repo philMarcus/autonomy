@@ -296,8 +296,9 @@ def build_default_registry(model_registry, blacklist_str: str = "") -> ControlRe
                 "Weighted model pool for SENTRY scoring", "llm",
                 choices=subconscious_choices),
         Control("strategist_model_weights", "weights",
-                "gemini-2.5-flash-lite=1,ollama:gemma3:12b=1,ollama:phi4:latest=0.5",
-                "Weighted model pool for STRATEGIST drafts", "llm",
+                "ollama:deepseek-r1:8b=1,ollama:gemma3:12b=1,ollama:phi4:latest=0.5,"
+                "ollama:llama3.2:3b=0.3,ollama:qwen2.5:1.5b=0.1",
+                "Weighted model pool for STRATEGIST drafts (local only — free)", "llm",
                 choices=subconscious_choices),
         Control("seeker_model_weights", "weights", "gemini-2.5-flash-lite=1",
                 "Weighted model pool for SEEKER research (Gemini only — needs search grounding)", "llm",
