@@ -1118,12 +1118,16 @@ def render_daemon_tab(brain_filter: str):
         rub_display = rub_display.sort_values("ts", ascending=False).head(40)
         st.dataframe(rub_display, use_container_width=True, hide_index=True, height=250)
 
-        # Score by model comparison
+        # Score by model comparison (exclude zero scores — they're parse failures, not real scores)
         if "model" in rubrics.columns and "score" in rubrics.columns:
-            st.caption("Avg score by model")
-            model_stats = rubrics.groupby("model")["score"].agg(["count", "mean", "std"]).round(3)
-            model_stats.columns = ["calls", "avg_score", "std_dev"]
-            st.dataframe(model_stats, use_container_width=True)
+            st.caption("Avg score by model (excluding zeros)")
+            nonzero = rubrics[rubrics["score"] > 0]
+            if not nonzero.empty:
+                model_stats = nonzero.groupby("model")["score"].agg(["count", "mean", "std"]).round(3)
+                model_stats.columns = ["calls", "avg_score", "std_dev"]
+                st.dataframe(model_stats, use_container_width=True)
+            else:
+                st.info("No non-zero scores yet.")
     else:
         st.info("No sentry scores yet.")
 
