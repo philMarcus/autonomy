@@ -374,7 +374,7 @@ class SubconsciousDaemon:
             self._emit(f"  STRATEGIST ({_strat_model}) {len(high_signal_items)} items", Fore.CYAN)
             if drafts:
                 for d in drafts:
-                    self._emit(f"    → {d.suggested_action}: {d.target_summary[:60]}", Fore.GREEN)
+                    self._emit(f"    → DRAFT {d.suggested_action}: {d.target_summary[:60]}", Fore.GREEN)
             else:
                 self._emit("    (no drafts)", Fore.YELLOW)
             self._flush_tick_lines()  # push strategist results
