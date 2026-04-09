@@ -1321,7 +1321,7 @@ class SubconsciousDaemon:
         new_terms = []
         try:
             _synth_model = _pick_weighted_model(
-                self._ctrl.get("strategist_model_weights") or "ollama:gemma3:12b=1",
+                self._ctrl.get("synthesizer_model_weights") or "ollama:gemma3:12b=2,ollama:deepseek-r1:8b=1",
                 "ollama:gemma3:12b")
             synth_prompt = (
                 f"You are a research assistant. Given these new search findings, do two things:\n\n"

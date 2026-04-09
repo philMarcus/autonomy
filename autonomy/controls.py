@@ -303,6 +303,10 @@ def build_default_registry(model_registry, blacklist_str: str = "") -> ControlRe
         Control("seeker_model_weights", "weights", "gemini-2.5-flash-lite=1",
                 "Weighted model pool for SEEKER research (Gemini only — needs search grounding)", "llm",
                 choices=_GEMINI_TIER),
+        Control("synthesizer_model_weights", "weights",
+                "ollama:gemma3:12b=2,ollama:deepseek-r1:8b=1",
+                "Weighted model pool for SYNTHESIZER (seeker findings → insights + terms)", "llm",
+                choices=subconscious_choices),
         Control("verification_model_weights", "weights",
                 "ollama:gemma3:12b=3,gemini-2.5-flash=1",
                 "Weighted model pool for math verification challenges", "llm",
@@ -468,7 +472,7 @@ def build_default_registry(model_registry, blacklist_str: str = "") -> ControlRe
     _DEFAULT_LOCKED = {
         "conscious_model_weights", "subconscious_model_weights",
         "strategist_model_weights", "seeker_model_weights",
-        "verification_model_weights",
+        "synthesizer_model_weights", "verification_model_weights",
     }
     blacklist = _DEFAULT_LOCKED | {k.strip() for k in blacklist_str.split(",") if k.strip()}
 

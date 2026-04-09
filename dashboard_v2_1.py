@@ -846,9 +846,9 @@ def render_controls_tab(brain_filter: str):
                     if cli_flag:
                         help_text += f"  \nCLI override: `{cli_flag}`"
 
-                    # Special UI for weighted model pools
+                    # Special UI for weighted model pools — each cadre is collapsible
                     if typ == "weights":
-                        st.markdown(f"**{display_name}**")
+                      with st.expander(f"{display_name}", expanded=False):
                         st.caption(help_text)
                         weights_str = str(current_val or default)
                         # Parse existing weights
@@ -1232,6 +1232,7 @@ CONTROLS_META = [
     ("subconscious_model_weights", "weights", "gemini-2.5-flash-lite=1,ollama:gemma3:12b=1", "Sentry model pool (feed scoring)", "models", None, None, None),
     ("strategist_model_weights", "weights", "gemini-2.5-flash-lite=1,ollama:gemma3:12b=1", "Strategist model pool (draft generation)", "models", None, None, None),
     ("seeker_model_weights",     "weights", "gemini-2.5-flash-lite=1", "Seeker model pool (Gemini only — search grounding)", "models", None, None, None),
+    ("synthesizer_model_weights", "weights", "ollama:gemma3:12b=2,ollama:deepseek-r1:8b=1", "Synthesizer model pool (seeker findings → insights)", "models", None, None, None),
     ("verification_model_weights", "weights", "ollama:gemma3:12b=3,gemini-2.5-flash=1", "Verification model pool (math challenges)", "models", None, None, None),
     ("temperature",              "float", 0.7,    "Conscious LLM temperature",                      "models",   0.0,  2.0,   None),
     ("subconscious_temperature", "float", 0.3,    "Daemon LLM temperature",                         "models",   0.0,  2.0,   None),
@@ -1323,6 +1324,9 @@ DISPLAY_NAMES = {
     "conscious_model_weights": "Conscious Model Pool",
     "subconscious_model_weights": "Sentry Model Pool",
     "strategist_model_weights": "Strategist Model Pool",
+    "synthesizer_model_weights": "Synthesizer Model Pool",
+    "seeker_model_weights": "Seeker Model Pool",
+    "verification_model_weights": "Verification Model Pool",
 }
 
 
