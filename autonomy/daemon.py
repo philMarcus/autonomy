@@ -379,11 +379,14 @@ class SubconsciousDaemon:
                 })
 
         # Record charge produced this tick for auto-calibration
+        # Exclude seed charge (999) — seeds should cause instant wake, not inflate threshold
         _tick_charge = max(0, self._buffer.wake_potential - _pre_tick_potential)
+        _seed_charge_total = seeds_scanned * float(self._ctrl.get("charge_weight_seed") or 999.0) if seeds_scanned else 0
+        _feed_only_charge = max(0, _tick_charge - _seed_charge_total)
         if items_scanned > 0:
             _last_model = max(self._tick_model_counts, key=self._tick_model_counts.get) if self._tick_model_counts else ""
             if _last_model:
-                self._record_tick_charge(_last_model, _tick_charge)
+                self._record_tick_charge(_last_model, _feed_only_charge)
 
         # Reply candidate scan (every N ticks)
         _reply_interval = int(self._ctrl.get("reply_scan_interval_ticks") or 2)
