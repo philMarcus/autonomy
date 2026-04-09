@@ -95,7 +95,7 @@ def _format_draft_context(drafts: list, saved_plans: list,
 
 
 def _build_featured_note(store) -> str:
-    """Fetch the featured artifact title from Analog Home (if any)."""
+    """Fetch the featured artifact from Analog Home (if any)."""
     if not store._analog_home_url:
         return ""
     try:
@@ -106,7 +106,13 @@ def _build_featured_note(store) -> str:
         if resp.ok:
             data = resp.json()
             if data and data.get("title"):
-                return f'Your featured post on Analog Home: "{data["title"]}"'
+                title = data["title"]
+                body = (data.get("body_markdown") or "")[:1500]
+                return (
+                    f'Your FEATURED post on Analog Home (pinned for visitors):\n'
+                    f'  Title: "{title}"\n'
+                    f'  Body: {body}'
+                )
     except Exception:
         pass
     return ""
