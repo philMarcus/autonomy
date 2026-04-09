@@ -73,7 +73,7 @@ def _format_draft_context(drafts: list, saved_plans: list,
         for i, d in enumerate(drafts, 1):
             source_tag = " [HUMAN SEED]" if d.source == "seed" else " [SEARCH]" if d.source == "search" else ""
             model_tag = f" [by {d.model}]" if d.model else ""
-            lines.append(f"\n{i}. [score: {d.signal_score:.2f}]{source_tag}{model_tag} {d.target_summary}")
+            lines.append(f"\n{i}. [sentry score: {d.signal_score:.2f}]{source_tag}{model_tag} {d.target_summary}")
             lines.append(f"   Suggested: {d.suggested_action} — {d.reasoning}")
             if d.draft_content:
                 lines.append(f"   Draft: {d.draft_content[:200]}")
@@ -84,7 +84,7 @@ def _format_draft_context(drafts: list, saved_plans: list,
             source_tag = " [HUMAN SEED]" if d.source == "seed" else " [SEARCH]" if d.source == "search" else ""
             model_tag = f" [by {d.model}]" if d.model else ""
             age = f"saved {d.cycles_saved} cycle(s) ago"
-            lines.append(f"\n  S{i}. [score: {d.signal_score:.2f}]{source_tag}{model_tag} {d.target_summary} ({age})")
+            lines.append(f"\n  S{i}. [sentry score: {d.signal_score:.2f}]{source_tag}{model_tag} {d.target_summary} ({age})")
             lines.append(f"      Suggested: {d.suggested_action} — {d.reasoning}")
             if d.draft_content:
                 lines.append(f"      Draft: {d.draft_content[:200]}")
