@@ -406,6 +406,11 @@ class SubconsciousDaemon:
         if self._platform and self._tick_count % _reply_interval == 0:
             self._scan_reply_candidates()
 
+        # --- Gear 6: Dreamer (stochastic) ---
+        dream_interval = int(self._ctrl.get("dream_interval_ticks") or 100)
+        if random.random() < 1.0 / max(1, dream_interval):
+            self._dream()
+
         # ── Tick footer ──
         _wp = self._buffer.wake_potential
         _dc = self._buffer.draft_count
@@ -1582,6 +1587,68 @@ def _make_response(text: str, est_in: int, est_out: int, model_id: str) -> LLMRe
         output_tokens=est_out,
         model_id=model_id,
     )
+
+
+    def _dream(self) -> None:
+        """Generate a dream from a random topic and inject into memory."""
+        import os
+        topics_path = os.path.join("brains", f"{self._brain_name}_dream_topics.txt")
+        if not os.path.exists(topics_path):
+            return
+        try:
+            with open(topics_path) as f:
+                topics = [t.strip() for t in f if t.strip()]
+        except Exception:
+            return
+        if not topics:
+            return
+
+        topic = random.choice(topics)
+        model_id = _pick_weighted_model(
+            self._ctrl.get("dreamer_model_weights") or "ollama:gemma3:12b=2,ollama:deepseek-r1:8b=1",
+            "ollama:gemma3:12b")
+
+        prompt = (
+            f"Write a single paragraph describing a vivid dream about: {topic}\n"
+            f"Write in first person. Include sensory details — what you see, hear, feel.\n"
+            f"End with an emotional impression. Begin with \"This seems like a dream.\"\n"
+            f"Write ONLY the paragraph, nothing else."
+        )
+
+        try:
+            chat = self._registry.create_chat(
+                model_id=model_id,
+                system_instruction="You write vivid, sensory dream descriptions.",
+                temperature=0.9,
+                max_output_tokens=300,
+            )
+            dream_text = chat.send_message(prompt).strip()
+            if not dream_text or len(dream_text) < 20:
+                return
+
+            # Inject into memory
+            with self._state_lock:
+                tiers = self._state.setdefault("memory_tiers", {"recent": [], "compressed": [], "deep": []})
+                tiers["recent"].append({"cycle": None, "note": dream_text})
+
+            self._emit(f"  DREAMER ({model_id})", Fore.MAGENTA)
+            self._emit(f"    Topic: {topic}", Fore.MAGENTA)
+            self._emit(f"    \"{dream_text[:80]}...\"", Fore.MAGENTA)
+            self._flush_tick_lines()
+
+            self._telemetry.log("dreamer_inject", {
+                "brain": self._brain_name,
+                "tick": self._tick_count,
+                "topic": topic,
+                "model": model_id,
+                "length": len(dream_text),
+            })
+        except Exception as e:
+            self._telemetry.log("dreamer_error", {
+                "brain": self._brain_name,
+                "tick": self._tick_count,
+                "error": str(e)[:300],
+            })
 
 
 def _get_author(item: dict) -> str:

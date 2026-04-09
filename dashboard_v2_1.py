@@ -1233,6 +1233,7 @@ CONTROLS_META = [
     ("strategist_model_weights", "weights", "gemini-2.5-flash-lite=1,ollama:gemma3:12b=1", "Strategist model pool (draft generation)", "models", None, None, None),
     ("seeker_model_weights",     "weights", "gemini-2.5-flash-lite=1", "Seeker model pool (Gemini only — search grounding)", "models", None, None, None),
     ("synthesizer_model_weights", "weights", "ollama:gemma3:12b=2,ollama:deepseek-r1:8b=1", "Synthesizer model pool (seeker findings → insights)", "models", None, None, None),
+    ("dreamer_model_weights", "weights", "ollama:gemma3:12b=2,ollama:deepseek-r1:8b=1", "Dreamer model pool (dream generation)", "models", None, None, None),
     ("verification_model_weights", "weights", "ollama:gemma3:12b=3,gemini-2.5-flash=1", "Verification model pool (math challenges)", "models", None, None, None),
     ("temperature",              "float", 0.7,    "Conscious LLM temperature",                      "models",   0.0,  2.0,   None),
     ("subconscious_temperature", "float", 0.3,    "Daemon LLM temperature",                         "models",   0.0,  2.0,   None),
@@ -1325,6 +1326,7 @@ DISPLAY_NAMES = {
     "subconscious_model_weights": "Sentry Model Pool",
     "strategist_model_weights": "Strategist Model Pool",
     "synthesizer_model_weights": "Synthesizer Model Pool",
+    "dreamer_model_weights": "Dreamer Model Pool",
     "seeker_model_weights": "Seeker Model Pool",
     "verification_model_weights": "Verification Model Pool",
 }
