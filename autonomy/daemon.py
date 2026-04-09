@@ -360,11 +360,17 @@ class SubconsciousDaemon:
                 _seed_text = seed_item.get('title', seed_item.get('content', '?'))[:50]
                 self._emit(f"  SEED: \"{_seed_text}\" → score={score:.1f} (below {seed_threshold})", Fore.YELLOW)
 
+        # Add base charge for each signal (even if strategist produces no drafts)
+        _feed_charge = float(self._ctrl.get("charge_weight_feed") or 0.05)
+        for _ in high_signal_items:
+            with self._buffer._lock:
+                self._buffer._wake_potential += _feed_charge
+
         # --- Gear 2: Strategist — ONE call with all high-signal items ---
         if high_signal_items:
             seeker_summary = self._buffer.get_seeker_summary()
             drafts = self._strategize_batch(high_signal_items, seeker_summary)
-            _strat_model = drafts[0].model if drafts else "?"
+            _strat_model = getattr(self, '_last_strategist_model', None) or (drafts[0].model if drafts else "?")
             self._emit(f"  STRATEGIST ({_strat_model}) {len(high_signal_items)} items", Fore.CYAN)
             if drafts:
                 for d in drafts:
@@ -830,6 +836,7 @@ class SubconsciousDaemon:
         from .buffer import Draft
 
         model_id = self._pick_strategist_model()
+        self._last_strategist_model = model_id
         temp = self._ctrl.get("subconscious_temperature")
         max_tokens = self._ctrl.get("strategist_max_tokens")
 
