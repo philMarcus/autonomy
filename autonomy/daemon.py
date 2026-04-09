@@ -644,7 +644,7 @@ class SubconsciousDaemon:
             self._budget.record_usage(model_id, _make_response(text, est_in, est_out, model_id))
 
             rubric = parse_rubric_response(text)
-            score = rubric.get("relevance", 0) / 3.0  # normalize 0-3 to 0-1
+            score = rubric.get("relevance", 0) / 9.0  # normalize 0-3 to 0-1
 
             # Log per-criterion scores for observability
             self._telemetry.log("sentry_rubric", {
@@ -794,7 +794,7 @@ class SubconsciousDaemon:
             scores = []
             for i, (item, rubric) in enumerate(zip(items, rubrics)):
                 # Simple score: average of the three identical criteria / 3, normalized to 0-1
-                score = rubric.get("relevance", 0) / 3.0
+                score = rubric.get("relevance", 0) / 9.0
                 scores.append(score)
                 self._telemetry.log("sentry_rubric", {
                     "brain": self._brain_name,
@@ -847,7 +847,7 @@ class SubconsciousDaemon:
                         rubrics = parse_simple_batch_response(text, len(items))
                         scores = []
                         for i, (item, rubric) in enumerate(zip(items, rubrics)):
-                            score = rubric.get("relevance", 0) / 3.0
+                            score = rubric.get("relevance", 0) / 9.0
                             scores.append(score)
                             self._telemetry.log("sentry_rubric", {
                                 "brain": self._brain_name, "tick": self._tick_count,
@@ -1261,7 +1261,7 @@ class SubconsciousDaemon:
                 rubrics = parse_simple_batch_response(text, len(candidates))
 
                 for c, rubric in zip(candidates, rubrics):
-                    score = rubric.get("relevance", 0) / 3.0
+                    score = rubric.get("relevance", 0) / 9.0
                     if score >= 0.5:  # worthy of reply
                         cid = c.get("id", "")
                         author = c.get("author", {})

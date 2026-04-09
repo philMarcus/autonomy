@@ -194,13 +194,11 @@ def parse_simple_batch_response(text: str, num_items: int) -> List[Dict]:
     for i in range(num_items):
         if i < len(numbers):
             score_9 = min(9, max(0, int(numbers[i])))
-            # Map 0-9 to 0-3 per criterion (approximate)
-            score_3 = round(score_9 / 3.0)
-            score_3 = min(3, score_3)
+            # Store raw 0-9 score directly (relevance field used as 0-9, divided by 9 downstream)
             results.append({
-                "relevance": score_3,
-                "novelty": score_3,
-                "actionability": score_3,
+                "relevance": score_9,
+                "novelty": score_9,
+                "actionability": score_9,
                 "reason": "",
                 "raw": text[:200],
             })
