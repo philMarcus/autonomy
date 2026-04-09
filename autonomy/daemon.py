@@ -1325,7 +1325,7 @@ class SubconsciousDaemon:
                 "ollama:gemma3:12b")
             synth_prompt = (
                 f"You are a research assistant. Given these new search findings, do two things:\n\n"
-                f"1. Write a 2-3 sentence synthesis of the KEY insights (not a generic summary).\n"
+                f"1. Write a 3-5 sentence synthesis of the KEY insights (not a generic summary).\n"
                 f"2. Suggest 3 specific follow-up search terms that go DEEPER.\n\n"
                 f"FINDINGS:\n{new_block[:2000]}\n\n"
                 f"Format:\nSYNTHESIS: <your synthesis>\n"
@@ -1335,7 +1335,7 @@ class SubconsciousDaemon:
                 model_id=_synth_model,
                 system_instruction="Synthesize research and suggest search terms.",
                 temperature=0.4,
-                max_output_tokens=300,
+                max_output_tokens=500,
             )
             synth_resp = synth_chat.send_message(synth_prompt).strip()
             # Parse synthesis and terms
