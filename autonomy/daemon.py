@@ -25,8 +25,8 @@ from .cooldowns import can_do
 from .llm import DailyBudget, ModelRegistry
 from .llm.base import LLMResponse
 from .scoring import (
-    build_sentry_prompt, build_simple_batch_prompt,
-    parse_rubric_response, parse_simple_batch_response,
+    build_simple_batch_prompt,
+    parse_simple_batch_response,
 )
 from .telemetry import TelemetryLogger
 from .utils import shorten, is_item_too_old, norm_key
@@ -619,43 +619,38 @@ class SubconsciousDaemon:
         if not self._budget.can_afford(model_id, est_input_tokens=800, est_output_tokens=50):
             return 0.0
 
-        # Build item summary
+        # Build item summary — use same simple format as batch scoring
         author_name = _get_author(item)
         title = item.get("title", "") or ""
         content = item.get("content", "") or ""
-        item_text = f"- Author: @{author_name}\n- Title: {title}\n- Content: {shorten(content, 500)}"
+        item_text = f"@{author_name}: \"{title}\" — {shorten(content, 300)}"
 
         directives_text = self._get_directives_text()
-        prompt = build_sentry_prompt(item_text, self._directive, directives_text)
+        prompt = build_simple_batch_prompt([item_text], self._directive, directives_text)
 
         try:
-            chat_kwargs: Dict[str, Any] = dict(
+            chat = self._registry.create_chat(
                 model_id=model_id,
                 system_instruction="You are a feed-scanning daemon. Score items concisely.",
                 temperature=temp,
-                max_output_tokens=self._ctrl.get("sentry_max_tokens"),
+                max_output_tokens=50,
                 disable_thinking=True,
             )
-            chat = self._registry.create_chat(**chat_kwargs)
             text = chat.send_message(prompt)
-            # Estimate tokens for budget tracking
-            est_in = (len(self._kernel) + len(prompt)) // 4
+            est_in = (len(prompt)) // 4
             est_out = len(text) // 4
             self._budget.record_usage(model_id, _make_response(text, est_in, est_out, model_id))
 
-            rubric = parse_rubric_response(text)
-            score = rubric.get("relevance", 0) / 9.0  # normalize 0-3 to 0-1
+            rubrics = parse_simple_batch_response(text, 1)
+            rubric = rubrics[0] if rubrics else {"relevance": 0}
+            score = rubric.get("relevance", 0) / 9.0
 
-            # Log per-criterion scores for observability
             self._telemetry.log("sentry_rubric", {
                 "brain": self._brain_name,
                 "tick": self._tick_count,
                 "item_id": item.get("id", ""),
                 "relevance": rubric.get("relevance", 0),
-                "novelty": rubric.get("novelty", 0),
-                "actionability": rubric.get("actionability", 0),
                 "score": score,
-                "reason": rubric.get("reason", ""),
                 "model": model_id,
             })
             return score

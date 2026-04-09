@@ -155,7 +155,7 @@ def parse_batch_rubric_response(text: str, num_items: int) -> List[Dict]:
         if i in parsed_by_index:
             results.append(parsed_by_index[i])
         else:
-            results.append({name: 0 for name in CRITERION_NAMES} | {"reason": "", "raw": ""})
+            results.append({"relevance": 0, "raw": ""})
 
     return results
 
@@ -194,16 +194,12 @@ def parse_simple_batch_response(text: str, num_items: int) -> List[Dict]:
     for i in range(num_items):
         if i < len(numbers):
             score_9 = min(9, max(0, int(numbers[i])))
-            # Store raw 0-9 score directly (relevance field used as 0-9, divided by 9 downstream)
             results.append({
                 "relevance": score_9,
-                "novelty": score_9,
-                "actionability": score_9,
-                "reason": "",
                 "raw": text[:200],
             })
         else:
-            results.append({name: 0 for name in CRITERION_NAMES} | {"reason": "", "raw": ""})
+            results.append({"relevance": 0, "raw": ""})
     return results
 
 
