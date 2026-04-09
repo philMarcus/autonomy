@@ -94,11 +94,14 @@ def _format_draft_context(drafts: list, saved_plans: list,
     return "\n".join(lines)
 
 
-def _push_to_live(store, lines, daemon=None):
-    """Push conscious loop lines to Analog Home live daemon feed."""
+def _push_to_live(store, lines, daemon=None, cycle=0):
+    """Push conscious loop lines to Analog Home live daemon feed.
+
+    Uses cycle + 10000 as tick number to avoid collision with daemon ticks.
+    """
     if not store or not hasattr(store, 'push_daemon_tick'):
         return
-    tick = daemon._tick_count if daemon else 0
+    tick = cycle + 10000  # conscious events use high tick numbers
     interval = 300
     if daemon and hasattr(daemon, '_ctrl'):
         interval = int(daemon._ctrl.get("sentry_interval_seconds") or 300)
@@ -889,7 +892,7 @@ def main():
         _model_short = conscious_model.replace("ollama:", "") if _is_local else conscious_model
         _model_tag = "local" if _is_local else "api"
         safe_print(f"{_model_color}── CYCLE {iteration} ── conscious: {_model_short} ({_model_tag}) ──{Style.RESET_ALL}")
-        _push_to_live(store, [f"── CYCLE {iteration} ── conscious: {_model_short} ({_model_tag}) ──"], daemon)
+        _push_to_live(store, [f"── CYCLE {iteration} ── conscious: {_model_short} ({_model_tag}) ──"], daemon, cycle=iteration)
 
         # --- Budget planning (accountant) ---
         if ctrl.get("budget_plan_enabled"):
@@ -928,7 +931,7 @@ def main():
                         if bp_changes:
                             try:
                                 print(f"{Fore.CYAN}[BUDGET] Plan applied: {bp_changes}")
-                                _push_to_live(store, [f"[BUDGET] {bp_changes}"], daemon)
+                                _push_to_live(store, [f"[BUDGET] {bp_changes}"], daemon, cycle=iteration)
                             except Exception:
                                 pass
                 except Exception as bp_err:
@@ -1284,7 +1287,7 @@ def main():
                 tiers = state.setdefault("memory_tiers", {"recent": [], "compressed": [], "deep": []})
                 tiers["recent"].append({"cycle": iteration, "note": memory_note})
                 safe_print(f"{Fore.GREEN}[MEMORY] {memory_note}")
-                _push_to_live(store, [f"[MEMORY] {memory_note[:80]}"], daemon)
+                _push_to_live(store, [f"[MEMORY] {memory_note[:80]}"], daemon, cycle=iteration)
 
                 # Auto-compress when tiers overflow
                 _recent_cap = int(ctrl.get("memory_recent_capacity") if ctrl else 20)
@@ -1306,7 +1309,7 @@ def main():
                         tiers["recent"] = tiers["recent"][half:]
                         tiers["compressed"].append(result)
                         safe_print(f"{Fore.CYAN}[COMPRESS] {half} recent → compressed: {result['summary'][:80]}...")
-                        _push_to_live(store, [f"[COMPRESS] {half} recent → compressed"], daemon)
+                        _push_to_live(store, [f"[COMPRESS] {half} recent → compressed"], daemon, cycle=iteration)
 
                 if len(tiers["compressed"]) >= _compressed_cap:
                     half = _compressed_cap // 2
@@ -1364,7 +1367,7 @@ def main():
                     safe_print(f"{Fore.MAGENTA}[KERNEL UPDATE REQUESTED]")
                     safe_print(f"{Fore.YELLOW}Reason: {reason}")
                     safe_print(f"{Fore.YELLOW}New kernel length: {len(new_kernel)} chars")
-                    _push_to_live(store, [f"[KERNEL] Updated ({len(new_kernel)} chars): {reason[:60]}"], daemon)
+                    _push_to_live(store, [f"[KERNEL] Updated ({len(new_kernel)} chars): {reason[:60]}"], daemon, cycle=iteration)
                 except Exception:
                     pass
 
@@ -1513,7 +1516,7 @@ def main():
                         safe_print(f"{Fore.YELLOW}  [CTRL] {ck} BLOCKED (blacklisted)")
                         _ctrl_live_lines.append(f"[CONTROL] {ck} BLOCKED")
                 if _ctrl_live_lines:
-                    _push_to_live(store, _ctrl_live_lines, daemon)
+                    _push_to_live(store, _ctrl_live_lines, daemon, cycle=iteration)
 
 
                 # Actuate budget change
@@ -1944,7 +1947,7 @@ def main():
                             "source_id": source_id,
                             "content_length": len(executed_plan.get("content", "")),
                         })
-                        _push_to_live(store, [f"ACTION: {act_upper} \"{(artifact_title or '')[:60]}\""], daemon)
+                        _push_to_live(store, [f"ACTION: {act_upper} \"{(artifact_title or '')[:60]}\""], daemon, cycle=iteration)
 
                         # --- Post memory buffer ---
                         _post_buf = state.setdefault("_post_memory_buffer", [])
