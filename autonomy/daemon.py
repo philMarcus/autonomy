@@ -254,6 +254,7 @@ class SubconsciousDaemon:
         """One tick of the daemon: seeker → sentry → strategist (single call)."""
         self._tick_count += 1
         self._tick_lines: list = []
+        self._tick_model_counts.clear()
 
         # Read controls
         signal_threshold = self._ctrl.get("signal_threshold")
@@ -309,7 +310,7 @@ class SubconsciousDaemon:
                     self._reflex(item, score)
                     signals_above += 1
                     high_signal_items.append((item, score))
-                    _author = item.get("author", {}).get("username", "?") if isinstance(item.get("author"), dict) else item.get("author", "?")
+                    _author = _get_author(item)
                     _title = (item.get("title") or item.get("content", ""))[:60]
                     _signal_lines.append((_author, _title, score))
 
