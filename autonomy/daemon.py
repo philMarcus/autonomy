@@ -1606,21 +1606,6 @@ class SubconsciousDaemon:
             model=model_id,
         )
 
-
-# ======================================================================
-# Helpers
-# ======================================================================
-
-def _make_response(text: str, est_in: int, est_out: int, model_id: str) -> LLMResponse:
-    """Construct an LLMResponse for budget tracking from estimated token counts."""
-    return LLMResponse(
-        text=text,
-        input_tokens=est_in,
-        output_tokens=est_out,
-        model_id=model_id,
-    )
-
-
     def _dream(self) -> None:
         """Generate a dream from a random topic and inject into memory."""
         import os
@@ -1681,6 +1666,20 @@ def _make_response(text: str, est_in: int, est_out: int, model_id: str) -> LLMRe
                 "tick": self._tick_count,
                 "error": str(e)[:300],
             })
+
+
+# ======================================================================
+# Helpers
+# ======================================================================
+
+def _make_response(text: str, est_in: int, est_out: int, model_id: str) -> LLMResponse:
+    """Construct an LLMResponse for budget tracking from estimated token counts."""
+    return LLMResponse(
+        text=text,
+        input_tokens=est_in,
+        output_tokens=est_out,
+        model_id=model_id,
+    )
 
 
 def _get_author(item: dict) -> str:
