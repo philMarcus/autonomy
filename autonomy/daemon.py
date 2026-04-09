@@ -1312,52 +1312,63 @@ class SubconsciousDaemon:
         if not all_findings:
             return
 
-        # Build updated living summary by asking LLM to synthesize old + new
+        # Append new findings to living summary (preserves all prior content)
         prev_summary = self._buffer.get_seeker_summary()
-        synthesis_prompt = (
-            f"You are a research assistant. Synthesize the following into a coherent summary.\n\n"
-        )
-        if prev_summary:
-            synthesis_prompt += f"PREVIOUS FINDINGS:\n{shorten(prev_summary, 2000)}\n\n"
-        synthesis_prompt += (
-            f"NEW FINDINGS:\n" + "\n---\n".join(shorten(f, 1500) for f in all_findings) + "\n\n"
-            f"Write a unified summary (3-5 paragraphs) covering all findings.\n"
-            f"Then suggest 2-3 follow-up search terms to explore further.\n\n"
-            f"Format:\nSUMMARY: <your unified summary>\n"
-            f"NEXT_TERMS: <term1>, <term2>, <term3>"
-        )
+        new_block = "\n---\n".join(shorten(f, 1500) for f in all_findings)
+        combined = f"{prev_summary}\n\n[Tick {self._tick_count}]\n{new_block}" if prev_summary else new_block
 
+        # Extract follow-up terms from the last search result
+        new_terms = []
+        # Ask LLM only for next search terms (cheap, no synthesis needed)
         try:
+            terms_prompt = (
+                f"Based on these research findings, suggest 3 follow-up search terms.\n\n"
+                f"{new_block[:1500]}\n\n"
+                f"Reply with ONLY a comma-separated list of 3 search terms:"
+            )
             chat = self._registry.create_chat(
                 model_id=model_id,
-                system_instruction=self._kernel,
+                system_instruction="You suggest search terms.",
                 temperature=temp,
-                max_output_tokens=max_tokens,
-                tools=self._search_tools,
+                max_output_tokens=100,
             )
-            synthesis = chat.send_message(synthesis_prompt)
-            est_in = (len(synthesis_prompt) + len(self._kernel)) // 4
-            est_out = len(synthesis) // 4
+            terms_resp = chat.send_message(terms_prompt)
+            est_in = len(terms_prompt) // 4
+            est_out = len(terms_resp) // 4
             self._budget.record_usage(model_id,
-                                      _make_response(synthesis, est_in, est_out, model_id))
+                                      _make_response(terms_resp, est_in, est_out, model_id))
+            new_terms = [t.strip() for t in terms_resp.strip().split(",") if t.strip()][:5]
+        except Exception:
+            pass  # keep old terms on failure
 
-            # Parse summary and next terms
-            new_summary = synthesis
-            new_terms = []
-            if "SUMMARY:" in synthesis:
-                parts = synthesis.split("SUMMARY:", 1)
-                remainder = parts[1] if len(parts) > 1 else synthesis
-                if "NEXT_TERMS:" in remainder:
-                    summary_part, terms_part = remainder.split("NEXT_TERMS:", 1)
-                    new_summary = summary_part.strip()
-                    new_terms = [t.strip() for t in terms_part.strip().split(",") if t.strip()]
-                else:
-                    new_summary = remainder.strip()
+        # Compress if over max length
+        _max_summary = int(self._ctrl.get("seeker_max_summary_chars") or 2000)
+        if len(combined) > _max_summary:
+            try:
+                _compressor = self._ctrl.get("compressor_model") or "ollama:qwen2.5:1.5b"
+                compress_prompt = (
+                    f"Compress these research findings into a coherent summary under {_max_summary} characters.\n"
+                    f"Preserve: key discoveries, specific claims, data points, unresolved questions.\n"
+                    f"Discard: redundant observations, generic statements.\n\n"
+                    f"{combined}\n\n"
+                    f"Write ONLY the compressed summary:"
+                )
+                comp_chat = self._registry.create_chat(
+                    model_id=_compressor,
+                    system_instruction="Compress concisely.",
+                    temperature=0.3,
+                    max_output_tokens=800,
+                )
+                combined = comp_chat.send_message(compress_prompt).strip()
+            except Exception:
+                # Truncate as last resort
+                combined = combined[-_max_summary:]
 
+        try:
             # Update the living summary in the buffer
             self._buffer.update_seeker(
-                summary=new_summary,
-                new_terms=new_terms if new_terms else terms,  # keep old terms if no new ones
+                summary=combined,
+                new_terms=new_terms if new_terms else terms,
                 sources=all_sources,
                 tick=self._tick_count,
             )

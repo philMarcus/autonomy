@@ -402,6 +402,8 @@ def build_default_registry(model_registry, blacklist_str: str = "") -> ControlRe
                 "Max output tokens for seeker responses", "daemon", min_val=256, max_val=8192),
         Control("charge_weight_search", "float", 0.2,
                 "Charge for seeker-discovered items (informational)", "daemon", min_val=0.0, max_val=5.0),
+        Control("seeker_max_summary_chars", "int", 2000,
+                "Max chars for seeker living summary before compression", "daemon", min_val=500, max_val=10000),
         Control("seeker_max_topics", "int", 3,
                 "Max focus topics to search per sweep", "daemon", min_val=1, max_val=10),
 
