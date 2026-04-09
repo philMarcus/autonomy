@@ -94,6 +94,24 @@ def _format_draft_context(drafts: list, saved_plans: list,
     return "\n".join(lines)
 
 
+def _build_featured_note(store) -> str:
+    """Fetch the featured artifact title from Analog Home (if any)."""
+    if not store._analog_home_url:
+        return ""
+    try:
+        import requests
+        from urllib.parse import urljoin
+        url = urljoin(store._analog_home_url.rstrip("/") + "/", "featured")
+        resp = requests.get(url, timeout=5)
+        if resp.ok:
+            data = resp.json()
+            if data and data.get("title"):
+                return f'Your featured post on Analog Home: "{data["title"]}"'
+    except Exception:
+        pass
+    return ""
+
+
 def _build_post_engagement(platform, state: dict, count: int = 5) -> str:
     """Fetch upvote/comment counts for agent's recent Moltbook posts."""
     if not platform:
@@ -1102,7 +1120,7 @@ def main():
             daemon_active=daemon is not None,
             platform_status=platform_status,
             nudge_note=nudge_note,
-            self_telemetry=_build_self_telemetry(state, budget, iteration, daemon),
+            self_telemetry=_build_self_telemetry(state, budget, iteration, daemon) + "\n" + _build_featured_note(store),
             recent_posts=_build_recent_posts(store, state.get("_session_id", ""),
                                              count=int(ctrl.get("recent_posts_in_prompt") or 4)),
             post_engagement=_build_post_engagement(platform, state),
