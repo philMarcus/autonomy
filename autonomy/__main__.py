@@ -625,28 +625,14 @@ def main():
     store._run_id = session_id
 
     if analog_home_url:
-        con_weights = ctrl.get("conscious_model_weights") or conscious_model
-        sub_weights = ctrl.get("subconscious_model_weights") or "gemini-2.5-flash-lite"
-        seeker = ctrl.get("seeker_model_weights") or "gemini-2.5-flash-lite=1"
-        run_body = (
-            f"Version: {VERSION}\n"
-            f"Default conscious model: {conscious_model}\n"
-            f"**Conscious pool:** {con_weights}\n"
-            f"**Subconscious pool:** {sub_weights}\n"
-            f"**Seeker model:** {seeker}"
-        )
-        if fresh_session:
-            run_body += "\nSession: NEW"
-        else:
-            run_body += f"\nSession: continued (restart)"
+        session_type = "New session" if fresh_session else "Agent restart"
+        run_body = f"v{VERSION} | {session_type}"
         if changes:
-            run_body += "\n\nChanges detected:\n" + "\n".join(f"- {c}" for c in changes)
-        else:
-            run_body += "\n\nNo configuration changes since last run."
+            run_body += "\n" + "\n".join(f"- {c}" for c in changes)
         store.write_artifact(0, {
             "brain": brain_name,
             "artifact_type": "system_run_start",
-            "title": f"Run Started -- {brain_name}",
+            "title": session_type,
             "body_markdown": run_body,
             "temperature": float(ctrl.get("temperature") if ctrl else 0.7),
         })
