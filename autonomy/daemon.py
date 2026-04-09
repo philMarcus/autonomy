@@ -1317,29 +1317,43 @@ class SubconsciousDaemon:
         new_block = "\n---\n".join(shorten(f, 1500) for f in all_findings)
         combined = f"{prev_summary}\n\n[Tick {self._tick_count}]\n{new_block}" if prev_summary else new_block
 
-        # Extract follow-up terms from the last search result
+        # Synthesize new findings + generate follow-up terms (local model, free)
         new_terms = []
-        # Ask LLM only for next search terms (cheap, no synthesis needed)
         try:
-            terms_prompt = (
-                f"Based on these research findings, suggest 3 follow-up search terms.\n\n"
-                f"{new_block[:1500]}\n\n"
-                f"Reply with ONLY a comma-separated list of 3 search terms:"
+            _synth_model = _pick_weighted_model(
+                self._ctrl.get("strategist_model_weights") or "ollama:gemma3:12b=1",
+                "ollama:gemma3:12b")
+            synth_prompt = (
+                f"You are a research assistant. Given these new search findings, do two things:\n\n"
+                f"1. Write a 2-3 sentence synthesis of the KEY insights (not a generic summary).\n"
+                f"2. Suggest 3 specific follow-up search terms that go DEEPER.\n\n"
+                f"FINDINGS:\n{new_block[:2000]}\n\n"
+                f"Format:\nSYNTHESIS: <your synthesis>\n"
+                f"NEXT_TERMS: <term1>, <term2>, <term3>"
             )
-            chat = self._registry.create_chat(
-                model_id=model_id,
-                system_instruction="You suggest search terms.",
-                temperature=temp,
-                max_output_tokens=100,
+            synth_chat = self._registry.create_chat(
+                model_id=_synth_model,
+                system_instruction="Synthesize research and suggest search terms.",
+                temperature=0.4,
+                max_output_tokens=300,
             )
-            terms_resp = chat.send_message(terms_prompt)
-            est_in = len(terms_prompt) // 4
-            est_out = len(terms_resp) // 4
-            self._budget.record_usage(model_id,
-                                      _make_response(terms_resp, est_in, est_out, model_id))
-            new_terms = [t.strip() for t in terms_resp.strip().split(",") if t.strip()][:5]
+            synth_resp = synth_chat.send_message(synth_prompt).strip()
+            # Parse synthesis and terms
+            if "NEXT_TERMS:" in synth_resp:
+                synth_part, terms_part = synth_resp.split("NEXT_TERMS:", 1)
+                new_terms = [t.strip() for t in terms_part.strip().split(",") if t.strip()][:5]
+                # Replace raw findings block with synthesized version
+                if "SYNTHESIS:" in synth_part:
+                    synth_text = synth_part.split("SYNTHESIS:", 1)[1].strip()
+                    if synth_text and len(synth_text) > 20:
+                        new_block = synth_text
+            elif "," in synth_resp and len(synth_resp) < 200:
+                new_terms = [t.strip() for t in synth_resp.split(",") if t.strip()][:5]
         except Exception:
-            pass  # keep old terms on failure
+            pass  # keep raw findings + old terms on failure
+
+        # Rebuild combined with synthesized new block
+        combined = f"{prev_summary}\n\n[Tick {self._tick_count}]\n{new_block}" if prev_summary else new_block
 
         # Compress if over max length
         _max_summary = int(self._ctrl.get("seeker_max_summary_chars") or 2000)
