@@ -1218,7 +1218,7 @@ def main():
                 plan = plan_next_action(chat, prompt, telemetry=telemetry, brain_name=brain_name, budget=budget)
             except Exception as _plan_err:
                 _err_str = str(_plan_err)
-                if "503" in _err_str or "UNAVAILABLE" in _err_str:
+                if "503" in _err_str or "UNAVAILABLE" in _err_str or "ReadTimeout" in _err_str or "timed out" in _err_str:
                     # Retry with a different conscious model
                     from .daemon import _pick_weighted_model
                     retry_model = _pick_weighted_model(
@@ -1260,7 +1260,7 @@ def main():
                             _success = True
                             break
                         except Exception as _inner_err:
-                            if "503" in str(_inner_err) or "UNAVAILABLE" in str(_inner_err):
+                            if "503" in str(_inner_err) or "UNAVAILABLE" in str(_inner_err) or "ReadTimeout" in str(_inner_err) or "timed out" in str(_inner_err):
                                 continue  # try next model
                             raise  # non-503 error, propagate
                     if not _success:
