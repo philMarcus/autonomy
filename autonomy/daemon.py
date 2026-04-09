@@ -1378,14 +1378,14 @@ class SubconsciousDaemon:
             # Parse synthesis and terms
             if "NEXT_TERMS:" in synth_resp:
                 synth_part, terms_part = synth_resp.split("NEXT_TERMS:", 1)
-                new_terms = [t.strip() for t in terms_part.strip().split(",") if t.strip()][:5]
+                new_terms = [t.strip().strip("*\"'`- ") for t in terms_part.strip().split(",") if t.strip().strip("*\"'`- ")][:5]
                 # Replace raw findings block with synthesized version
                 if "SYNTHESIS:" in synth_part:
                     synth_text = synth_part.split("SYNTHESIS:", 1)[1].strip()
                     if synth_text and len(synth_text) > 20:
                         new_block = synth_text
             elif "," in synth_resp and len(synth_resp) < 200:
-                new_terms = [t.strip() for t in synth_resp.split(",") if t.strip()][:5]
+                new_terms = [t.strip().strip("*\"'`- ") for t in synth_resp.split(",") if t.strip().strip("*\"'`- ")][:5]
         except Exception:
             pass  # keep raw findings + old terms on failure
 
