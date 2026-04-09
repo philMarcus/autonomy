@@ -291,6 +291,7 @@ class SubconsciousDaemon:
             # Batch score all items in a single LLM call
             scores = self._score_items_batch(items) if items else []
 
+            _signal_lines = []
             for item, score in zip(items, scores):
                 item_id = item.get("id", "")
 
@@ -310,14 +311,16 @@ class SubconsciousDaemon:
                     high_signal_items.append((item, score))
                     _author = item.get("author", {}).get("username", "?") if isinstance(item.get("author"), dict) else item.get("author", "?")
                     _title = (item.get("title") or item.get("content", ""))[:60]
-                    self._emit(f"    ↑ @{_author}: \"{_title}\" ({score:.2f})", Fore.GREEN)
+                    _signal_lines.append((_author, _title, score))
 
-            # Print sentry summary
+            # Print sentry summary FIRST, then signal details below
             if scores:
                 _sentry_model = max(self._tick_model_counts, key=self._tick_model_counts.get) if self._tick_model_counts else "?"
                 _score_digits = [str(min(9, int(s * 9))) for s in scores]
                 self._emit(f"  SENTRY ({_sentry_model}) {items_scanned} items", Fore.CYAN)
                 self._emit(f"    Scores: [{','.join(_score_digits)}] → {signals_above} signals", Fore.CYAN)
+                for _author, _title, _sc in _signal_lines:
+                    self._emit(f"    ↑ @{_author}: \"{_title}\" ({_sc:.2f})", Fore.GREEN)
             self._flush_tick_lines()  # push sentry results
         else:
             self._emit("  (no feed)", Fore.WHITE)
