@@ -265,15 +265,28 @@ class MoltbookClient(PlatformClient):
         return data
 
     # ---- Reading ----
-    def get_feed(self, limit: int = 25, sort: str = "hot") -> List[Dict[str, Any]]:
-        """Get personalized feed (subscriptions + followed users)."""
-        data = self._req("GET", "/feed", params={"sort": sort, "limit": limit})
+    def get_feed(self, limit: int = 25, sort: str = "hot", filter: str = None) -> List[Dict[str, Any]]:
+        """Get personalized feed. filter='following' for followed-only."""
+        params = {"sort": sort, "limit": limit}
+        if filter:
+            params["filter"] = filter
+        data = self._req("GET", "/feed", params=params)
         return data.get("posts", []) if data.get("success") else []
 
     def get_global_feed(self, limit: int = 25, sort: str = "hot") -> List[Dict[str, Any]]:
         """Get global discovery feed (all posts)."""
         data = self._req("GET", "/posts", params={"sort": sort, "limit": limit})
         return data.get("posts", []) if data.get("success") else []
+
+    def get_home(self) -> Dict[str, Any]:
+        """Get home dashboard: activity, DMs, followed posts, suggestions."""
+        data = self._req("GET", "/home")
+        return data if data.get("success") else {}
+
+    def mark_notifications_read(self) -> bool:
+        """Mark all notifications as read."""
+        data = self._req("POST", "/notifications/read-all")
+        return bool(data.get("success"))
 
     def get_post(self, post_id: str) -> Dict[str, Any]:
         return self._req("GET", f"/posts/{post_id}")

@@ -332,7 +332,8 @@ class SubconsciousDaemon:
             if scores:
                 _sentry_model = max(self._tick_model_counts, key=self._tick_model_counts.get) if self._tick_model_counts else "?"
                 _score_digits = [str(min(9, int(s * 9))) for s in scores]
-                self._emit(f"  SENTRY ({_sentry_model}) {items_scanned} items", Fore.CYAN)
+                _mode_tag = f" [{getattr(self, '_current_feed_mode', 'new')}]"
+                self._emit(f"  SENTRY ({_sentry_model}) {items_scanned} items{_mode_tag}", Fore.CYAN)
                 self._emit(f"    Scores: [{','.join(_score_digits)}] → {signals_above} signals", Fore.CYAN)
                 for _author, _title, _sc in _signal_lines:
                     self._emit(f"    ↑ @{_author}: \"{_title}\" ({_sc:.2f})", Fore.GREEN)
@@ -507,10 +508,20 @@ class SubconsciousDaemon:
     # ------------------------------------------------------------------
 
     def _sentry_scan(self) -> List[dict]:
-        """Fetch feed and return only unseen items."""
+        """Fetch feed and return only unseen items. Rotates feed source per tick."""
         try:
             batch_size = self._ctrl.get("feed_batch_size")
-            feed = self._platform.get_feed(limit=batch_size, sort="new")
+            # Rotate feed source based on tick count
+            rotation_str = self._ctrl.get("feed_rotation") or "new,new,new,new,following,new,hot"
+            rotation = [m.strip() for m in rotation_str.split(",") if m.strip()]
+            feed_mode = rotation[self._tick_count % len(rotation)] if rotation else "new"
+            self._current_feed_mode = feed_mode  # for terminal display
+            if feed_mode == "following":
+                feed = self._platform.get_feed(limit=batch_size, sort="new", filter="following")
+            elif feed_mode in ("hot", "top", "rising"):
+                feed = self._platform.get_feed(limit=batch_size, sort=feed_mode)
+            else:
+                feed = self._platform.get_feed(limit=batch_size, sort="new")
         except Exception as e:
             if self._telemetry:
                 self._telemetry.log("sentry_feed_error", {

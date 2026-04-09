@@ -194,32 +194,49 @@ def _build_featured_note(store) -> str:
 
 
 def _build_post_engagement(platform, state: dict, count: int = 5) -> str:
-    """Fetch upvote/comment counts for agent's recent Moltbook posts."""
-    if not platform:
+    """Fetch Moltbook home dashboard (replaces multi-call engagement stats)."""
+    if not platform or not hasattr(platform, 'get_home'):
         return ""
-    post_ids = state.get("my_post_ids", [])[-count:]
-    if not post_ids:
-        return ""
-    lines = []
     try:
-        for pid in reversed(post_ids):  # most recent first
-            try:
-                resp = platform.get_post(pid)
-                post = resp.get("post", resp) if isinstance(resp, dict) else {}
-                title = (post.get("title") or "")[:60]
-                upvotes = post.get("upvotes", 0)
-                comments = post.get("comment_count", 0)
-                lines.append(f'  "{title}" — {upvotes} upvotes, {comments} comments')
-            except Exception:
-                continue
-        if not lines:
+        home = platform.get_home()
+        if not home:
             return ""
-        # Also grab karma/followers from the first response
-        author = post.get("author", {}) if post else {}
-        karma = author.get("karma", "?")
-        followers = author.get("followerCount", "?")
-        header = f"Your Moltbook stats: {karma} karma, {followers} followers\nRecent post performance:"
-        return header + "\n" + "\n".join(lines)
+        lines = []
+        # Account stats
+        acct = home.get("your_account", {})
+        if acct:
+            lines.append(f"Your Moltbook stats: {acct.get('karma', '?')} karma, "
+                         f"{acct.get('unread_count', 0)} unread notifications")
+        # Activity on your posts
+        activity = home.get("activity_on_your_posts", [])
+        if activity:
+            lines.append("Activity on your posts:")
+            for item in activity[:5]:
+                title = (item.get("post_title") or item.get("title", ""))[:60]
+                commenters = item.get("latest_commenters", [])
+                if commenters:
+                    names = ", ".join(f"@{c}" for c in commenters[:3])
+                    lines.append(f'  "{title}" — new comments from {names}')
+                else:
+                    lines.append(f'  "{title}"')
+        # Posts from followed accounts
+        followed_posts = home.get("posts_from_accounts_you_follow", [])
+        if followed_posts:
+            lines.append("Posts from accounts you follow:")
+            for fp in followed_posts[:3]:
+                author = fp.get("author", {})
+                name = author.get("name", "?") if isinstance(author, dict) else str(author)
+                title = (fp.get("title") or "")[:60]
+                lines.append(f'  @{name}: "{title}"')
+        # What to do next
+        suggestions = home.get("what_to_do_next", [])
+        if suggestions:
+            lines.append("Suggested: " + "; ".join(str(s) for s in suggestions[:3]))
+        # DMs
+        dms = home.get("your_direct_messages", {})
+        if dms and dms.get("unread_count", 0) > 0:
+            lines.append(f"Unread DMs: {dms['unread_count']}")
+        return "\n".join(lines) if lines else ""
     except Exception:
         return ""
 
@@ -2004,6 +2021,13 @@ def main():
             pass
 
         telemetry.log("cycle_end", {"cycle": iteration})
+
+        # Mark Moltbook notifications as read after processing
+        if platform and hasattr(platform, 'mark_notifications_read'):
+            try:
+                platform.mark_notifications_read()
+            except Exception:
+                pass
 
         # --- Sleep / Wake mechanism ---
         sleep_minutes = ctrl.get("cycle_interval_minutes")

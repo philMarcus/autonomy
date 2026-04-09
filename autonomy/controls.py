@@ -420,6 +420,9 @@ def build_default_registry(model_registry, blacklist_str: str = "") -> ControlRe
         # --- Context ---
         Control("feed_batch_size", "int", 8,
                 "Feed items per cycle", "context", min_val=1, max_val=50),
+        Control("feed_rotation", "str",
+                "new,new,new,new,following,new,hot",
+                "Sentry feed rotation pattern per tick (new/following/hot/top/rising)", "daemon"),
         Control("feed_item_chars", "int", 400,
                 "Max chars per feed item in prompt", "context", min_val=50, max_val=2000),
         Control("history_context_n", "int", 15,
