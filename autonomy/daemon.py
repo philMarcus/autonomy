@@ -308,6 +308,9 @@ class SubconsciousDaemon:
                     self._reflex(item, score)
                     signals_above += 1
                     high_signal_items.append((item, score))
+                    _author = item.get("author", {}).get("username", "?") if isinstance(item.get("author"), dict) else item.get("author", "?")
+                    _title = (item.get("title") or item.get("content", ""))[:60]
+                    self._emit(f"    ↑ @{_author}: \"{_title}\" ({score:.2f})", Fore.GREEN)
 
             # Print sentry summary
             if scores:
@@ -1360,6 +1363,12 @@ class SubconsciousDaemon:
         self._emit(f"    Searched {len(terms)} terms → {results_found} results", Fore.MAGENTA)
         if _next_terms:
             self._emit(f"    Next: {', '.join(_next_terms)}", Fore.MAGENTA)
+        _summary_text = _sk_state.summary or ""
+        if _summary_text:
+            # Full summary to terminal; live daemon will show full line (CSS truncates visually)
+            for _sline in _summary_text.split("\n")[:5]:
+                if _sline.strip():
+                    self._emit(f"    {_sline.strip()[:120]}", Fore.MAGENTA)
         self._flush_tick_lines()  # push seeker results
 
         self._telemetry.log("seeker_sweep", {

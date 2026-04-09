@@ -94,6 +94,25 @@ def _format_draft_context(drafts: list, saved_plans: list,
     return "\n".join(lines)
 
 
+def _push_to_live(store, lines, daemon=None):
+    """Push conscious loop lines to Analog Home live daemon feed."""
+    if not store or not hasattr(store, 'push_daemon_tick'):
+        return
+    tick = daemon._tick_count if daemon else 0
+    interval = 300
+    if daemon and hasattr(daemon, '_ctrl'):
+        interval = int(daemon._ctrl.get("sentry_interval_seconds") or 300)
+    store.push_daemon_tick(tick, lines, interval, complete=False)
+
+
+def _format_model_name(model_id: str) -> str:
+    """Format model name for display: strip ollama: prefix, add (local)/(api)."""
+    if model_id.startswith("ollama:"):
+        short = model_id[7:].replace(":", " ")
+        return f"{short} (local)"
+    return f"{model_id} (api)"
+
+
 def _compress_post_memory(state, registry, ctrl):
     """Compress the post memory buffer and cascade tiers."""
     from .utils import compress_post_tier
@@ -797,10 +816,12 @@ def main():
         extra_str = f" | {', '.join(extras)}" if extras else ""
         print(f"{Fore.CYAN}    subconscious daemon: ACTIVE{extra_str}")
 
-    iteration = 0
+    # Cycle number persists across restarts (only resets on memory wipe)
+    iteration = state.get("_cycle_number", 0)
     prev_feed_available = None  # Track feed state transitions
     while True:
         iteration += 1
+        state["_cycle_number"] = iteration
 
         # --- Re-read controls from disk (picks up dashboard edits) ---
         if os.path.exists(controls_file):
@@ -865,6 +886,7 @@ def main():
         _model_short = conscious_model.replace("ollama:", "") if _is_local else conscious_model
         _model_tag = "local" if _is_local else "api"
         safe_print(f"{_model_color}── CYCLE {iteration} ── conscious: {_model_short} ({_model_tag}) ──{Style.RESET_ALL}")
+        _push_to_live(store, [f"── CYCLE {iteration} ── conscious: {_model_short} ({_model_tag}) ──"], daemon)
 
         # --- Budget planning (accountant) ---
         if ctrl.get("budget_plan_enabled"):
@@ -903,6 +925,7 @@ def main():
                         if bp_changes:
                             try:
                                 print(f"{Fore.CYAN}[BUDGET] Plan applied: {bp_changes}")
+                                _push_to_live(store, [f"[BUDGET] {bp_changes}"], daemon)
                             except Exception:
                                 pass
                 except Exception as bp_err:
@@ -1251,6 +1274,7 @@ def main():
                 tiers = state.setdefault("memory_tiers", {"recent": [], "compressed": [], "deep": []})
                 tiers["recent"].append({"cycle": iteration, "note": memory_note})
                 safe_print(f"{Fore.GREEN}[MEMORY] {memory_note}")
+                _push_to_live(store, [f"[MEMORY] {memory_note[:80]}"], daemon)
 
                 # Auto-compress when tiers overflow
                 _recent_cap = int(ctrl.get("memory_recent_capacity") if ctrl else 20)
@@ -1272,6 +1296,7 @@ def main():
                         tiers["recent"] = tiers["recent"][half:]
                         tiers["compressed"].append(result)
                         safe_print(f"{Fore.CYAN}[COMPRESS] {half} recent → compressed: {result['summary'][:80]}...")
+                        _push_to_live(store, [f"[COMPRESS] {half} recent → compressed"], daemon)
 
                 if len(tiers["compressed"]) >= _compressed_cap:
                     half = _compressed_cap // 2
@@ -1329,6 +1354,7 @@ def main():
                     safe_print(f"{Fore.MAGENTA}[KERNEL UPDATE REQUESTED]")
                     safe_print(f"{Fore.YELLOW}Reason: {reason}")
                     safe_print(f"{Fore.YELLOW}New kernel length: {len(new_kernel)} chars")
+                    _push_to_live(store, [f"[KERNEL] Updated ({len(new_kernel)} chars): {reason[:60]}"], daemon)
                 except Exception:
                     pass
 
@@ -1468,11 +1494,16 @@ def main():
                     "blocked_count": len(blocked),
                 })
 
+                _ctrl_live_lines = []
                 for ck, cv in results.items():
                     if cv == "ok":
                         safe_print(f"{Fore.GREEN}  [CTRL] {ck} -> {ctrl.get(ck)}")
+                        _ctrl_live_lines.append(f"[CONTROL] {ck} → {ctrl.get(ck)}")
                     elif cv == "blocked":
                         safe_print(f"{Fore.YELLOW}  [CTRL] {ck} BLOCKED (blacklisted)")
+                        _ctrl_live_lines.append(f"[CONTROL] {ck} BLOCKED")
+                if _ctrl_live_lines:
+                    _push_to_live(store, _ctrl_live_lines, daemon)
 
 
                 # Actuate budget change
@@ -1490,11 +1521,11 @@ def main():
                 if applied:
                     changes_lines = []
                     for ck in sorted(applied.keys()):
-                        changes_lines.append(f"- **{ck}**: {ctrl.get(ck)}")
+                        changes_lines.append(f"{ck}: {ctrl.get(ck)}")
                     if blocked:
                         changes_lines.append("")
                         for ck in sorted(blocked.keys()):
-                            changes_lines.append(f"- ~~{ck}~~ (blocked by blacklist)")
+                            changes_lines.append(f"{ck}: BLOCKED")
                     store.write_artifact(iteration, {
                         "brain": brain_name,
                         "artifact_type": "system_controls_update",
@@ -1524,41 +1555,41 @@ def main():
               try:
                 from collections import Counter
                 report_parts = []
-                report_parts.append(f"**Conscious model:** {conscious_model}")
+                report_parts.append(f"Conscious model: {_format_model_name(conscious_model)}")
                 if _sentry_model_counts:
-                    sentry_lines = ", ".join(f"{m}: {c}" for m, c in
+                    sentry_lines = ", ".join(f"{_format_model_name(m)}: {c}" for m, c in
                                              sorted(_sentry_model_counts.items(), key=lambda x: -x[1]))
-                    report_parts.append(f"**Sentry calls by model:** {sentry_lines}")
+                    report_parts.append(f"Sentry calls: {sentry_lines}")
                 if fresh_drafts:
                     draft_models = Counter(d.model for d in fresh_drafts if d.model)
-                    draft_lines = ", ".join(f"{m}: {c}" for m, c in draft_models.most_common())
-                    report_parts.append(f"**Strategist drafts:** {len(fresh_drafts)} ({draft_lines})")
+                    draft_lines = ", ".join(f"{_format_model_name(m)}: {c}" for m, c in draft_models.most_common())
+                    report_parts.append(f"Strategist drafts: {len(fresh_drafts)} ({draft_lines})")
                 else:
-                    report_parts.append("**Strategist drafts:** 0")
+                    report_parts.append("Strategist drafts: 0")
                 _sk = draft_buffer.get_seeker_state()
                 if _sk.runs_this_cycle > 0:
-                    report_parts.append(f"**Seeker runs:** {_sk.runs_this_cycle} | "
+                    report_parts.append(f"Seeker runs: {_sk.runs_this_cycle} | "
                                         f"terms: {', '.join(_sk.search_terms[:5]) if _sk.search_terms else 'none'}")
                 if fresh_drafts:
-                    report_parts.append(f"**Wake potential:** {wake_pot:.2f} / {draft_buffer._wake_threshold:.1f}")
+                    report_parts.append(f"Wake potential: {wake_pot:.2f} / {draft_buffer._wake_threshold:.1f}")
                 if budget:
                     _spent = budget.spent_today_usd()
                     remaining = budget.daily_limit_usd - _spent
-                    report_parts.append(f"**Budget:** ${_spent:.3f} spent, "
+                    report_parts.append(f"Budget: ${_spent:.3f} spent, "
                                         f"${remaining:.3f} remaining of ${budget.daily_limit_usd:.2f}")
                 _act = (plan.get("action") or "?").upper() if plan else "?"
-                report_parts.append(f"**Action:** {_act}")
+                report_parts.append(f"Action: {_act}")
                 if daemon_directives and isinstance(daemon_directives, dict):
                     report_parts.append("")
                     focus = daemon_directives.get("focus_topics", [])
                     if focus:
-                        report_parts.append("**Directives — Focus:** " + ", ".join(str(t) for t in focus))
+                        report_parts.append("Directives — Focus: " + ", ".join(str(t) for t in focus))
                     ignore = daemon_directives.get("ignore_authors", [])
                     if ignore:
-                        report_parts.append("**Directives — Ignore:** " + ", ".join(str(a) for a in ignore))
+                        report_parts.append("Directives — Ignore: " + ", ".join(str(a) for a in ignore))
                     note = daemon_directives.get("note", "")
                     if note:
-                        report_parts.append(f"**Directives — Note:** {note}")
+                        report_parts.append(f"Directives — Note: {note}")
                 store.write_artifact(iteration, {
                     "brain": brain_name,
                     "artifact_type": "system_cycle_report",
@@ -1903,6 +1934,7 @@ def main():
                             "source_id": source_id,
                             "content_length": len(executed_plan.get("content", "")),
                         })
+                        _push_to_live(store, [f"ACTION: {act_upper} \"{(artifact_title or '')[:60]}\""], daemon)
 
                         # --- Post memory buffer ---
                         _post_buf = state.setdefault("_post_memory_buffer", [])
