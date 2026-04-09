@@ -1659,6 +1659,7 @@ class SubconsciousDaemon:
                 "topic": topic,
                 "model": model_id,
                 "length": len(dream_text),
+                "text": dream_text[:1000],
             })
         except Exception as e:
             self._telemetry.log("dreamer_error", {
