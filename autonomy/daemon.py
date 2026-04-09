@@ -110,6 +110,11 @@ class SubconsciousDaemon:
             )
         # Track reply candidates already scored (avoid re-scoring)
         self._scored_comment_ids: Set[str] = set()
+        # Load persisted scored comment IDs from state
+        with self._state_lock:
+            _persisted = self._state.get("_scored_comment_ids", [])
+            if _persisted:
+                self._scored_comment_ids.update(_persisted)
 
         # Track which feed items we've already scored (avoid re-scoring)
         self._seen_ids: Set[str] = set()
@@ -1268,9 +1273,11 @@ class SubconsciousDaemon:
                     "error": str(e)[:200],
                 })
 
-        # Cap scored_comment_ids
+        # Cap and persist scored_comment_ids
         if len(self._scored_comment_ids) > 500:
             self._scored_comment_ids = set(list(self._scored_comment_ids)[-250:])
+        with self._state_lock:
+            self._state["_scored_comment_ids"] = list(self._scored_comment_ids)[-500:]
 
     # ------------------------------------------------------------------
     # Gear 4: Seeker — search for information using Google Search
