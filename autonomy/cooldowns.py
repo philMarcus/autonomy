@@ -16,8 +16,8 @@ from typing import Any, Dict, Optional, Tuple
 # ============================================================
 DEFAULT_COOLDOWNS: Dict[str, int] = {
     "POST": 1800,               # 30m — Moltbook rate limit
-    "COMMENT": 180,             # 3m — behavioral throttle (API limit is 20s)
-    "REPLY": 180,               # same as COMMENT
+    "COMMENT": 60,              # 1m — behavioral throttle (API limit is 20s)
+    "REPLY": 60,                # same as COMMENT
     "UPVOTE_POST": 60,          # prevent spam-voting
     "DOWNVOTE_POST": 60,
     "UPVOTE_COMMENT": 30,
