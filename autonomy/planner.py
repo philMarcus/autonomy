@@ -391,6 +391,7 @@ def build_planner_prompt(
     nudge_note: str = "",
     self_telemetry: str = "",
     recent_posts: str = "",
+    post_memory: str = "",
 ) -> str:
     read_only_note = ""
     if read_only:
@@ -467,6 +468,8 @@ Recent actions (history):
 Your recent posts/artifacts (what you actually wrote — build on these):
 {recent_posts if recent_posts else "No recent posts available."}
 {f"""
+{post_memory}
+""" if post_memory else ""}{f"""
 --- YOUR MOLTBOOK POST PERFORMANCE ---
 {post_engagement}
 """ if post_engagement else ""}

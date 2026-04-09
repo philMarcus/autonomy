@@ -518,6 +518,93 @@ def compress_memory_tier(entries, chat_fn, tier_name="recent"):
         return None
 
 
+POST_COMPRESS_PROMPT = """Synthesize these posts/comments into a summary of what was produced.
+Preserve: topics addressed, key ideas expressed, creative approaches, conversations engaged.
+Discard: formatting details, routine responses.
+Write in first person past tense. Be thorough.
+
+Posts:
+{entries_text}
+
+Write ONLY the synthesized paragraph:"""
+
+
+def compress_post_tier(entries, chat_fn):
+    """Compress a list of post entries into a single summary using an LLM.
+
+    Args:
+        entries: list of dicts — either raw posts {cycle, type, title, body}
+                 or already-compressed {cycles, summary}
+        chat_fn: callable(prompt) -> str
+
+    Returns:
+        dict with {cycles: "X-Y", summary: "..."} or None on failure
+    """
+    if not entries:
+        return None
+
+    lines = []
+    cycle_nums = []
+    for e in entries:
+        if "body" in e:
+            # Raw post entry
+            prefix = f"[c{e.get('cycle', '?')} {e.get('type', 'post')}]"
+            title = e.get("title", "")
+            body = e.get("body", "")
+            lines.append(f"{prefix} {title}\n{body}")
+            if isinstance(e.get("cycle"), int):
+                cycle_nums.append(e["cycle"])
+        elif "summary" in e:
+            # Already-compressed entry
+            lines.append(f"[cycles {e.get('cycles', '?')}] {e['summary']}")
+
+    entries_text = "\n\n".join(lines)
+    prompt = POST_COMPRESS_PROMPT.format(entries_text=entries_text)
+
+    try:
+        summary = chat_fn(prompt).strip()
+        if cycle_nums:
+            cycles_label = f"{min(cycle_nums)}-{max(cycle_nums)}"
+        else:
+            all_ranges = [e.get("cycles", "") for e in entries if e.get("cycles")]
+            if all_ranges:
+                first = all_ranges[0].split("-")[0]
+                last = all_ranges[-1].split("-")[-1]
+                cycles_label = f"{first}-{last}"
+            else:
+                cycles_label = "?"
+        return {"cycles": cycles_label, "summary": summary}
+    except Exception:
+        return None
+
+
+def post_memory_context(state: Dict[str, Any]) -> str:
+    """Render hierarchical post memory tiers for the planner prompt."""
+    tiers = state.get("post_tiers")
+    if not tiers:
+        return ""
+
+    lines = []
+    deep = tiers.get("deep", [])
+    if deep:
+        for entry in deep:
+            lines.append(f"[deep: cycles {entry.get('cycles', '?')}] {entry.get('summary', '')}")
+
+    compressed = tiers.get("compressed", [])
+    if compressed:
+        for entry in compressed:
+            lines.append(f"[cycles {entry.get('cycles', '?')}] {entry.get('summary', '')}")
+
+    recent = tiers.get("recent", [])
+    if recent:
+        for entry in recent:
+            lines.append(f"[cycles {entry.get('cycles', '?')}] {entry.get('summary', '')}")
+
+    if not lines:
+        return ""
+    return "=== POST HISTORY (what you've written) ===\n" + "\n".join(lines)
+
+
 def compress_memories(
     state: Dict[str, Any],
     chat_fn,

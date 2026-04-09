@@ -32,7 +32,7 @@ from .telemetry import TelemetryLogger
 from .store import LocalFileStore
 from .utils import (
     load_kernel, load_knowledge,
-    history_context, memory_context, post_url, get_author_name, shorten,
+    history_context, memory_context, post_memory_context, post_url, get_author_name, shorten,
     get_post_comment_count, add_history,
     update_kernel_file,
     aggregate_feeds, format_feed_brief,
@@ -92,6 +92,59 @@ def _format_draft_context(drafts: list, saved_plans: list,
         lines.append("\nYou may act on any of these, synthesize multiple into one action, or ignore them.")
         lines.append("Plans you don't act on will be saved for future cycles (up to 5 cycles).")
     return "\n".join(lines)
+
+
+def _compress_post_memory(state, registry, ctrl):
+    """Compress the post memory buffer and cascade tiers."""
+    from .utils import compress_post_tier
+    buf = state.get("_post_memory_buffer", [])
+    batch = int(ctrl.get("post_memory_batch") if ctrl else 4)
+    if len(buf) < batch:
+        return
+
+    _compressor = ctrl.get("compressor_model") if ctrl else "ollama:qwen2.5:1.5b"
+    def _compress_fn(prompt):
+        _c = registry.create_chat(
+            model_id=_compressor, system_instruction="Summarize concisely.",
+            temperature=0.3, max_output_tokens=512)
+        return _c.send_message(prompt)
+
+    to_compress = buf[:batch]
+    result = compress_post_tier(to_compress, _compress_fn)
+    if result:
+        state["_post_memory_buffer"] = buf[batch:]
+        tiers = state.setdefault("post_tiers", {"recent": [], "compressed": [], "deep": []})
+        tiers["recent"].append(result)
+        safe_print(f"{Fore.CYAN}[POST MEMORY] {batch} posts → summary: {result['summary'][:80]}...")
+
+        # Cascade
+        _recent_cap = int(ctrl.get("post_memory_recent_cap") if ctrl else 8)
+        _compressed_cap = int(ctrl.get("post_memory_compressed_cap") if ctrl else 8)
+        _deep_cap = int(ctrl.get("post_memory_deep_cap") if ctrl else 5)
+
+        if len(tiers["recent"]) >= _recent_cap:
+            half = _recent_cap // 2
+            r = compress_post_tier(tiers["recent"][:half], _compress_fn)
+            if r:
+                tiers["recent"] = tiers["recent"][half:]
+                tiers["compressed"].append(r)
+                safe_print(f"{Fore.CYAN}[POST MEMORY] {half} recent → compressed")
+
+        if len(tiers["compressed"]) >= _compressed_cap:
+            half = _compressed_cap // 2
+            r = compress_post_tier(tiers["compressed"][:half], _compress_fn)
+            if r:
+                tiers["compressed"] = tiers["compressed"][half:]
+                tiers["deep"].append(r)
+                safe_print(f"{Fore.CYAN}[POST MEMORY] {half} compressed → deep")
+
+        if len(tiers["deep"]) >= _deep_cap:
+            half = _deep_cap // 2
+            r = compress_post_tier(tiers["deep"][:half], _compress_fn)
+            if r:
+                tiers["deep"] = tiers["deep"][half:]
+                tiers["deep"].insert(0, r)
+                safe_print(f"{Fore.CYAN}[POST MEMORY] {half} deep → ultra-deep")
 
 
 def _build_featured_note(store) -> str:
@@ -1130,6 +1183,7 @@ def main():
             recent_posts=_build_recent_posts(store, state.get("_session_id", ""),
                                              count=int(ctrl.get("recent_posts_in_prompt") or 4)),
             post_engagement=_build_post_engagement(platform, state),
+            post_memory=post_memory_context(state),
         )
 
         plan = None
@@ -1849,6 +1903,18 @@ def main():
                             "source_id": source_id,
                             "content_length": len(executed_plan.get("content", "")),
                         })
+
+                        # --- Post memory buffer ---
+                        _post_buf = state.setdefault("_post_memory_buffer", [])
+                        _post_buf.append({
+                            "cycle": iteration,
+                            "type": artifact_type,
+                            "title": (artifact_title or "")[:100],
+                            "body": (executed_plan.get("content", "") or "")[:1500],
+                        })
+                        _batch_size = int(ctrl.get("post_memory_batch") if ctrl else 4)
+                        if len(_post_buf) >= _batch_size:
+                            _compress_post_memory(state, registry, ctrl)
 
         except Exception as e:
             telemetry.log("error", {"cycle": iteration, "error": str(e)})
