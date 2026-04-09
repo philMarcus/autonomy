@@ -466,7 +466,7 @@ def build_default_registry(model_registry, blacklist_str: str = "") -> ControlRe
         # --- Daemon permission controls ---
         Control("daemon_can_upvote", "bool", True,
                 "Daemon can upvote posts/comments", "daemon"),
-        Control("daemon_can_follow", "bool", False,
+        Control("daemon_can_follow", "bool", True,
                 "Daemon can follow (rare, off by default)", "daemon"),
         Control("daemon_can_subscribe", "bool", False,
                 "Daemon can subscribe to submolts", "daemon"),

@@ -527,7 +527,13 @@ class SubconsciousDaemon:
                 continue
             # Skip own posts
             author = item.get("author", {})
-            if isinstance(author, dict) and author.get("name") == self._username:
+            author_name = author.get("name", "") if isinstance(author, dict) else str(author)
+            if author_name == self._username:
+                continue
+            # Skip ignored authors (from conscious directives)
+            with self._directives_lock:
+                _ignored = {a.lower() for a in self._directives.get("ignore_authors", [])}
+            if author_name.lower() in _ignored:
                 continue
             # Skip stale items
             if is_item_too_old(item, max_age_hours):
