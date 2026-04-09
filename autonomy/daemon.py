@@ -143,6 +143,15 @@ class SubconsciousDaemon:
         """Start the daemon background thread."""
         if self._thread and self._thread.is_alive():
             return
+        # Clear old daemon ticks from Analog Home on each restart
+        if self._store and hasattr(self._store, '_analog_home_url') and self._store._analog_home_url:
+            try:
+                import requests
+                from urllib.parse import urljoin
+                url = urljoin(self._store._analog_home_url.rstrip("/") + "/", f"daemon-ticks?run_id={self._store._run_id}")
+                requests.delete(url, timeout=3)
+            except Exception:
+                pass
         self._stop_event.clear()
         self._thread = threading.Thread(
             target=self._run, name="subconscious-daemon", daemon=True
