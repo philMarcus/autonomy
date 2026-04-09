@@ -1228,8 +1228,15 @@ def main():
                         retry_model = _pick_weighted_model(
                             ctrl.get("conscious_model_weights"), "gemini-2.5-pro",
                         )
-                    # Try each conscious pool model until one works
-                    _all_con = [p.split("=")[0].strip() for p in (ctrl.get("conscious_model_weights") or "").split(",") if "=" in p]
+                    # Try each conscious pool model until one works (highest weight first)
+                    _con_pairs = []
+                    for p in (ctrl.get("conscious_model_weights") or "").split(","):
+                        if "=" in p:
+                            _m, _w = p.rsplit("=", 1)
+                            try: _con_pairs.append((_m.strip(), float(_w.strip())))
+                            except ValueError: pass
+                    _con_pairs.sort(key=lambda x: -x[1])  # highest weight first
+                    _all_con = [m for m, w in _con_pairs]
                     _tried = {conscious_model}
                     _success = False
                     for _candidate in _all_con:
