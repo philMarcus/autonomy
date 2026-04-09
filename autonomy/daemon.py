@@ -348,14 +348,18 @@ class SubconsciousDaemon:
             if score >= seed_threshold:
                 signals_above += 1
                 high_signal_items.append((seed_item, score))
-                # Seeds that pass get high charge (configurable, default 999 = instant wake)
-                seed_charge = float(self._ctrl.get("charge_weight_seed") or 999.0)
+                # Seed charge: threshold * score for normal seeds, 999 for operator seeds (-P suffix)
+                _seed_text_raw = seed_item.get('title', seed_item.get('content', ''))
+                if _seed_text_raw.rstrip().endswith("-P"):
+                    seed_charge = 999.0  # operator seed — instant wake
+                else:
+                    seed_charge = self._buffer._wake_threshold * score  # proportional to threshold + quality
                 with self._buffer._lock:
                     self._buffer._wake_potential += seed_charge
                     if self._buffer._wake_potential >= self._buffer._wake_threshold:
                         self._buffer._wake_event.set()
-                _seed_text = seed_item.get('title', seed_item.get('content', '?'))[:50]
-                self._emit(f"  SEED: \"{_seed_text}\" → score={score:.1f} → charge +{seed_charge}", Fore.GREEN)
+                _seed_text = (_seed_text_raw or "?")[:50]
+                self._emit(f"  SEED: \"{_seed_text}\" → score={score:.1f} → charge +{seed_charge:.1f}", Fore.GREEN)
             else:
                 _seed_text = seed_item.get('title', seed_item.get('content', '?'))[:50]
                 self._emit(f"  SEED: \"{_seed_text}\" → score={score:.1f} (below {seed_threshold})", Fore.YELLOW)
