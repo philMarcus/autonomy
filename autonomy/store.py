@@ -113,6 +113,23 @@ class LocalFileStore(Store):
         except Exception:
             return {}
 
+    def push_daemon_tick(self, tick: int, lines: list, sentry_interval: int = 300,
+                          complete: bool = False) -> None:
+        """Push daemon tick lines to Analog Home for live display."""
+        if not self._analog_home_url:
+            return
+        try:
+            import requests
+            url = urljoin(self._analog_home_url.rstrip("/") + "/", "daemon-tick")
+            requests.post(url, json={
+                "tick": tick, "brain": getattr(self, '_brain_name', ''),
+                "run_id": self._run_id,
+                "lines": lines, "sentry_interval": sentry_interval,
+                "complete": complete,
+            }, timeout=3)
+        except Exception:
+            pass  # non-fatal, best-effort
+
     def consume_seeds(self, seed_ids: list) -> bool:
         """DELETE seeds by ID after the agent has read them."""
         if not self._analog_home_url or not seed_ids:

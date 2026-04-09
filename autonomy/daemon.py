@@ -231,9 +231,29 @@ class SubconsciousDaemon:
             interval = self._ctrl.get("sentry_interval_seconds")
             self._stop_event.wait(timeout=max(1, interval))
 
+    def _emit(self, line: str, color=None) -> None:
+        """Print a line to terminal AND accumulate for Analog Home push."""
+        if color:
+            print(f"{color}{line}{Style.RESET_ALL}")
+        else:
+            print(line)
+        # Strip ANSI for Analog Home (plain text with role prefixes for CSS coloring)
+        import re as _re
+        clean = _re.sub(r'\x1b\[[0-9;]*m', '', f"{color}{line}{Style.RESET_ALL}" if color else line)
+        self._tick_lines.append(clean)
+
+    def _flush_tick_lines(self, complete: bool = False) -> None:
+        """Push accumulated lines to Analog Home and clear."""
+        if self._tick_lines and self._store:
+            interval = int(self._ctrl.get("sentry_interval_seconds") or 300)
+            self._store.push_daemon_tick(
+                self._tick_count, list(self._tick_lines), interval, complete)
+            self._tick_lines.clear()
+
     def _tick(self) -> None:
         """One tick of the daemon: seeker → sentry → strategist (single call)."""
         self._tick_count += 1
+        self._tick_lines: list = []
 
         # Read controls
         signal_threshold = self._ctrl.get("signal_threshold")
@@ -246,7 +266,8 @@ class SubconsciousDaemon:
         self._buffer.decay(1.0)
 
         # ── Tick header ──
-        print(f"{Fore.BLUE}── TICK {self._tick_count} {'─' * 38}{Style.RESET_ALL}")
+        self._emit(f"── TICK {self._tick_count} {'─' * 38}", Fore.CYAN)
+        self._flush_tick_lines()  # push header immediately
 
         # --- Gear 4: Seeker goes FIRST (every N ticks) ---
         seeker_n = int(self._ctrl.get("seeker_every_n_ticks") or 3)
@@ -292,10 +313,11 @@ class SubconsciousDaemon:
             if scores:
                 _sentry_model = max(self._tick_model_counts, key=self._tick_model_counts.get) if self._tick_model_counts else "?"
                 _score_digits = [str(min(9, int(s * 9))) for s in scores]
-                print(f"{Fore.BLUE}  SENTRY ({_sentry_model}) {items_scanned} items{Style.RESET_ALL}")
-                print(f"{Fore.BLUE}    Scores: [{','.join(_score_digits)}] → {signals_above} signals{Style.RESET_ALL}")
+                self._emit(f"  SENTRY ({_sentry_model}) {items_scanned} items", Fore.CYAN)
+                self._emit(f"    Scores: [{','.join(_score_digits)}] → {signals_above} signals", Fore.CYAN)
+            self._flush_tick_lines()  # push sentry results
         else:
-            print(f"{Fore.BLUE}  (no feed){Style.RESET_ALL}")
+            self._emit("  (no feed)", Fore.CYAN)
 
         # Seed scan — scored by sentry but with lower threshold and higher charge
         # Good-faith seeds wake the agent; garbage ("Hello!") does not
@@ -326,22 +348,23 @@ class SubconsciousDaemon:
                     if self._buffer._wake_potential >= self._buffer._wake_threshold:
                         self._buffer._wake_event.set()
                 _seed_text = seed_item.get('title', seed_item.get('content', '?'))[:50]
-                print(f"{Fore.GREEN}  SEED: \"{_seed_text}\" → score={score:.1f} → charge +{seed_charge}{Style.RESET_ALL}")
+                self._emit(f"  SEED: \"{_seed_text}\" → score={score:.1f} → charge +{seed_charge}", Fore.GREEN)
             else:
                 _seed_text = seed_item.get('title', seed_item.get('content', '?'))[:50]
-                print(f"{Fore.YELLOW}  SEED: \"{_seed_text}\" → score={score:.1f} (below {seed_threshold}){Style.RESET_ALL}")
+                self._emit(f"  SEED: \"{_seed_text}\" → score={score:.1f} (below {seed_threshold})", Fore.YELLOW)
 
         # --- Gear 2: Strategist — ONE call with all high-signal items ---
         if high_signal_items:
             seeker_summary = self._buffer.get_seeker_summary()
             drafts = self._strategize_batch(high_signal_items, seeker_summary)
             _strat_model = drafts[0].model if drafts else "?"
-            print(f"{Fore.CYAN}  STRATEGIST ({_strat_model}) {len(high_signal_items)} items{Style.RESET_ALL}")
+            self._emit(f"  STRATEGIST ({_strat_model}) {len(high_signal_items)} items", Fore.CYAN)
             if drafts:
                 for d in drafts:
-                    print(f"{Fore.GREEN}    → {d.suggested_action}: {d.target_summary[:60]}{Style.RESET_ALL}")
+                    self._emit(f"    → {d.suggested_action}: {d.target_summary[:60]}", Fore.GREEN)
             else:
-                print(f"{Fore.YELLOW}    (no drafts){Style.RESET_ALL}")
+                self._emit("    (no drafts)", Fore.YELLOW)
+            self._flush_tick_lines()  # push strategist results
             for draft in drafts:
                 self._buffer.add_draft(draft)
                 self._telemetry.log("strategist_draft", {
@@ -371,8 +394,9 @@ class SubconsciousDaemon:
         _wp = self._buffer.wake_potential
         _dc = self._buffer.draft_count
         _thresh = self._buffer._wake_threshold
-        print(f"{Fore.BLUE}  wake={_wp:.2f} | drafts={_dc} | threshold={_thresh:.1f}{Style.RESET_ALL}")
-        print(f"{Fore.BLUE}{'─' * 46}{Style.RESET_ALL}")
+        self._emit(f"  wake={_wp:.2f} | drafts={_dc} | threshold={_thresh:.1f}", Fore.CYAN)
+        self._emit(f"{'─' * 46}", Fore.CYAN)
+        self._flush_tick_lines(complete=True)  # final push for this tick
 
         self._telemetry.log("daemon_tick", {
             "brain": self._brain_name,
@@ -1329,10 +1353,11 @@ class SubconsciousDaemon:
 
         _sk_state = self._buffer.get_seeker_state()
         _next_terms = _sk_state.search_terms[:3]
-        print(f"{Fore.MAGENTA}  SEEKER ({model_id}){Style.RESET_ALL}")
-        print(f"{Fore.MAGENTA}    Searched {len(terms)} terms → {results_found} results{Style.RESET_ALL}")
+        self._emit(f"  SEEKER ({model_id})", Fore.MAGENTA)
+        self._emit(f"    Searched {len(terms)} terms → {results_found} results", Fore.MAGENTA)
         if _next_terms:
-            print(f"{Fore.MAGENTA}    Next: {', '.join(_next_terms)}{Style.RESET_ALL}")
+            self._emit(f"    Next: {', '.join(_next_terms)}", Fore.MAGENTA)
+        self._flush_tick_lines()  # push seeker results
 
         self._telemetry.log("seeker_sweep", {
             "brain": self._brain_name,
