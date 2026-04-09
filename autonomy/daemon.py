@@ -266,7 +266,7 @@ class SubconsciousDaemon:
         self._buffer.decay(1.0)
 
         # ── Tick header ──
-        self._emit(f"── TICK {self._tick_count} {'─' * 38}", Fore.CYAN)
+        self._emit(f"── TICK {self._tick_count} {'─' * 38}", Fore.WHITE)
         self._flush_tick_lines()  # push header immediately
 
         # --- Gear 4: Seeker goes FIRST (every N ticks) ---
@@ -317,7 +317,7 @@ class SubconsciousDaemon:
                 self._emit(f"    Scores: [{','.join(_score_digits)}] → {signals_above} signals", Fore.CYAN)
             self._flush_tick_lines()  # push sentry results
         else:
-            self._emit("  (no feed)", Fore.CYAN)
+            self._emit("  (no feed)", Fore.WHITE)
 
         # Seed scan — scored by sentry but with lower threshold and higher charge
         # Good-faith seeds wake the agent; garbage ("Hello!") does not
@@ -394,8 +394,8 @@ class SubconsciousDaemon:
         _wp = self._buffer.wake_potential
         _dc = self._buffer.draft_count
         _thresh = self._buffer._wake_threshold
-        self._emit(f"  wake={_wp:.2f} | drafts={_dc} | threshold={_thresh:.1f}", Fore.CYAN)
-        self._emit(f"{'─' * 46}", Fore.CYAN)
+        self._emit(f"  wake={_wp:.2f} | drafts={_dc} | threshold={_thresh:.1f}", Fore.WHITE)
+        self._emit(f"{'─' * 46}", Fore.WHITE)
         self._flush_tick_lines(complete=True)  # final push for this tick
 
         self._telemetry.log("daemon_tick", {

@@ -142,16 +142,18 @@ def cooldown_status_text(
 ) -> str:
     """Build a status block for the planner prompt showing each action's readiness."""
     actions = [
-        "POST", "COMMENT", "REPLY",
+        "POST_MOLTBOOK", "COMMENT", "REPLY",
         "UPVOTE_POST", "DOWNVOTE_POST",
         "UPVOTE_COMMENT", "DOWNVOTE_COMMENT",
         "FOLLOW", "UNFOLLOW",
         "SUBSCRIBE_SUBMOLT", "CREATE_SUBMOLT",
         "DM", "GENERATE_IMAGE",
     ]
-    lines = []
+    lines = ["  POST (Analog Home): always available"]
     for action in actions:
-        ok, remaining = can_do(state, action, ctrl=ctrl)
+        # POST_MOLTBOOK uses the "POST" cooldown key internally
+        cooldown_key = "POST" if action == "POST_MOLTBOOK" else action
+        ok, remaining = can_do(state, cooldown_key, ctrl=ctrl)
         if ok:
             lines.append(f"  {action}: READY")
         else:
