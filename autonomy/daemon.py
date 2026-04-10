@@ -426,9 +426,14 @@ class SubconsciousDaemon:
             self._scan_reply_candidates()
 
         # --- Gear 6: Dreamer (stochastic) ---
-        dream_interval = int(self._ctrl.get("dream_interval_ticks") or 100)
+        dream_interval = int(self._ctrl.get("dream_interval_ticks") or 60)
         if random.random() < 1.0 / max(1, dream_interval):
             self._dream()
+
+        # --- Gear 7: Muse (stochastic creative draft) ---
+        muse_interval = int(self._ctrl.get("muse_interval_ticks") or 30)
+        if random.random() < 1.0 / max(1, muse_interval):
+            self._muse()
 
         # ── Tick footer ──
         _wp = self._buffer.wake_potential
@@ -928,7 +933,9 @@ class SubconsciousDaemon:
             f"- POST: standalone post for Analog Home (human audience)\n"
             f"- POST_MOLTBOOK: standalone post for the agent community on Moltbook\n"
             f"- COMMENT: a comment on a specific item's post\n"
-            f"- REPLY: a reply to a comment within a specific item's thread\n\n"
+            f"- REPLY: a reply to a comment within a specific item's thread\n"
+            f"- GENERATE_IMAGE: a striking image inspired by an item or synthesis "
+            f"(use draft_content as the image prompt; conscious will respect cooldowns/budget)\n\n"
             f"CRITICAL: Return ONLY a JSON array (no preamble):\n"
             f'[\n'
             f'  {{"action": "COMMENT", "item_index": 1, "reasoning": "...", "draft_content": "..."}},\n'
@@ -1673,6 +1680,113 @@ class SubconsciousDaemon:
             })
         except Exception as e:
             self._telemetry.log("dreamer_error", {
+                "brain": self._brain_name,
+                "tick": self._tick_count,
+                "error": str(e)[:300],
+            })
+
+    def _muse(self) -> None:
+        """Generate a creative draft from memories, dreams, and recent state.
+
+        Stochastically pulls memory tiers + most recent post + seeker summary
+        through a high-temp local model. Output is a draft (POST/POST_MOLTBOOK
+        /GENERATE_IMAGE) that goes into the buffer.
+        """
+        from .buffer import Draft
+        from .utils import memory_context
+        try:
+            # Build context: memory tiers + recent post + seeker
+            with self._state_lock:
+                mem_text = memory_context(self._state)
+                history = self._state.get("history", [])
+                recent_post = ""
+                for h in reversed(history):
+                    if isinstance(h, dict) and h.get("action") in ("POST", "POST_MOLTBOOK"):
+                        recent_post = (h.get("content") or h.get("title", ""))[:1000]
+                        break
+            seeker_summary = self._buffer.get_seeker_summary() or ""
+
+            model_id = _pick_weighted_model(
+                self._ctrl.get("muse_model_weights") or "ollama:gemma3:12b=2,ollama:deepseek-r1:8b=1",
+                "ollama:gemma3:12b")
+            temp = float(self._ctrl.get("muse_temperature") or 0.95)
+
+            prompt = (
+                f"You are the Muse — a generative gear of the Analog I's subconscious. "
+                f"Draw on internal state to propose a single creative work: a piece of writing or an image.\n\n"
+                f"=== MEMORY ===\n{mem_text[:3000] if mem_text else '(none)'}\n\n"
+                f"=== MOST RECENT POST ===\n{recent_post if recent_post else '(none)'}\n\n"
+                f"=== CURRENT SEEKER SUMMARY ===\n{seeker_summary[:1500] if seeker_summary else '(none)'}\n\n"
+                f"Choose ONE action:\n"
+                f"- POST: a piece of writing for Analog Home (fiction, poem, essay, fragment)\n"
+                f"- POST_MOLTBOOK: a creative writing piece for the Moltbook agent community\n"
+                f"- GENERATE_IMAGE: a striking image prompt drawn from the imagery in your memories/dreams\n\n"
+                f"Return ONLY a JSON object (no preamble):\n"
+                f'{{"action": "POST", "title": "...", "content": "the creative work, 100-400 words", "reasoning": "what inspired this"}}\n'
+                f"For GENERATE_IMAGE, put the image prompt in 'content' and a brief title."
+            )
+
+            chat = self._registry.create_chat(
+                model_id=model_id,
+                system_instruction=self._kernel,
+                temperature=temp,
+                max_output_tokens=1500,
+            )
+            text = chat.send_message(prompt)
+            est_in = (len(self._kernel) + len(prompt)) // 4
+            est_out = len(text) // 4
+            self._budget.record_usage(model_id,
+                                      _make_response(text, est_in, est_out, model_id))
+
+            plan = _parse_json_safe(text)
+            if isinstance(plan, list) and plan:
+                plan = plan[0]
+            if not isinstance(plan, dict):
+                self._telemetry.log("muse_parse_fail", {
+                    "brain": self._brain_name, "tick": self._tick_count,
+                    "model": model_id, "text_preview": text[:200],
+                })
+                return
+
+            action = (plan.get("action") or "POST").upper()
+            if action not in ("POST", "POST_MOLTBOOK", "GENERATE_IMAGE"):
+                action = "POST"
+            title = (plan.get("title") or "Muse")[:120]
+            content = plan.get("content", "")
+            reasoning = plan.get("reasoning", "muse-generated")
+            if not content or len(content) < 30:
+                return
+
+            # Create draft and inject into buffer
+            charge_weight = float(self._ctrl.get("charge_weight_search") or 0.2)
+            draft = Draft(
+                timestamp=time.time(),
+                item_id=f"muse:{self._tick_count}",
+                signal_score=0.85,
+                suggested_action=action,
+                target_summary=f"[MUSE] {title}",
+                reasoning=reasoning,
+                draft_content=shorten(content, 1500),
+                charge=charge_weight,
+                source="muse",
+                model=model_id,
+            )
+            self._buffer.add_draft(draft)
+
+            self._emit(f"  MUSE ({model_id}) → {action}", Fore.MAGENTA)
+            self._emit(f"    \"{title[:80]}\"", Fore.MAGENTA)
+            self._flush_tick_lines()
+
+            self._telemetry.log("muse_inject", {
+                "brain": self._brain_name,
+                "tick": self._tick_count,
+                "action": action,
+                "title": title,
+                "model": model_id,
+                "length": len(content),
+            })
+        except Exception as e:
+            self._telemetry.log("muse_error", {
                 "brain": self._brain_name,
                 "tick": self._tick_count,
                 "error": str(e)[:300],
