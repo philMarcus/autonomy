@@ -969,9 +969,19 @@ class SubconsciousDaemon:
             if isinstance(plans, dict):
                 plans = [plans]
             if not isinstance(plans, list):
+                # Detect truncation: response near max_tokens, doesn't end with ] or }
+                looks_truncated = (
+                    len(text) > 0
+                    and not text.rstrip().endswith(("]", "}"))
+                    and (est_out := len(text) // 4) > max_tokens * 0.85
+                )
                 self._telemetry.log("strategist_parse_fail", {
                     "brain": self._brain_name, "tick": self._tick_count,
-                    "raw_text": shorten(text, 500), "model": model_id,
+                    "raw_text_head": text[:300], "raw_text_tail": text[-300:] if len(text) > 600 else "",
+                    "full_text_length": len(text),
+                    "looks_truncated": looks_truncated,
+                    "max_tokens": max_tokens,
+                    "model": model_id,
                 })
                 return []
 
@@ -1728,10 +1738,12 @@ def _parse_json_safe(text: str):
     # Strip // comments (deepseek-r1 adds them to JSON)
     text = re.sub(r'//[^\n]*', '', text)
     # Strip monologue/thinking text before JSON (models sometimes role-play before producing JSON)
+    # If any of [{ / [ / { is found, that's our JSON start. Break immediately to preserve outer structure.
     for marker in ('[{', '[', '{'):
         idx = text.find(marker)
-        if idx > 0 and idx < len(text) - 1:
-            text = text[idx:]
+        if idx >= 0:
+            if idx > 0:
+                text = text[idx:]
             break
     try:
         return json.loads(text)
