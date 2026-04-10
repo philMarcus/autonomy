@@ -402,7 +402,7 @@ def build_default_registry(model_registry, blacklist_str: str = "") -> ControlRe
                 "Max drafts in buffer before pruning oldest", "daemon", min_val=1, max_val=50),
         Control("sentry_max_tokens", "int", 256,
                 "Max output tokens for sentry scoring", "daemon", min_val=64, max_val=1024),
-        Control("strategist_max_tokens", "int", 4096,
+        Control("strategist_max_tokens", "int", 6144,
                 "Max output tokens for strategist drafts", "daemon", min_val=128, max_val=8192),
         Control("max_item_age_hours", "int", 24,
                 "Ignore feed items older than this (hours)", "daemon", min_val=1, max_val=168),
