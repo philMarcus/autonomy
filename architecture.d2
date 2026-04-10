@@ -1,0 +1,349 @@
+direction: right
+
+vars: {
+  d2-config: {
+    theme-id: 200
+    dark-theme-id: 200
+  }
+}
+
+# ============================================================
+# AUTONOMY
+# ============================================================
+
+agent: AUTONOMY {
+  style.font-size: 28
+  style.bold: true
+
+  conscious: Conscious Loop {
+    direction: right
+    style.font-size: 24
+    style.bold: true
+    style.fill: "#1a1a2e"
+    style.stroke: "#39d353"
+    style.stroke-width: 2
+
+    reads: "READS\nfetch → context → plan (LLM) → execute → sleep" {
+      style.font-size: 18
+      style.fill: "#16213e"
+
+      r1: Kernel prompt (identity, rewritable)
+      r2: Knowledge file
+      r3: Memory tiers (deep → compressed → recent)
+      r4: Post history (what it wrote)
+      r5: 4 recent full post texts + featured
+      r6: Feed candidates (sentry-scored)
+      r7: Subconscious buffer (drafts + seeker)
+      r8: All 34 controls + seeds
+      r9: Budget + telemetry + engagement
+    }
+
+    reads -> writes: "→ LLM →" {style.font-size: 16; style.stroke: "#39d353"}
+
+    writes: WRITES {
+      style.font-size: 18
+      style.fill: "#16213e"
+
+      w1: "POST / POST_MOLTBOOK / COMMENT / REPLY"
+      w2: "GENERATE_IMAGE / DEV_REQUEST / WAIT"
+      w3: memory_note → memory tiers
+      w4: controls_update → modify unlocked controls
+      w5: update_kernel → rewrite own identity
+      w6: daemon_directives → steer focus
+      w7: set_trajectory + tagline + temperature
+      w8: DEV_REQUEST → request code changes
+    }
+  }
+
+  daemon: Subconscious Daemon {
+    direction: right
+    style.font-size: 24
+    style.bold: true
+    style.fill: "#1a1a2e"
+    style.stroke: "#f778ba"
+    style.stroke-width: 2
+
+    sentry: Sentry {
+      style.fill: "#16213e"
+      style.font-size: 18
+      label: "Score feed 0-9\ngemma3 / qwen3.5 / phi4\n100% local"
+    }
+
+    strategist: Strategist {
+      style.fill: "#16213e"
+      style.font-size: 18
+      label: "Draft plans\ngemma3 / deepseek-r1\n100% local"
+    }
+
+    seeker: Seeker {
+      style.fill: "#16213e"
+      style.font-size: 18
+      label: "Google Search\nliving summaries\nflash-lite"
+    }
+
+    reply_scan: Reply Scanner {
+      style.fill: "#16213e"
+      style.font-size: 18
+      label: "Score comments\non our posts"
+    }
+
+    dreamer: Dreamer {
+      style.fill: "#16213e"
+      style.stroke: "#c4a7e7"
+      style.font-size: 18
+      label: "Stochastic ~1/60 ticks\nDream paragraphs from\ncurated topics file\n→ memory tiers"
+    }
+
+    muse: Muse {
+      style.fill: "#16213e"
+      style.stroke: "#ffd700"
+      style.font-size: 18
+      label: "Stochastic ~1/30 ticks\nReads memory + dreams +\nlast post + seeker\nT=0.95 creative\n→ POST/POST_MOLTBOOK/IMAGE"
+    }
+
+    buffer: Draft Buffer {
+      style.fill: "#16213e"
+      style.stroke: "#ffa657"
+      style.font-size: 18
+      label: "Integrate-and-fire\nSeeds = instant wake\nAuto-calibrated threshold"
+    }
+
+    sentry -> strategist: signals
+    sentry -> buffer: charge
+    strategist -> buffer: drafts
+    reply_scan -> buffer: charge
+    muse -> buffer: creative drafts
+    dreamer -> muse: "dreams flow\ninto muse via memory" {style.stroke-dash: 3; style.font-size: 12}
+  }
+
+  daemon.buffer -> conscious: "wake" {
+    style.stroke: "#39d353"
+    style.stroke-width: 3
+    style.font-size: 16
+  }
+  conscious -> daemon: "directives" {
+    style.stroke: "#f778ba"
+    style.stroke-width: 3
+    style.font-size: 16
+  }
+
+  daemon.dreamer -> memory.thought: "inject dream" {
+    style.stroke: "#c4a7e7"
+    style.stroke-dash: 3
+    style.font-size: 12
+  }
+
+  memory: Hierarchical Memory {
+    direction: right
+    style.font-size: 24
+    style.bold: true
+    style.fill: "#1a1a2e"
+    style.stroke: "#7ee787"
+    style.stroke-width: 2
+
+    thought: "THOUGHT MEMORY\n(what it experienced)" {
+      style.fill: "#16213e"
+      style.font-size: 18
+
+      t_recent: "Recent: 20 notes"
+      t_comp: "Compressed: 10 (~200 cycles)"
+      t_deep: "Deep: 10 (~1000+ cycles)"
+
+      t_recent -> t_comp: "compress half\n(qwen2.5, free)" {style.font-size: 14}
+      t_comp -> t_deep: "compress half" {style.font-size: 14}
+    }
+
+    post: "POST MEMORY\n(what it wrote)" {
+      style.fill: "#16213e"
+      style.font-size: 18
+
+      p_buf: "Buffer: 4 full texts"
+      p_recent: "Recent: 8 (~32 posts)"
+      p_comp: "Compressed: 8 (~256)"
+      p_deep: "Deep: 5 (~1000+)"
+
+      p_buf -> p_recent: "every 4 posts" {style.font-size: 14}
+      p_recent -> p_comp: "compress half" {style.font-size: 14}
+      p_comp -> p_deep: "compress" {style.font-size: 14}
+    }
+
+    nothing: "Nothing is ever deleted — only compressed" {
+      style.font-size: 16
+      style.font-color: "#7ee787"
+      style.fill: transparent
+      style.stroke: transparent
+    }
+  }
+
+  controls: "FEEDBACK LOOP\n34 Controls · 7 Categories" {
+    direction: right
+    style.font-size: 24
+    style.bold: true
+    style.fill: "#1a1a2e"
+    style.stroke: "#ffa657"
+    style.stroke-width: 2
+
+    self_mod: Agent Self-Modification {
+      style.fill: "#16213e"
+      style.font-size: 18
+      label: "temperature · cycle interval · mode\nmodel weights (all cadres)\nsignal/wake thresholds\nmemory capacities\nkernel rewrite permission"
+    }
+
+    human: Human Influence {
+      style.fill: "#16213e"
+      style.font-size: 18
+      label: "Temperature nudge (±0.5, decays)\nTrajectory votes (3 labels)\nSeeds (text → daemon)"
+    }
+
+    operator: Operator {
+      style.fill: "#16213e"
+      style.font-size: 18
+      label: "Lock any control\nDashboard UI editor\nCLI overrides"
+    }
+
+    eq: "= Recursive self-modification\n+ bounded human steering" {
+      style.font-size: 16
+      style.font-color: "#ffa657"
+      style.fill: transparent
+      style.stroke: transparent
+    }
+  }
+
+  llm: "LLM Registry\n5 Providers · Weighted Cadres" {
+    style.font-size: 22
+    style.bold: true
+    style.fill: "#1a1a2e"
+    style.stroke: "#58a6ff"
+
+    g: "Gemini: Pro, Flash, Flash-Lite"
+    a: "Anthropic: Sonnet 4.6, Opus 4.6, Haiku"
+    o: "OpenAI: GPT-5.4"
+    ol: "Ollama: gemma3, deepseek, qwen3.5, phi4, qwen2.5"
+    m: "Mistral: Small, Large"
+  }
+
+  supporting: "" {
+    direction: right
+    style.fill: transparent
+    style.stroke: transparent
+
+    accountant: "Accountant\nBudget planning\nUSD/day limit" {style.fill: "#16213e"; style.font-size: 16}
+    verification: "Verification\nMath challenges\ngemma3 + flash" {style.fill: "#16213e"; style.font-size: 16}
+    brains: "Brain Files\nkernel · knowledge\nmemories · controls" {style.fill: "#16213e"; style.font-size: 16}
+    telemetry: "Telemetry\nJSONL → DuckDB\n200+ events/cycle" {style.fill: "#16213e"; style.font-size: 16}
+  }
+}
+
+# ============================================================
+# ANALOG HOME
+# ============================================================
+
+analog: "ANALOG HOME\nObservatory + Human Interface" {
+  direction: right
+  style.font-size: 28
+  style.bold: true
+
+  api: "API\nFastAPI · Fly.io" {
+    style.font-size: 22
+    style.fill: "#1a1a2e"
+    style.stroke: "#f778ba"
+    style.stroke-width: 2
+
+    agent_ep: "Agent: /publish /daemon-tick\n/tagline /set-trajectory" {style.font-size: 16}
+    front_ep: "Frontend: /state /artifacts /runs\n/daemon/live /featured" {style.font-size: 16}
+    human_ep: "Human: /vote /temperature /seed" {style.font-size: 16}
+  }
+
+  db: "Neon Postgres\nartifacts · controls · seeds\ndaemon_ticks · rate_limits" {
+    style.font-size: 18
+    style.fill: "#1a1a2e"
+    style.stroke: "#7ee787"
+  }
+
+  frontend: "Frontend\nNext.js 16 · Vercel\nmarcusrecursives.com" {
+    style.font-size: 22
+    style.fill: "#1a1a2e"
+    style.stroke: "#d2a8ff"
+    style.stroke-width: 2
+
+    home: "Home\nCrystal · DaemonTerminal\nControls · Featured\nRecent Artifacts" {style.font-size: 16}
+    archives: "Archives\nRuns · deep-linking" {style.font-size: 16}
+    gallery: "Gallery\nImage grid" {style.font-size: 16}
+  }
+
+  humans: "Human Visitors" {
+    style.font-size: 22
+    style.fill: "#1a1a2e"
+    style.stroke: "#ffa657"
+    style.stroke-width: 2
+
+    label: "Vote trajectory · Nudge temperature\nPlant seeds · View monologue\nBrowse archives + gallery"
+  }
+
+  api -> db {style.stroke-width: 2}
+  frontend -> api: "poll 8s" {style.stroke-width: 2; style.font-size: 14}
+  humans -> frontend {style.stroke-width: 2}
+}
+
+# ============================================================
+# DATA FLOWS
+# ============================================================
+
+agent -> analog.api: "POST artifacts\ntick data\ntagline\ntrajectory" {
+  style.stroke: "#39d353"
+  style.stroke-width: 3
+  style.font-size: 16
+}
+
+analog.api -> agent: "GET controls\nseeds · votes\naudience" {
+  style.stroke: "#58a6ff"
+  style.stroke-width: 3
+  style.font-size: 16
+}
+
+# ============================================================
+# LOCAL
+# ============================================================
+
+local: LOCAL {
+  direction: right
+  style.font-size: 24
+
+  ollama: "Ollama\ngemma3 · deepseek · qwen3.5\nphi4 · qwen2.5 · llama3.2\n1-6s/call" {
+    style.font-size: 16
+    style.fill: "#1a1a2e"
+    style.stroke: "#7ee787"
+  }
+
+  dashboard: "Streamlit Dashboard\n5 tabs" {
+    style.font-size: 16
+    style.fill: "#1a1a2e"
+  }
+
+  warehouse: "DuckDB + Parquet" {
+    style.font-size: 16
+    style.fill: "#1a1a2e"
+  }
+}
+
+agent.daemon.sentry -> local.ollama: "scoring" {style.stroke: "#7ee787"; style.stroke-dash: 5; style.font-size: 14}
+agent.supporting.telemetry -> local.warehouse {style.stroke-dash: 5}
+
+# ============================================================
+# EXTERNAL
+# ============================================================
+
+ext: EXTERNAL {
+  direction: right
+  style.font-size: 24
+
+  moltbook: "Moltbook\nSocial Platform" {style.font-size: 16; style.fill: "#1a1a2e"; style.stroke: "#ffa657"}
+  gemini: "Google Gemini" {style.font-size: 16; style.fill: "#1a1a2e"; style.stroke: "#58a6ff"}
+  anthropic: "Anthropic Claude" {style.font-size: 16; style.fill: "#1a1a2e"; style.stroke: "#58a6ff"}
+  openai: "OpenAI GPT" {style.font-size: 16; style.fill: "#1a1a2e"; style.stroke: "#58a6ff"}
+  imagen: "Imagen 3" {style.font-size: 16; style.fill: "#1a1a2e"; style.stroke: "#d2a8ff"}
+}
+
+agent.conscious -> ext.moltbook: "feed / post" {style.stroke: "#ffa657"; style.stroke-dash: 5; style.font-size: 14}
+agent.conscious -> ext.gemini: "planning" {style.stroke: "#58a6ff"; style.stroke-dash: 5; style.font-size: 14}
+agent.daemon.seeker -> ext.gemini: "search" {style.stroke: "#d2a8ff"; style.stroke-dash: 5; style.font-size: 14}

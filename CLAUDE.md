@@ -469,6 +469,100 @@ v16_0/ is the stable foundation. **Do not modify archived versions.** All future
 - Controls manager: weight sliders per model, auto-discovers Ollama models
 - Time range: Past day (default), Past week, All time
 
+## v17.3–17.5 — Subconscious Expansion + Social Improvements
+
+### Live Daemon Feed on Analog Home (v17.3)
+- Daemon pushes tick lines per-role to `/daemon-tick` API as they happen
+- `daemon_ticks` table in Postgres (auto-pruned, run_id-filtered)
+- `DaemonTerminal.tsx` polls `/daemon/live` every 8s, color-coded lines
+- Conscious events (CYCLE start, ACTION, MEMORY, CONTROL, KERNEL, BUDGET) pushed with tick = `cycle + 10000` to avoid collision with daemon ticks
+- Auto-clears old session ticks on daemon start (`DELETE /daemon-ticks?run_id=...`)
+- Lines truncate with ellipsis (no horizontal scroll)
+- Color scheme: white tick borders, cyan sentry, orange strategist, pink seeker, green conscious, teal budget, blue compress, amber verification, lavender dreamer, golden muse
+
+### Hierarchical Post Memory (v17.3)
+- Mirrors `memory_tiers` but for what was *produced*, not what was *thought*
+- Buffer: last 4 artifact bodies (full text, already shown in prompt)
+- After every 4 artifacts: compress into summary → `post_tiers.recent` (up to 8)
+- Cascade: recent → compressed (8) → deep (5)
+- Compressor: `qwen2.5:1.5b` (free)
+- Rendered as `POST HISTORY (what you've written)` in planner prompt
+- Controls: `post_memory_batch`, `post_memory_recent_cap`, `post_memory_compressed_cap`, `post_memory_deep_cap`
+
+### Featured Artifact + Gallery + Archive Deep-Linking (v17.3)
+- `is_featured` flag on artifacts table
+- `POST /feature/{id}`, `GET /featured` endpoints
+- Home page: featured artifact section above recent artifacts (collapsible, gold border)
+- New `/gallery` page: image grid via `/artifacts?artifact_type=image`
+- Deep-linking: `/archives?artifact={id}` calculates page via `/artifacts/{id}/position`, loads exactly that page
+- Archives pagination: 25 per page with First/Prev/Next/Last
+- Featured image on home links to archives
+
+### Synthesizer Cadre (v17.3)
+- Seeker findings synthesis moved from flash-lite (re-summarize, lossy) to local model (synthesize new findings only)
+- Seeker now appends new synthesized blocks to living summary (preserves all prior findings)
+- Compressor only fires when summary > `seeker_max_summary_chars` (default 2000)
+- New control: `synthesizer_model_weights` (locked default: gemma3=2, deepseek=1)
+
+### Dreamer Gear (Gear 6, v17.3-17.5)
+- Stochastic 1/`dream_interval_ticks` (default 60) per tick
+- Loads topics from `brains/{brain}_dream_topics.txt`
+- Picks random topic, generates first-person dream paragraph via local model
+- Injects into `state["memory_tiers"]["recent"]` with `cycle: None`
+- Cadre: `dreamer_model_weights` (locked default: gemma3=2, deepseek=1)
+- Color: lavender in terminal/live daemon
+
+### Muse Gear (Gear 7, v17.5)
+- Stochastic 1/`muse_interval_ticks` (default 30) per tick
+- Reads: full memory tiers (incl. dreams), most recent post, current seeker summary, kernel
+- Outputs ONE creative draft: POST / POST_MOLTBOOK / GENERATE_IMAGE
+- Goes into draft buffer alongside strategist drafts
+- Own model cadre: `muse_model_weights` (locked default: gemma3=2, deepseek=1, others at 0)
+- Own temperature: `muse_temperature` (default 0.95)
+- Color: golden in terminal/live daemon
+
+### Sentry Improvements (v17.4)
+- **ignore_authors enforced**: sentry skips items from authors in conscious directives (was stored but never checked)
+- **daemon_can_follow=True default**: follows authors on score >= 0.9
+- **Feed rotation**: `feed_rotation` control rotates between new/following/hot per tick (default `new,new,new,new,following,new,hot`)
+- **Reply scanner persistence**: `_scored_comment_ids` persists to state (was re-scoring all comments after restart, causing instant wake from accumulated charge)
+- **Persistent cycle number**: `state["_cycle_number"]` survives restarts (only resets on memory wipe)
+- **Single 0-9 scoring**: removed dead novelty/actionability fields. parse_simple_batch_response returns just `relevance` (full 10-point granularity, was only 4 values: 0/0.33/0.67/1.0)
+
+### Moltbook /home Dashboard (v17.4)
+- `get_home()` replaces multi-call engagement gathering
+- One API call returns: account stats, activity on posts, followed accounts' posts, suggestions, DMs
+- `mark_notifications_read()` called after each conscious cycle
+
+### Strategist Improvements (v17.5)
+- Added `GENERATE_IMAGE` to action types
+- Prompt rewritten to encourage multiple drafts (was always producing 0-1 even with 16+ signals)
+- Per-item and synthesis modes presented as equally valid first-class options
+
+### 503 Retry Order (v17.4)
+- Conscious 503 retry now sorts by weight DESCENDING (was string order)
+- Was: gemini-2.5-pro 503'd → fell to claude-sonnet-4-6 (next in string) → 38% sonnet usage vs 11% expected
+- Now: tries gemini-3.1-pro-preview before sonnet
+- ReadTimeout treated as retryable (was going to WAIT)
+
+### Seed Charge Calibration (v17.4)
+- Was: 999 charge per seed (caused double-wakes — residual after refractory still above threshold)
+- Now: `wake_threshold * sentry_score` (proportional)
+- Operator override: text ending in `-P` gets 999 (instant wake)
+
+### Wake Threshold Bug Fix (v17.4)
+- `_record_tick_charge` was including seed charge in calibration history → inflated threshold to 400
+- Now subtracts seed charge before recording feed-only charge
+
+### Cycle Reports (v17.4)
+- Removed `**markdown**` (CrtTerminal renders literally)
+- Model names: `_format_model_name()` strips `ollama:`, replaces `:` with space, adds `(local)` or `(api)`
+- Controls update artifact also cleaned
+
+### Architecture Diagram (v17.4)
+- `architecture.d2` — full system diagram via D2 (https://d2lang.com)
+- Render: `d2 --layout=elk --pad=40 architecture.d2 architecture.svg`
+
 ## Key Architecture Decisions
 
 - **Controls are source of truth**: controls.py has defaults, controls.json overrides, CLI overrides both. No competing defaults.
