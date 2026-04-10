@@ -1752,23 +1752,27 @@ def _parse_json_safe(text: str):
     # Try to find JSON array in text
     arr_start = text.find("[")
     arr_end = text.rfind("]")
+    starts_with_bracket = text.lstrip().startswith('[')
     if arr_start >= 0 and arr_end > arr_start:
         try:
             return json.loads(text[arr_start:arr_end + 1])
         except (json.JSONDecodeError, ValueError):
             pass
-    # Try to find JSON object in text
-    start = text.find("{")
-    end = text.rfind("}")
-    if start >= 0 and end > start:
-        try:
-            return json.loads(text[start:end + 1])
-        except (json.JSONDecodeError, ValueError):
-            pass
-    # Repair truncated JSON — close open strings, braces, and arrays
-    # Try array repair first if text contains [
-    if arr_start >= 0:
-        fragment = text[arr_start:]
+    # Try to find JSON object in text — but only if text doesn't start with [
+    # (otherwise we'd lose the array context)
+    if not starts_with_bracket:
+        start = text.find("{")
+        end = text.rfind("}")
+        if start >= 0 and end > start:
+            try:
+                return json.loads(text[start:end + 1])
+            except (json.JSONDecodeError, ValueError):
+                pass
+    # Repair truncated JSON.
+    # If text starts with [, we're committed to a list result. Try multiple recovery strategies:
+    if text.lstrip().startswith('['):
+        # Strategy 1: greedy — close any open string/braces/bracket and parse
+        fragment = text[text.find('['):]
         in_str = False
         i = 0
         while i < len(fragment):
@@ -1781,24 +1785,57 @@ def _parse_json_safe(text: str):
             i += 1
         if in_str:
             fragment += '"'
-        # Close open braces and arrays
         open_braces = fragment.count('{') - fragment.count('}')
         fragment += '}' * max(0, open_braces)
         open_brackets = fragment.count('[') - fragment.count(']')
         fragment += ']' * max(0, open_brackets)
         try:
-            return json.loads(fragment)
+            result = json.loads(fragment)
+            if isinstance(result, list):
+                return result
+            return [result] if isinstance(result, dict) else None
         except (json.JSONDecodeError, ValueError):
-            # Strip trailing incomplete object after last complete one
-            try:
-                last_complete = fragment.rfind('},')
-                if last_complete > 0:
-                    truncated = fragment[:last_complete + 1] + ']'
-                    return json.loads(truncated)
-            except (json.JSONDecodeError, ValueError):
-                pass
-    if start >= 0:
-        fragment = text[start:]
+            pass
+
+        # Strategy 2: extract complete top-level objects manually
+        # Find balanced { ... } pairs at depth 1 inside the array
+        objs = []
+        depth = 0
+        obj_start = -1
+        in_str = False
+        escape = False
+        text_inner = text[text.find('[') + 1:]
+        for i, ch in enumerate(text_inner):
+            if escape:
+                escape = False
+                continue
+            if ch == '\\':
+                escape = True
+                continue
+            if ch == '"':
+                in_str = not in_str
+                continue
+            if in_str:
+                continue
+            if ch == '{':
+                if depth == 0:
+                    obj_start = i
+                depth += 1
+            elif ch == '}':
+                depth -= 1
+                if depth == 0 and obj_start >= 0:
+                    obj_text = text_inner[obj_start:i + 1]
+                    try:
+                        objs.append(json.loads(obj_text))
+                    except (json.JSONDecodeError, ValueError):
+                        pass
+                    obj_start = -1
+        if objs:
+            return objs
+
+    # Object-only repair (text starts with {)
+    if text.lstrip().startswith('{'):
+        fragment = text[text.find('{'):]
         in_str = False
         i = 0
         while i < len(fragment):
@@ -1817,4 +1854,5 @@ def _parse_json_safe(text: str):
             return json.loads(fragment)
         except (json.JSONDecodeError, ValueError):
             pass
+
     return None

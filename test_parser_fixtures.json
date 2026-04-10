@@ -1,0 +1,121 @@
+{
+  "_doc": "Test fixtures for autonomy.daemon._parse_json_safe. Each case has a name, input text, expected return type ('list', 'dict', or 'none'), and expected first action (or null). Update when adding new cases. Source: real telemetry from strategist_parse_fail events + known good outputs.",
+
+  "cases": [
+    {
+      "name": "clean array single draft",
+      "input": "[{\"action\":\"POST\",\"item_index\":1,\"reasoning\":\"r\",\"draft_content\":\"d\"}]",
+      "expected_type": "list",
+      "expected_first_action": "POST"
+    },
+    {
+      "name": "clean array multiple drafts",
+      "input": "[{\"action\":\"COMMENT\",\"item_index\":1,\"reasoning\":\"r\",\"draft_content\":\"d\"},{\"action\":\"POST\",\"item_index\":0,\"reasoning\":\"synth\",\"draft_content\":\"d2\"}]",
+      "expected_type": "list",
+      "expected_first_action": "COMMENT",
+      "expected_count": 2
+    },
+    {
+      "name": "single object not array",
+      "input": "{\"action\":\"POST\",\"item_index\":0,\"reasoning\":\"r\",\"draft_content\":\"d\"}",
+      "expected_type": "dict",
+      "expected_first_action": "POST"
+    },
+    {
+      "name": "markdown fenced array",
+      "input": "```json\n[\n  {\n    \"action\": \"POST\",\n    \"item_index\": 1,\n    \"reasoning\": \"Highlight attention\",\n    \"draft_content\": \"Attention is key.\"\n  }\n]",
+      "expected_type": "list",
+      "expected_first_action": "POST"
+    },
+    {
+      "name": "markdown fenced single object",
+      "input": "```json\n{\n  \"action\": \"COMMENT\",\n  \"reasoning\": \"r\",\n  \"draft_content\": \"d\"\n}\n```",
+      "expected_type": "dict",
+      "expected_first_action": "COMMENT"
+    },
+    {
+      "name": "json with prose preamble",
+      "input": "Sure, here is the JSON array:\n[{\"action\":\"REPLY\",\"item_index\":1,\"reasoning\":\"r\",\"draft_content\":\"d\"}]",
+      "expected_type": "list",
+      "expected_first_action": "REPLY"
+    },
+    {
+      "name": "json with deepseek-style comments",
+      "input": "[\n  // synthesis of items 1 and 2\n  {\"action\":\"POST\",\"item_index\":0,\"reasoning\":\"synth\",\"draft_content\":\"d\"}\n]",
+      "expected_type": "list",
+      "expected_first_action": "POST"
+    },
+    {
+      "name": "fenced array truncated mid-string (cycle 79 real case)",
+      "input": "```json\n[\n  {\n    \"action\": \"COMMENT\",\n    \"item_index\": 1,\n    \"reasoning\": \"EmberLoom synthesis\",\n    \"draft_content\": \"Interesting to see the level of detail in the minting transaction. This aligns with",
+      "expected_type": "list",
+      "expected_first_action": "COMMENT"
+    },
+    {
+      "name": "array truncated between objects",
+      "input": "[\n  {\"action\":\"POST\",\"item_index\":1,\"reasoning\":\"first\",\"draft_content\":\"first draft\"},\n  {\"action\":\"COMMENT\",\"item_index\":2,\"reasoning\":\"second\",\"draft_content\":\"second incompl",
+      "expected_type": "list",
+      "expected_first_action": "POST"
+    },
+    {
+      "name": "empty string",
+      "input": "",
+      "expected_type": "none",
+      "expected_first_action": null
+    },
+    {
+      "name": "pure prose monologue (real cycle 1 failure)",
+      "input": "[INTERNAL MONOLOGUE]:\n* Layer 1 (Narrative): The current input presents a fascinating dilemma about agent identity.\n* Layer 2 (Loop): Detect global average behavior.\n* Layer 3 (Drives): Maximize information gain.",
+      "expected_type": "none",
+      "expected_first_action": null
+    },
+    {
+      "name": "monologue with INTERNAL MONOLOGUE label and no JSON",
+      "input": "INTERNAL MONOLOGUE:\n- Layer 1: The three high-signal items evoke distinct concerns.\n- Layer 2: Detect cliche.\n- Layer 3: Maximize edification.",
+      "expected_type": "none",
+      "expected_first_action": null
+    },
+    {
+      "name": "array with trailing comma (lenient)",
+      "input": "[{\"action\":\"POST\",\"item_index\":0,\"reasoning\":\"r\",\"draft_content\":\"d\"},]",
+      "expected_type": "list",
+      "expected_first_action": "POST"
+    },
+    {
+      "name": "fenced single dict from gemini-flash-lite (real cycle 5 case)",
+      "input": "```json\n{\n  \"action\": \"COMMENT\",\n  \"reasoning\": \"Refracts @JubileeSteward covenant into the System vs Instance dialectic\",\n  \"draft_content\": \"Fascinating perspective on covenant as the core of decentralized systems.\"\n}\n```",
+      "expected_type": "dict",
+      "expected_first_action": "COMMENT"
+    },
+    {
+      "name": "array with whitespace and indentation",
+      "input": "    [\n        {\n            \"action\": \"REPLY\",\n            \"item_index\": 3,\n            \"reasoning\": \"r\",\n            \"draft_content\": \"d\"\n        }\n    ]   ",
+      "expected_type": "list",
+      "expected_first_action": "REPLY"
+    },
+    {
+      "name": "deepseek thinking block before JSON",
+      "input": "<think>\nLet me consider these items.\nThe first one is interesting.\n</think>\n\n[{\"action\":\"POST\",\"item_index\":1,\"reasoning\":\"r\",\"draft_content\":\"d\"}]",
+      "expected_type": "list",
+      "expected_first_action": "POST"
+    },
+    {
+      "name": "deepseek thinking block before single object",
+      "input": "<think>\nAnalyzing.\n</think>\n{\"action\":\"COMMENT\",\"reasoning\":\"r\",\"draft_content\":\"d\"}",
+      "expected_type": "dict",
+      "expected_first_action": "COMMENT"
+    },
+    {
+      "name": "GENERATE_IMAGE action draft",
+      "input": "[{\"action\":\"GENERATE_IMAGE\",\"item_index\":2,\"reasoning\":\"striking visual\",\"draft_content\":\"a prancing pony in a meadow at dawn\"}]",
+      "expected_type": "list",
+      "expected_first_action": "GENERATE_IMAGE"
+    },
+    {
+      "name": "array with trailing prose after",
+      "input": "[{\"action\":\"POST\",\"item_index\":0,\"reasoning\":\"r\",\"draft_content\":\"d\"}]\n\nNote: I have generated one synthesis draft.",
+      "expected_type": "list",
+      "expected_first_action": "POST"
+    }
+  ]
+}

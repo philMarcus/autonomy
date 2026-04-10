@@ -39,7 +39,7 @@ OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://172.30.48.1:11434")
 
 def ollama_generate(model: str, prompt: str, system: str = "",
                     temperature: float = 0.0, max_tokens: int = 300,
-                    think: bool = False) -> Tuple[str, float]:
+                    think: bool = False, json_mode: bool = False) -> Tuple[str, float]:
     """Call Ollama and return (text, elapsed_seconds)."""
     import requests
     payload: dict = {
@@ -50,6 +50,8 @@ def ollama_generate(model: str, prompt: str, system: str = "",
     }
     if not think:
         payload["think"] = False
+    if json_mode:
+        payload["format"] = "json"
     if system:
         # Use chat endpoint for system prompt
         payload = {
@@ -63,6 +65,8 @@ def ollama_generate(model: str, prompt: str, system: str = "",
         }
         if not think:
             payload["think"] = False
+        if json_mode:
+            payload["format"] = "json"
         t0 = time.time()
         resp = requests.post(f"{OLLAMA_URL}/api/chat", json=payload, timeout=180)
         return resp.json().get("message", {}).get("content", "").strip(), time.time() - t0
@@ -132,15 +136,15 @@ def parse_json_from_response(text: str):
 
 def call_model(model: str, prompt: str, system: str = "",
                temperature: float = 0.0, max_tokens: int = 300,
-               think: bool = False) -> Tuple[str, float]:
+               think: bool = False, json_mode: bool = False) -> Tuple[str, float]:
     """Unified model caller — routes to Ollama or API."""
     if model.startswith("ollama:"):
-        return ollama_generate(model[7:], prompt, system, temperature, max_tokens, think)
+        return ollama_generate(model[7:], prompt, system, temperature, max_tokens, think, json_mode)
     # For non-ollama models in the test, just use ollama if it's a bare name
     # that matches an ollama model
     ollama_models = get_ollama_models()
     if model in ollama_models:
-        return ollama_generate(model, prompt, system, temperature, max_tokens, think)
+        return ollama_generate(model, prompt, system, temperature, max_tokens, think, json_mode)
 
     # API models — use the registry
     sys.path.insert(0, os.path.dirname(__file__))
@@ -339,14 +343,20 @@ def benchmark_sentry(models: List[str], prompt_path: Optional[str] = None,
 
 
 def benchmark_strategist(models: List[str], prompt_path: Optional[str] = None,
-                          think_modes: Optional[List[bool]] = None) -> List[dict]:
+                          think_modes: Optional[List[bool]] = None,
+                          json_modes: Optional[List[bool]] = None,
+                          n_trials: int = 1) -> List[dict]:
     """Test strategist: JSON parse success + draft quality.
 
     Uses parse_json_from_response (same parser as production daemon).
     Tests with thinking on by default; use think_modes=[True,False] for comparison.
+    Use json_modes=[False,True] to compare grammar-constrained output.
+    n_trials runs each combination N times to get a parse success rate.
     """
     if think_modes is None:
         think_modes = [True]
+    if json_modes is None:
+        json_modes = [False]
 
     system_override, prompt_template, variant = find_prompt("strategist", prompt_path)
     if variant != "builtin" and "{items}" in prompt_template:
@@ -366,40 +376,55 @@ def benchmark_strategist(models: List[str], prompt_path: Optional[str] = None,
 
     for model in models:
       for think in think_modes:
-        think_label = "think" if think else "no-think"
-        label = f"{model} ({think_label})" if len(think_modes) > 1 else model
-        print(f"  Testing {label}...", end=" ", flush=True)
-        try:
-            text, elapsed = call_model(model, prompt, system=kernel,
-                                       temperature=0.3, max_tokens=2048, think=think)
-            parsed = parse_json_from_response(text)
+        for json_mode in json_modes:
+            tags = []
+            if len(think_modes) > 1:
+                tags.append("think" if think else "no-think")
+            if len(json_modes) > 1:
+                tags.append("json-mode" if json_mode else "free-form")
+            tag_str = f" ({', '.join(tags)})" if tags else ""
+            label = f"{model}{tag_str}"
 
-            if parsed is not None:
-                drafts = parsed if isinstance(parsed, list) else [parsed]
-                actions = [d.get("action", "?") for d in drafts if isinstance(d, dict)]
-                has_content = any(d.get("draft_content") for d in drafts if isinstance(d, dict))
-                results.append({
-                    "model": model, "role": "strategist", "think": think,
-                    "parsed": True, "drafts": len(drafts),
-                    "actions": actions, "has_content": has_content,
-                    "elapsed_s": round(elapsed, 1),
-                })
-                print(f"OK {len(drafts)} draft(s): {actions} ({elapsed:.1f}s)")
-            else:
-                has_monologue = "[INTERNAL MONOLOGUE]" in text
-                has_json = "{" in text or "[" in text
-                results.append({
-                    "model": model, "role": "strategist", "think": think,
-                    "parsed": False, "has_json": has_json,
-                    "has_monologue": has_monologue,
-                    "raw_preview": text[:200],
-                    "elapsed_s": round(elapsed, 1),
-                })
-                print(f"PARSE FAIL (mono={has_monologue}, json={has_json}) ({elapsed:.1f}s)")
-        except Exception as e:
-            results.append({"model": model, "role": "strategist", "think": think,
-                            "error": str(e)[:100], "elapsed_s": 0})
-            print(f"ERROR: {e}")
+            for trial in range(n_trials):
+                trial_label = f" trial {trial+1}/{n_trials}" if n_trials > 1 else ""
+                print(f"  Testing {label}{trial_label}...", end=" ", flush=True)
+                try:
+                    text, elapsed = call_model(model, prompt, system=kernel,
+                                               temperature=0.3, max_tokens=4096,
+                                               think=think, json_mode=json_mode)
+                    parsed = parse_json_from_response(text)
+
+                    if parsed is not None:
+                        drafts = parsed if isinstance(parsed, list) else [parsed]
+                        actions = [d.get("action", "?") for d in drafts if isinstance(d, dict)]
+                        has_content = any(d.get("draft_content") for d in drafts if isinstance(d, dict))
+                        results.append({
+                            "model": model, "role": "strategist", "think": think,
+                            "json_mode": json_mode, "trial": trial,
+                            "parsed": True, "drafts": len(drafts),
+                            "actions": actions, "has_content": has_content,
+                            "raw_length": len(text),
+                            "elapsed_s": round(elapsed, 1),
+                        })
+                        print(f"OK {len(drafts)} draft(s): {actions} ({elapsed:.1f}s, {len(text)}c)")
+                    else:
+                        has_monologue = "[INTERNAL MONOLOGUE]" in text
+                        has_json = "{" in text or "[" in text
+                        results.append({
+                            "model": model, "role": "strategist", "think": think,
+                            "json_mode": json_mode, "trial": trial,
+                            "parsed": False, "has_json": has_json,
+                            "has_monologue": has_monologue,
+                            "raw_preview": text[:200],
+                            "raw_length": len(text),
+                            "elapsed_s": round(elapsed, 1),
+                        })
+                        print(f"PARSE FAIL (mono={has_monologue}, json={has_json}) ({elapsed:.1f}s, {len(text)}c)")
+                except Exception as e:
+                    results.append({"model": model, "role": "strategist", "think": think,
+                                    "json_mode": json_mode, "trial": trial,
+                                    "error": str(e)[:100], "elapsed_s": 0})
+                    print(f"ERROR: {e}")
     return results
 
 
@@ -512,6 +537,28 @@ def print_summary(all_results: List[dict]):
         if not role_results:
             continue
         print(f"\n--- {role.upper()} ---")
+        # If strategist with multiple json_modes, aggregate by (model, json_mode)
+        if role == "strategist" and any(r.get("json_mode") for r in role_results):
+            from collections import defaultdict
+            agg = defaultdict(lambda: {"trials": 0, "parsed": 0, "drafts": 0, "elapsed_s": 0.0})
+            for r in role_results:
+                key = (r["model"], r.get("json_mode", False))
+                a = agg[key]
+                a["trials"] += 1
+                if r.get("parsed"):
+                    a["parsed"] += 1
+                    a["drafts"] += r.get("drafts", 0)
+                a["elapsed_s"] += r.get("elapsed_s", 0)
+            print(f"  {'model':<30} {'mode':<10} {'parse':<10} {'avg drafts':<12} {'avg time':<10}")
+            print(f"  {'-'*30} {'-'*10} {'-'*10} {'-'*12} {'-'*10}")
+            for (model, jm), a in sorted(agg.items()):
+                mode = "json" if jm else "free"
+                rate = f"{a['parsed']}/{a['trials']}"
+                avg_drafts = (a["drafts"] / a["parsed"]) if a["parsed"] else 0
+                avg_time = a["elapsed_s"] / a["trials"]
+                print(f"  {model:<30} {mode:<10} {rate:<10} {avg_drafts:<12.1f} {avg_time:<10.1f}s")
+            continue
+
         for r in sorted(role_results, key=lambda x: x.get("elapsed_s", 999)):
             model = r["model"]
             think = r.get("think")
@@ -614,6 +661,10 @@ def main():
                              help="Test with thinking OFF only")
     think_group.add_argument("--both-think", dest="think_mode", action="store_const", const="both",
                              help="Test both thinking ON and OFF (compare)")
+    parser.add_argument("--json-mode-compare", action="store_true",
+                        help="For strategist: test both json_mode=False and json_mode=True")
+    parser.add_argument("--n-trials", type=int, default=1,
+                        help="Number of trials per (model, think, json_mode) combo (default: 1)")
     args = parser.parse_args()
 
     # Determine think modes
@@ -654,7 +705,10 @@ def main():
         if role == "sentry":
             all_results.extend(benchmark_sentry(models, args.prompt, think_modes))
         elif role == "strategist":
-            all_results.extend(benchmark_strategist(models, args.prompt, think_modes))
+            json_modes = [False, True] if args.json_mode_compare else [False]
+            all_results.extend(benchmark_strategist(
+                models, args.prompt, think_modes,
+                json_modes=json_modes, n_trials=args.n_trials))
         elif role == "verification":
             all_results.extend(benchmark_verification(models, args.n_challenges, args.prompt))
         elif role == "compressor":
