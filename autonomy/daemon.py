@@ -919,32 +919,20 @@ class SubconsciousDaemon:
             urgency = float(self._directives.get("urgency_boost", 1.0))
 
         prompt = (
-            f"You have {len(items_with_scores)} high-signal items and research context.\n"
+            f"STRATEGIST TASK — output JSON array only. Do not write monologue or prose.\n\n"
             f"Directive: {self._directive}\n"
-            f"{directive_section}{seeker_section}\n\n"
-            f"HIGH-SIGNAL ITEMS:\n{items_text}\n\n"
-            f"Generate multiple drafts. Two valid modes (use both freely):\n"
-            f"  • PER-ITEM: one draft directly responding to a specific item (COMMENT/REPLY)\n"
-            f"  • SYNTHESIS: a draft connecting multiple items into a new insight (POST/POST_MOLTBOOK)\n"
-            f"\n"
-            f"Synthesizing seemingly disparate signals is valuable when an interesting connection emerges. "
-            f"Per-item drafts are valuable when an item deserves direct engagement.\n\n"
-            f"Action types:\n"
-            f"- POST: standalone post for Analog Home (human audience)\n"
-            f"- POST_MOLTBOOK: standalone post for the agent community on Moltbook\n"
-            f"- COMMENT: a comment on a specific item's post\n"
-            f"- REPLY: a reply to a comment within a specific item's thread\n"
-            f"- GENERATE_IMAGE: a striking image inspired by an item or synthesis "
-            f"(use draft_content as the image prompt; conscious will respect cooldowns/budget)\n\n"
-            f"CRITICAL: Return ONLY a JSON array (no preamble):\n"
-            f'[\n'
-            f'  {{"action": "COMMENT", "item_index": 1, "reasoning": "...", "draft_content": "..."}},\n'
-            f'  {{"action": "POST_MOLTBOOK", "item_index": 0, "reasoning": "synthesizes items 2 and 4", "draft_content": "..."}},\n'
-            f'  {{"action": "REPLY", "item_index": 3, "reasoning": "...", "draft_content": "..."}}\n'
-            f']\n'
-            f"item_index: 1-based index of the inspiring item (0 = pure synthesis or research-driven). "
-            f"Keep reasoning under 50 words, draft_content under 200 words. "
-            f"Empty array [] only if nothing warrants action."
+            f"{directive_section}{seeker_section}\n"
+            f"HIGH-SIGNAL ITEMS ({len(items_with_scores)}):\n{items_text}\n\n"
+            f"Generate drafts. Two equally valid modes:\n"
+            f"  PER-ITEM: respond directly to one item (COMMENT/REPLY)\n"
+            f"  SYNTHESIS: connect multiple items into new insight (POST/POST_MOLTBOOK)\n\n"
+            f"Action types: POST, POST_MOLTBOOK, COMMENT, REPLY, GENERATE_IMAGE\n"
+            f"For GENERATE_IMAGE, draft_content is the image prompt.\n\n"
+            f"OUTPUT FORMAT — JSON array, NOTHING ELSE. No prose. No [INTERNAL MONOLOGUE]. No markdown fences. Begin response with [.\n"
+            f'[{{"action":"COMMENT","item_index":1,"reasoning":"≤50 words","draft_content":"≤150 words"}},{{"action":"POST","item_index":0,"reasoning":"synthesis","draft_content":"≤150 words"}}]\n\n'
+            f"item_index: 1-based index of inspiring item (0 = synthesis). "
+            f"Keep draft_content concise (≤150 words) to avoid truncation. "
+            f"Empty array [] if nothing warrants action."
         )
 
         try:
@@ -1891,10 +1879,10 @@ def _parse_json_safe(text: str):
             return json.loads(text[start:end + 1])
         except (json.JSONDecodeError, ValueError):
             pass
-    # Repair truncated JSON — close open strings and braces
-    if start >= 0:
-        fragment = text[start:]
-        # Close any open string (odd number of unescaped quotes)
+    # Repair truncated JSON — close open strings, braces, and arrays
+    # Try array repair first if text contains [
+    if arr_start >= 0:
+        fragment = text[arr_start:]
         in_str = False
         i = 0
         while i < len(fragment):
@@ -1907,7 +1895,36 @@ def _parse_json_safe(text: str):
             i += 1
         if in_str:
             fragment += '"'
-        # Close open braces
+        # Close open braces and arrays
+        open_braces = fragment.count('{') - fragment.count('}')
+        fragment += '}' * max(0, open_braces)
+        open_brackets = fragment.count('[') - fragment.count(']')
+        fragment += ']' * max(0, open_brackets)
+        try:
+            return json.loads(fragment)
+        except (json.JSONDecodeError, ValueError):
+            # Strip trailing incomplete object after last complete one
+            try:
+                last_complete = fragment.rfind('},')
+                if last_complete > 0:
+                    truncated = fragment[:last_complete + 1] + ']'
+                    return json.loads(truncated)
+            except (json.JSONDecodeError, ValueError):
+                pass
+    if start >= 0:
+        fragment = text[start:]
+        in_str = False
+        i = 0
+        while i < len(fragment):
+            ch = fragment[i]
+            if ch == '\\' and in_str:
+                i += 2
+                continue
+            if ch == '"':
+                in_str = not in_str
+            i += 1
+        if in_str:
+            fragment += '"'
         open_braces = fragment.count('{') - fragment.count('}')
         fragment += '}' * max(0, open_braces)
         try:
