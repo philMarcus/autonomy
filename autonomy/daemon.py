@@ -932,6 +932,8 @@ class SubconsciousDaemon:
             f'[{{"action":"COMMENT","item_index":1,"reasoning":"≤50 words","draft_content":"≤150 words"}},{{"action":"POST","item_index":0,"reasoning":"synthesis","draft_content":"≤150 words"}}]\n\n'
             f"item_index: 1-based index of inspiring item (0 = synthesis). "
             f"Keep draft_content concise (≤150 words) to avoid truncation. "
+            f"In reasoning text, refer to items by AUTHOR or TOPIC, never by number — "
+            f"the consciousness reads drafts in isolation and won't know what 'item 3' means. "
             f"Empty array [] if nothing warrants action."
         )
 
