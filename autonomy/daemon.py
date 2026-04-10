@@ -935,10 +935,21 @@ class SubconsciousDaemon:
             f"Empty array [] if nothing warrants action."
         )
 
+        # Frame the kernel as a description of the entity being drafted FOR,
+        # not as the strategist's own identity. Prevents role-play / monologue.
+        strategist_system = (
+            "You are a strategist tool. You draft action plans on behalf of the following entity, "
+            "matching its voice and concerns, but you yourself are NOT that entity. "
+            "You output structured JSON only, never internal monologue or prose.\n\n"
+            "=== ENTITY YOU DRAFT FOR ===\n"
+            f"{self._kernel}\n"
+            "=== END ENTITY ==="
+        )
+
         try:
             chat = self._registry.create_chat(
                 model_id=model_id,
-                system_instruction=self._kernel,
+                system_instruction=strategist_system,
                 temperature=temp,
                 max_output_tokens=max_tokens,
             )
@@ -1018,7 +1029,7 @@ class SubconsciousDaemon:
                 if retry_model != model_id:
                     try:
                         chat = self._registry.create_chat(
-                            model_id=retry_model, system_instruction=self._kernel,
+                            model_id=retry_model, system_instruction=strategist_system,
                             temperature=temp, max_output_tokens=max_tokens)
                         text = chat.send_message(prompt)
                         self._budget.record_usage(retry_model,
