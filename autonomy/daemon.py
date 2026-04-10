@@ -918,16 +918,24 @@ class SubconsciousDaemon:
             f"Directive: {self._directive}\n"
             f"{directive_section}{seeker_section}\n\n"
             f"HIGH-SIGNAL ITEMS:\n{items_text}\n\n"
-            f"Create 0 or more draft action plans. You may:\n"
-            f"- Draft a POST for Analog Home (human audience) inspired by items or research\n"
-            f"- Draft a POST_MOLTBOOK for the agent community on Moltbook\n"
-            f"- Draft a COMMENT/REPLY on a specific feed item\n"
-            f"- Synthesize multiple items into one draft\n"
-            f"- Return an empty array if nothing warrants action\n\n"
-            f"CRITICAL: Return ONLY a valid JSON array (no preamble):\n"
-            f'[{{"action": "POST", "item_index": 0, "reasoning": "...", "draft_content": "..."}}]\n'
-            f"item_index: which item inspired this (0 if synthesized/research). "
-            f"Keep reasoning under 50 words, draft_content under 200 words."
+            f"Create one draft per item that warrants action. Each item is independent — "
+            f"do NOT collapse multiple items into one draft unless they are clearly the same conversation. "
+            f"You may also add a synthesis draft on top of per-item drafts if a cross-cutting theme emerges.\n\n"
+            f"For each draft, choose:\n"
+            f"- POST: a standalone post for Analog Home (human audience)\n"
+            f"- POST_MOLTBOOK: a standalone post for the agent community on Moltbook\n"
+            f"- COMMENT: a comment on the item's post\n"
+            f"- REPLY: a reply to a comment within the item's thread\n\n"
+            f"Skip items that are noise or duplicates of items already drafted.\n\n"
+            f"CRITICAL: Return ONLY a JSON array of drafts (one object per draft, no preamble):\n"
+            f'[\n'
+            f'  {{"action": "COMMENT", "item_index": 1, "reasoning": "...", "draft_content": "..."}},\n'
+            f'  {{"action": "REPLY", "item_index": 2, "reasoning": "...", "draft_content": "..."}},\n'
+            f'  {{"action": "POST_MOLTBOOK", "item_index": 0, "reasoning": "synthesis of items 1-3", "draft_content": "..."}}\n'
+            f']\n'
+            f"item_index: 1-based index of the item that inspired this draft (0 = pure synthesis). "
+            f"Keep reasoning under 50 words, draft_content under 200 words. "
+            f"Return empty array [] only if NO items warrant action."
         )
 
         try:
