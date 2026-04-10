@@ -52,7 +52,7 @@ Only Gemini models support native Google Search grounding via `--enable-search`.
 
 ## Benchmarking
 
-Run `python -c "from autonomy.benchmark import main; main()"` to test models on sentry/strategist/planner tasks. Results saved to `benchmark_results.json`.
+Run `python benchmark_models.py --role all` to test models on sentry/strategist/verification/compressor tasks. Results saved to `benchmark_results.json`.
 
 ## Usage Examples
 
