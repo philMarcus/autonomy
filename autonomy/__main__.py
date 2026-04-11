@@ -874,6 +874,20 @@ def main():
 
     # Cycle number persists across restarts (only resets on memory wipe)
     iteration = state.get("_cycle_number", 0)
+
+    # Push session-start marker to live daemon feed
+    if store and hasattr(store, 'push_daemon_tick'):
+        try:
+            _start_lines = [
+                f"── SESSION START ── v{VERSION} | brain: {brain_name} ──",
+                f"  Conscious next: cycle {iteration + 1}",
+                f"  Subconscious daemon: pending (starts after first cycle)",
+                f"  Budget: ${ctrl.get('daily_budget_usd'):.2f}/day | target wake: {ctrl.get('target_wake_minutes')}min",
+            ]
+            _push_to_live(store, _start_lines, daemon, cycle=iteration)
+        except Exception:
+            pass
+
     prev_feed_available = None  # Track feed state transitions
     while True:
         iteration += 1
@@ -1227,7 +1241,22 @@ def main():
         _nudge_parts = []
         _img_ok, _img_secs = can_do(state, "GENERATE_IMAGE", ctrl=ctrl)
         if _img_ok:
-            _nudge_parts.append("GENERATE_IMAGE is available — consider creating a visual artifact if inspiration strikes.")
+            # How long since last image?
+            _last_img_ts = state.get("last_action_ts", {}).get("GENERATE_IMAGE", 0)
+            _hours_since = (time.time() - _last_img_ts) / 3600 if _last_img_ts else 9999
+            if _hours_since > 48:
+                _nudge_parts.append(
+                    f"GENERATE_IMAGE is available — it has been {int(_hours_since)} hours since your last image. "
+                    f"Consider creating a striking visual artifact. Images are first-class output, "
+                    f"not a luxury. The Muse and Strategist may also propose them."
+                )
+            elif _hours_since > 24:
+                _nudge_parts.append(
+                    f"GENERATE_IMAGE is available ({int(_hours_since)}h since last image) — "
+                    f"consider a visual artifact if any imagery from your dreams or recent posts calls for it."
+                )
+            else:
+                _nudge_parts.append("GENERATE_IMAGE is available — consider creating a visual artifact if inspiration strikes.")
         _last_tagline = state.get("_last_tagline_cycle", 0)
         if iteration - _last_tagline >= 20:
             _nudge_parts.append("You haven't updated your Analog Home tagline recently — consider refreshing it if your focus has shifted.")
@@ -2083,6 +2112,23 @@ def main():
             pass
 
         telemetry.log("cycle_end", {"cycle": iteration})
+
+        # Show budget for this cycle in terminal + live daemon
+        try:
+            _cycle_in = getattr(chat, '_last_input_tokens', 0) or 0
+            _cycle_out = getattr(chat, '_last_output_tokens', 0) or 0
+            from .llm.budget import estimate_cost
+            _cycle_cost = estimate_cost(conscious_model, _cycle_in, _cycle_out)
+            _today_spent = budget.spent_today_usd() if budget else 0.0
+            _budget_limit = budget.daily_limit_usd if budget else 0.0
+            _budget_line = (
+                f"[BUDGET] cycle ${_cycle_cost:.4f} ({_cycle_in:,} in, {_cycle_out:,} out) "
+                f"| today ${_today_spent:.2f}/${_budget_limit:.2f}"
+            )
+            safe_print(f"{Fore.CYAN}{_budget_line}{Style.RESET_ALL}")
+            _push_to_live(store, [_budget_line], daemon, cycle=iteration)
+        except Exception:
+            pass
 
         # Mark Moltbook notifications as read after processing
         if platform and hasattr(platform, 'mark_notifications_read'):
