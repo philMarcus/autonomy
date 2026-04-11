@@ -52,6 +52,8 @@ class AnthropicChatSession(ChatSession):
         self._temperature = temperature
         self._max_output_tokens = max_output_tokens
         self._history: List[Dict[str, str]] = []
+        self._last_input_tokens = 0
+        self._last_output_tokens = 0
 
     def send_message(self, prompt: str, json_mode: bool = False) -> str:
         self._history.append({"role": "user", "content": prompt})
@@ -71,6 +73,10 @@ class AnthropicChatSession(ChatSession):
         for block in resp.content:
             if hasattr(block, "text"):
                 text += block.text
+
+        # Capture accurate token counts from the API response
+        self._last_input_tokens = getattr(resp.usage, "input_tokens", 0) or 0
+        self._last_output_tokens = getattr(resp.usage, "output_tokens", 0) or 0
 
         self._history.append({"role": "assistant", "content": text})
         return text

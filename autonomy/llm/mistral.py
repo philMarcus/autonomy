@@ -42,6 +42,8 @@ class MistralChatSession(ChatSession):
         self._temperature = temperature
         self._max_output_tokens = max_output_tokens
         self._messages: List[Dict[str, str]] = []
+        self._last_input_tokens = 0
+        self._last_output_tokens = 0
         if system_instruction:
             self._messages.append({"role": "system", "content": system_instruction})
 
@@ -59,6 +61,11 @@ class MistralChatSession(ChatSession):
 
         resp = self._client.chat.complete(**kwargs)
         text = resp.choices[0].message.content or ""
+
+        # Capture accurate token counts from the API response
+        if resp.usage:
+            self._last_input_tokens = getattr(resp.usage, "prompt_tokens", 0) or 0
+            self._last_output_tokens = getattr(resp.usage, "completion_tokens", 0) or 0
 
         self._messages.append({"role": "assistant", "content": text})
         return text
