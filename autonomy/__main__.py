@@ -1244,7 +1244,19 @@ def main():
                 plan = plan_next_action(chat, prompt, telemetry=telemetry, brain_name=brain_name, budget=budget)
             except Exception as _plan_err:
                 _err_str = str(_plan_err)
-                if "503" in _err_str or "UNAVAILABLE" in _err_str or "ReadTimeout" in _err_str or "timed out" in _err_str:
+                # Retryable: 503/timeout (transient) + 400 credit/quota (provider exhausted)
+                _retryable = (
+                    "503" in _err_str
+                    or "UNAVAILABLE" in _err_str
+                    or "ReadTimeout" in _err_str
+                    or "timed out" in _err_str
+                    or "credit balance" in _err_str.lower()
+                    or "quota" in _err_str.lower()
+                    or "insufficient_quota" in _err_str.lower()
+                    or "rate_limit" in _err_str.lower()
+                    or "429" in _err_str
+                )
+                if _retryable:
                     # Retry with a different conscious model
                     from .daemon import _pick_weighted_model
                     retry_model = _pick_weighted_model(
@@ -1286,9 +1298,14 @@ def main():
                             _success = True
                             break
                         except Exception as _inner_err:
-                            if "503" in str(_inner_err) or "UNAVAILABLE" in str(_inner_err) or "ReadTimeout" in str(_inner_err) or "timed out" in str(_inner_err):
+                            _inner_str = str(_inner_err).lower()
+                            if ("503" in _inner_str or "unavailable" in _inner_str
+                                    or "readtimeout" in _inner_str or "timed out" in _inner_str
+                                    or "credit balance" in _inner_str or "quota" in _inner_str
+                                    or "insufficient_quota" in _inner_str or "rate_limit" in _inner_str
+                                    or "429" in _inner_str):
                                 continue  # try next model
-                            raise  # non-503 error, propagate
+                            raise  # non-retryable error, propagate
                     if not _success:
                         # All conscious models 503'd — WAIT, don't degrade
                         safe_print(f"{Fore.RED}[503] All conscious models unavailable. Waiting for next cycle.")
