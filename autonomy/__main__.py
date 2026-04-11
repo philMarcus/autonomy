@@ -1775,7 +1775,6 @@ def main():
                             except ImportError:
                                 _img_mime = "image/png"  # fallback if Pillow not installed
                             image_b64 = base64.b64encode(image_bytes).decode("ascii")
-                            image_data_uri = f"data:{_img_mime};base64,{image_b64}"
 
                             from .llm.base import LLMResponse as _ImgResp
                             budget.record_usage(img_model_id, _ImgResp(
@@ -1785,13 +1784,18 @@ def main():
 
                             set_cooldown(state, "GENERATE_IMAGE", ctrl=ctrl)
 
+                            # Send raw base64 binary (not data URI). The API stores
+                            # in image_data BYTEA and serves via /artifacts/{id}/image/{size}
+                            # with HTTP caching, so the browser doesn't re-download
+                            # the same image on every 8s home-page poll.
                             store.write_artifact(iteration, {
                                 "brain": brain_name,
                                 "artifact_type": "image",
                                 "title": shorten(plan.get("title", "Visual Artifact"), 200),
                                 "body_markdown": plan.get("content", ""),
                                 "monologue_public": preamble,
-                                "image_url": image_data_uri,
+                                "image_data_b64": image_b64,
+                                "image_mime": _img_mime,
                                 "temperature": cycle_temperature,
                             })
 

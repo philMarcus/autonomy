@@ -267,6 +267,10 @@ class LocalFileStore(Store):
             "temperature": artifact.get("temperature"),
             "run_id": artifact.get("run_id", "") or self._run_id,
             "image_url": artifact.get("image_url", ""),
+            # New: raw base64 image bytes (no data URI prefix). Server stores
+            # in image_data BYTEA and serves via /artifacts/{id}/image/{size}.
+            "image_data_b64": artifact.get("image_data_b64", ""),
+            "image_mime": artifact.get("image_mime", "image/jpeg"),
         }
         try:
             import requests
