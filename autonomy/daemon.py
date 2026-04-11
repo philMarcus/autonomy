@@ -1261,7 +1261,7 @@ class SubconsciousDaemon:
                 model_id=_synth_model,
                 system_instruction="Synthesize research and suggest search terms.",
                 temperature=0.4,
-                max_output_tokens=500,
+                max_output_tokens=2048,
             )
             synth_resp = synth_chat.send_message(synth_prompt).strip()
             # Parse synthesis and terms
