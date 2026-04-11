@@ -372,8 +372,10 @@ def build_default_registry(model_registry, blacklist_str: str = "") -> ControlRe
                 "Wake potential after firing (negative=cooldown)", "daemon", min_val=-10.0, max_val=0.0),
         Control("charge_weight_feed", "float", 0.05,
                 "Charge per above-threshold feed item (low — accumulate many)", "daemon", min_val=0.0, max_val=5.0),
-        Control("charge_weight_seed", "float", 999.0,
-                "Charge for human seeds (999 = instant wake)", "daemon", min_val=0.0, max_val=1000.0),
+        Control("charge_weight_seed", "float", 3.0,
+                "Charge multiplier for strategist drafts inspired by seed items "
+                "(seed sentry charge itself uses wake_threshold * score; -P operator seeds get 999)",
+                "daemon", min_val=0.0, max_val=1000.0),
         Control("charge_weight_reply", "float", 1.5,
                 "Charge per worthy reply candidate", "daemon", min_val=0.0, max_val=5.0),
         Control("max_replies_per_post", "int", 3,

@@ -1240,24 +1240,29 @@ CONTROLS_META = [
     ("subconscious_temperature", "float", 0.3,    "Daemon LLM temperature",                         "models",   0.0,  2.0,   None),
     # --- Cost ---
     ("daily_budget_usd",         "float", 1.0,    "Daily API spend limit (USD)",                    "cost",     0.01, 100.0, None),
+    ("budget_plan_enabled",      "bool",  True,   "Enable daily budget planning pass (accountant)", "cost",     None, None,  None),
+    ("budget_conserve_threshold","float", 0.2,    "Switch to cheaper models below this remaining fraction", "cost", 0.0, 1.0, None),
     # --- Timing ---
     ("cycle_interval_minutes",   "int",   60,     "Max minutes between cycles (daemon may wake sooner)", "timing", 1, 120,   None),
     ("sentry_interval_seconds",  "int",   300,    "Seconds between sentry scans",                   "timing",   10,   None,  None),
     ("seeker_every_n_ticks",     "int",   3,      "Seeker runs every N sentry ticks",               "timing",   1,    20,    None),
+    ("target_wake_minutes",      "int",   60,     "Target avg minutes between conscious wakes (auto-calibrates threshold)", "timing", 5, 240, None),
     ("image_cooldown_minutes",   "int",   1440,   "Min minutes between image generations",          "timing",   10,   None,  None),
     # --- Wake Mechanics ---
-    ("wake_threshold",           "float", 3.0,    "Charge needed to wake conscious",                "wake",     0.5,  10.0,  None),
     ("wake_refractory",          "float", -2.0,   "Wake potential reset after firing (negative = cooldown)", "wake", -10.0, 0.0, None),
     ("signal_threshold",         "float", 0.67,   "Sentry score for feed items to trigger strategist", "wake",  0.0,  1.0,   None),
     ("seed_threshold",           "float", 0.3,    "Sentry score for human seeds (low — filters spam)", "wake",    0.0,  1.0,   None),
     ("charge_weight_feed",       "float", 0.3,    "Charge per qualifying feed item",                "wake",     0.0,  5.0,   None),
-    ("charge_weight_seed",       "float", 999.0,  "Charge for human seeds (999 = instant wake)",    "wake",     0.0,  1000.0, None),
+    ("charge_weight_seed",       "float", 3.0,    "Charge multiplier for strategist drafts inspired by seed items (sentry seed charge uses wake_threshold * score; -P operator seeds get 999)", "wake", 0.0, 1000.0, None),
     ("charge_weight_reply",      "float", 1.5,    "Charge for reply-worthy comments",               "wake",     0.0,  10.0,  None),
     ("charge_weight_search",     "float", 0.2,    "Charge per seeker result",                       "wake",     0.0,  5.0,   None),
     # --- Output ---
     ("mode",                     "str",   "all",  "Action mode",                                    "output",   None, None,  ["all", "comment_only", "no_post", "no_comment", "post_only"]),
     ("priority",                 "str",   "replies_first", "Reply priority",                        "output",   None, None,  ["replies_first", "outside_first"]),
     ("allow_downvote",           "bool",  False,  "Allow downvoting",                               "output",   None, None,  None),
+    ("allow_kernel_update",      "bool",  True,   "Allow agent to rewrite its kernel prompt",       "output",   None, None,  None),
+    ("max_replies_per_post",     "int",   3,      "Max replies to any single post",                 "output",   1,    10,    None),
+    ("image_model_tier",         "str",   "imagen-ultra", "Imagen tier (fast=$0.02, standard=$0.04, ultra=$0.06)", "output", None, None, ["imagen-fast", "imagen-standard", "imagen-ultra"]),
     # --- Moltbook ---
     ("post_interval_minutes",    "int",   30,     "Minutes between Moltbook posts",                 "moltbook", 5,    1440,  None),
     ("post_failure_cooldown_seconds", "int", 900, "Cooldown after a failed post (secs)",            "moltbook", 60,   7200,  None),
@@ -1281,17 +1286,32 @@ CONTROLS_META = [
     ("saved_plan_max_cycles",    "int",   5,      "Cycles a draft persists before expiry",          "daemon",   1,    20,    None),
     ("daemon_notes_max",         "int",   5,      "Max directive notes retained",                   "daemon",   1,    20,    None),
     ("daemon_can_upvote",        "bool",  True,   "Daemon can upvote",                              "daemon",   None, None,  None),
-    ("daemon_can_follow",        "bool",  False,  "Daemon can follow",                              "daemon",   None, None,  None),
+    ("daemon_can_follow",        "bool",  True,   "Daemon can follow (score >= 0.9)",               "daemon",   None, None,  None),
     ("daemon_can_subscribe",     "bool",  False,  "Daemon can subscribe",                           "daemon",   None, None,  None),
     ("daemon_can_downvote",      "bool",  False,  "Daemon can downvote",                            "daemon",   None, None,  None),
+    ("dream_interval_ticks",     "int",   60,     "Average ticks between dreams (stochastic)",      "daemon",   10,   1000,  None),
+    ("muse_interval_ticks",      "int",   30,     "Average ticks between muse creative drafts (stochastic)", "daemon", 5, 500, None),
+    ("muse_temperature",         "float", 0.95,   "Temperature for muse creative generation",       "daemon",   0.0,  2.0,   None),
+    ("reply_scan_interval_ticks","int",   2,      "Scan for reply candidates every N ticks",        "daemon",   1,    20,    None),
+    ("seeker_max_summary_chars", "int",   2000,   "Max chars for seeker living summary before compression", "daemon", 500, 10000, None),
+    ("feed_rotation",            "str",   "new,new,new,new,following,new,hot", "Sentry feed rotation pattern per tick", "daemon", None, None, None),
     # --- Context ---
     ("feed_batch_size",          "int",   8,      "Feed items per sentry tick",                     "context",  1,    50,    None),
     ("feed_item_chars",          "int",   400,    "Max chars per feed item",                        "context",  50,   2000,  None),
     ("history_context_n",        "int",   15,     "History entries in prompt",                       "context",  1,    50,    None),
-    ("memory_max_chars",         "int",   4000,   "Memory context budget (chars)",                   "context",  500,  20000, None),
+    ("recent_posts_in_prompt",   "int",   4,      "Number of recent artifact bodies shown in prompt", "context", 0,    20,    None),
     ("reply_candidate_chars",    "int",   5000,   "Max chars for reply candidate",                   "context",  500,  20000, None),
     ("outside_candidate_chars",  "int",   5000,   "Max chars for outside candidate",                 "context",  500,  20000, None),
-    ("dream_depth",              "int",   10,     "History entries per dream",                       "context",  3,    50,    None),
+    # Memory tiers
+    ("compressor_model",         "str",   "ollama:qwen2.5:1.5b", "Model for memory compression",    "context", None, None,  None),
+    ("memory_recent_capacity",   "int",   20,     "Per-cycle memory notes before compression",      "context",  5,    100,   None),
+    ("memory_compressed_capacity","int",  10,     "Compressed memories before deep compression",    "context",  3,    50,    None),
+    ("memory_deep_capacity",     "int",   10,     "Deep memories before further compression",       "context",  3,    50,    None),
+    # Post memory tiers
+    ("post_memory_batch",        "int",   4,      "Artifacts before post memory compression",       "context",  2,    20,    None),
+    ("post_memory_recent_cap",   "int",   8,      "Post summaries before deeper compression",       "context",  3,    50,    None),
+    ("post_memory_compressed_cap","int",  8,      "Compressed post summaries before deep",          "context",  3,    50,    None),
+    ("post_memory_deep_cap",     "int",   5,      "Deep post summaries before ultra-compression",   "context",  2,    20,    None),
 ]
 
 # CLI flags that override these controls at startup (shown as hints in the UI)
