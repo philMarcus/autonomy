@@ -1252,7 +1252,7 @@ CONTROLS_META = [
     ("wake_refractory",          "float", -2.0,   "Wake potential reset after firing (negative = cooldown)", "wake", -10.0, 0.0, None),
     ("signal_threshold",         "float", 0.67,   "Sentry score for feed items to trigger strategist", "wake",  0.0,  1.0,   None),
     ("seed_threshold",           "float", 0.3,    "Sentry score for human seeds (low — filters spam)", "wake",    0.0,  1.0,   None),
-    ("sentry_strictness",        "float", 0.5,    "Asks the sentry model to be more (1.0) or less (0.0) strict in scoring (0.0-0.33 liberal, 0.34-0.66 neutral, 0.67-1.0 strict)", "wake", 0.0, 1.0, None),
+    ("sentry_strictness",        "float", 0.5,    "Sentry signal-to-noise dial. 0.0-0.33 liberal (wide net, more false positives), 0.5 neutral, 0.67-1.0 strict (only clear matches). Model-side; signal_threshold is the post-scoring cutoff.", "wake", 0.0, 1.0, None),
     ("charge_weight_feed",       "float", 0.3,    "Charge per qualifying feed item",                "wake",     0.0,  5.0,   None),
     ("charge_weight_seed",       "float", 3.0,    "Charge multiplier for strategist drafts inspired by seed items (sentry seed charge uses wake_threshold * score; -P operator seeds get 999)", "wake", 0.0, 1000.0, None),
     ("charge_weight_reply",      "float", 1.5,    "Charge for reply-worthy comments",               "wake",     0.0,  10.0,  None),

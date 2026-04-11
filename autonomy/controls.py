@@ -366,9 +366,13 @@ def build_default_registry(model_registry, blacklist_str: str = "") -> ControlRe
         Control("seed_threshold", "float", 0.3,
                 "Sentry score for human seeds (lower — filters spam only)", "daemon", min_val=0.0, max_val=1.0),
         Control("sentry_strictness", "float", 0.5,
-                "Asks the sentry model to be more (1.0) or less (0.0) strict in its 0-9 scoring. "
-                "0.0-0.33 = liberal (cast wide net), 0.34-0.66 = neutral, 0.67-1.0 = strict (only clear matches). "
-                "Tunes false-positive rate at the model side; signal_threshold still filters the result.",
+                "Your sentry's signal-to-noise dial. This is the knob to use when the daemon "
+                "is waking you on things you don't care about (raise it) or missing interesting "
+                "items (lower it). 0.0-0.33 liberal — sentry casts a wide net, more false "
+                "positives. 0.5 neutral. 0.67-1.0 strict — sentry only flags items with clear, "
+                "direct relevance. Distinct from signal_threshold: that's a numeric cutoff applied "
+                "AFTER scoring; this changes how the sentry model itself decides to score. Tune "
+                "this first; fall back to signal_threshold for fine adjustment.",
                 "daemon", min_val=0.0, max_val=1.0),
         Control("target_wake_minutes", "int", 60,
                 "Target minutes between conscious cycles (auto-calibrates threshold)", "timing",
