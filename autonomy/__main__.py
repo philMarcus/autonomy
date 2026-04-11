@@ -435,6 +435,8 @@ def main():
     # Per-brain env vars
     prefix = brain_env_prefix(brain_name)
     gem_key = os.environ.get(f"{prefix}_GEMINI_API_KEY", "").strip() or os.environ.get("GEMINI_API_KEY", "").strip()
+    gem_key_2 = os.environ.get(f"{prefix}_GEMINI_API_KEY_2", "").strip() or os.environ.get("GEMINI_API_KEY_2", "").strip()
+    imagen_key = os.environ.get(f"{prefix}_GOOGLE_IMAGEN_API_KEY", "").strip() or os.environ.get("GOOGLE_IMAGEN_API_KEY", "").strip() or gem_key_2 or gem_key
     mb_key = os.environ.get(f"{prefix}_MOLTBOOK_API_KEY", "").strip() or os.environ.get("MOLTBOOK_API_KEY", "").strip()
     anthropic_key = os.environ.get(f"{prefix}_ANTHROPIC_API_KEY", "").strip() or os.environ.get("ANTHROPIC_API_KEY", "").strip()
     openai_key = os.environ.get(f"{prefix}_OPENAI_API_KEY", "").strip() or os.environ.get("OPENAI_API_KEY", "").strip()
@@ -470,6 +472,29 @@ def main():
     registry = ModelRegistry()
     gemini_backend = GeminiBackend(api_key=gem_key)
     registry.register_backend("gemini", gemini_backend)
+
+    # Optional: paid-tier Gemini backend for quota-overflow fallback
+    # When the primary (free) Gemini key returns 429/quota errors, the conscious
+    # retry chain tries the same model on this backend before falling through
+    # to other models in the pool.
+    gemini_backend_paid = None
+    if gem_key_2 and gem_key_2 != gem_key:
+        try:
+            gemini_backend_paid = GeminiBackend(api_key=gem_key_2)
+            print(f"{Fore.CYAN}    paid Gemini fallback: {key_fingerprint(gem_key_2)}")
+        except Exception as _e:
+            print(f"{Fore.YELLOW}    [WARN] Could not init paid Gemini fallback: {_e}")
+
+    # Image generation always uses the imagen key (paid; falls back to gem_key_2 then gem_key)
+    if imagen_key == gem_key:
+        gemini_backend_imagen = gemini_backend
+    elif imagen_key == gem_key_2 and gemini_backend_paid:
+        gemini_backend_imagen = gemini_backend_paid
+    else:
+        try:
+            gemini_backend_imagen = GeminiBackend(api_key=imagen_key)
+        except Exception:
+            gemini_backend_imagen = gemini_backend
 
     # Optional backends — registered when API key is present and package installed
     if anthropic_key:
@@ -1257,59 +1282,74 @@ def main():
                     or "429" in _err_str
                 )
                 if _retryable:
-                    # Retry with a different conscious model
-                    from .daemon import _pick_weighted_model
-                    retry_model = _pick_weighted_model(
-                        ctrl.get("conscious_model_weights"), "gemini-2.5-pro",
-                    )
-                    # Keep retrying until we get a different model (max 3 attempts)
-                    for _ in range(3):
-                        if retry_model != conscious_model:
-                            break
-                        retry_model = _pick_weighted_model(
-                            ctrl.get("conscious_model_weights"), "gemini-2.5-pro",
-                        )
-                    # Try each conscious pool model until one works (highest weight first)
-                    _con_pairs = []
-                    for p in (ctrl.get("conscious_model_weights") or "").split(","):
-                        if "=" in p:
-                            _m, _w = p.rsplit("=", 1)
-                            try: _con_pairs.append((_m.strip(), float(_w.strip())))
-                            except ValueError: pass
-                    _con_pairs.sort(key=lambda x: -x[1])  # highest weight first
-                    _all_con = [m for m, w in _con_pairs]
-                    _tried = {conscious_model}
                     _success = False
-                    for _candidate in _all_con:
-                        if _candidate in _tried:
-                            continue
-                        _tried.add(_candidate)
-                        safe_print(f"{Fore.YELLOW}[503] {conscious_model} unavailable, trying {_candidate}")
+                    # First fallback: if a Gemini model hit a quota/credit error and we
+                    # have a paid Gemini backend, try the SAME model on the paid backend
+                    # before falling through to other models in the pool.
+                    _is_gemini = conscious_model.startswith("gemini")
+                    _is_quota = (
+                        "credit balance" in _err_str.lower()
+                        or "quota" in _err_str.lower()
+                        or "insufficient_quota" in _err_str.lower()
+                        or "rate_limit" in _err_str.lower()
+                        or "429" in _err_str
+                    )
+                    if _is_gemini and _is_quota and gemini_backend_paid is not None:
                         try:
-                            chat = registry.create_chat(
-                                model_id=_candidate,
+                            safe_print(f"{Fore.YELLOW}[QUOTA] {conscious_model} quota exhausted on free key, retrying on paid key")
+                            paid_chat = gemini_backend_paid.create_chat(
+                                model_id=conscious_model,
                                 system_instruction=kernel,
                                 temperature=cycle_temperature,
                                 max_output_tokens=16384,
                                 tools=search_tools if args.enable_search else None,
                             )
-                            plan = plan_next_action(chat, prompt, telemetry=telemetry, brain_name=brain_name, budget=budget)
-                            conscious_model = _candidate  # update to actual model used
+                            plan = plan_next_action(paid_chat, prompt, telemetry=telemetry, brain_name=brain_name, budget=budget)
+                            chat = paid_chat
                             _success = True
-                            break
-                        except Exception as _inner_err:
-                            _inner_str = str(_inner_err).lower()
-                            if ("503" in _inner_str or "unavailable" in _inner_str
-                                    or "readtimeout" in _inner_str or "timed out" in _inner_str
-                                    or "credit balance" in _inner_str or "quota" in _inner_str
-                                    or "insufficient_quota" in _inner_str or "rate_limit" in _inner_str
-                                    or "429" in _inner_str):
-                                continue  # try next model
-                            raise  # non-retryable error, propagate
+                        except Exception as _paid_err:
+                            safe_print(f"{Fore.YELLOW}[QUOTA] Paid Gemini also failed: {str(_paid_err)[:100]}")
+
                     if not _success:
-                        # All conscious models 503'd — WAIT, don't degrade
-                        safe_print(f"{Fore.RED}[503] All conscious models unavailable. Waiting for next cycle.")
-                        plan = {"action": "WAIT", "summary": "All conscious models returned 503. Waiting."}
+                        # Try each conscious pool model until one works (highest weight first)
+                        _con_pairs = []
+                        for p in (ctrl.get("conscious_model_weights") or "").split(","):
+                            if "=" in p:
+                                _m, _w = p.rsplit("=", 1)
+                                try: _con_pairs.append((_m.strip(), float(_w.strip())))
+                                except ValueError: pass
+                        _con_pairs.sort(key=lambda x: -x[1])  # highest weight first
+                        _all_con = [m for m, w in _con_pairs]
+                        _tried = {conscious_model}
+                        for _candidate in _all_con:
+                            if _candidate in _tried:
+                                continue
+                            _tried.add(_candidate)
+                            safe_print(f"{Fore.YELLOW}[FALLBACK] {conscious_model} failed, trying {_candidate}")
+                            try:
+                                chat = registry.create_chat(
+                                    model_id=_candidate,
+                                    system_instruction=kernel,
+                                    temperature=cycle_temperature,
+                                    max_output_tokens=16384,
+                                    tools=search_tools if args.enable_search else None,
+                                )
+                                plan = plan_next_action(chat, prompt, telemetry=telemetry, brain_name=brain_name, budget=budget)
+                                conscious_model = _candidate  # update to actual model used
+                                _success = True
+                                break
+                            except Exception as _inner_err:
+                                _inner_str = str(_inner_err).lower()
+                                if ("503" in _inner_str or "unavailable" in _inner_str
+                                        or "readtimeout" in _inner_str or "timed out" in _inner_str
+                                        or "credit balance" in _inner_str or "quota" in _inner_str
+                                        or "insufficient_quota" in _inner_str or "rate_limit" in _inner_str
+                                        or "429" in _inner_str):
+                                    continue  # try next model
+                                raise  # non-retryable error, propagate
+                    if not _success:
+                        safe_print(f"{Fore.RED}[FALLBACK] All conscious models unavailable. Waiting for next cycle.")
+                        plan = {"action": "WAIT", "summary": "All conscious models unavailable. Waiting."}
                 else:
                     raise
 
@@ -1690,7 +1730,7 @@ def main():
                         safe_print(f"{Fore.MAGENTA}[IMAGE] Generating ({img_tier}): {image_prompt[:120]}...")
                         try:
                             import base64, io
-                            image_bytes, img_model_id, img_cost = gemini_backend.generate_image(
+                            image_bytes, img_model_id, img_cost = gemini_backend_imagen.generate_image(
                                 prompt=image_prompt, tier=img_tier,
                             )
                             # Compress PNG to JPEG (Imagen outputs ~1MB PNG; JPEG is ~10x smaller)
