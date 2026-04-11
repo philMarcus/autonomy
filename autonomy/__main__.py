@@ -861,14 +861,16 @@ def main():
         if prior_ids:
             daemon.seed_seen_ids(prior_ids)
             print(f"{Fore.CYAN}    daemon seeded with {len(prior_ids)} known post IDs")
-        daemon.start()
+        # Note: daemon.start() is deferred until AFTER cycle 1 completes
+        # (avoids race where the daemon's first tick collides with the
+        # immediate startup conscious cycle)
         extras = []
         if daemon_search_tools:
             extras.append("search: ON")
         if analog_home_url:
             extras.append("seeds: ON")
         extra_str = f" | {', '.join(extras)}" if extras else ""
-        print(f"{Fore.CYAN}    subconscious daemon: ACTIVE{extra_str}")
+        print(f"{Fore.CYAN}    subconscious daemon: PENDING (starts after first conscious cycle){extra_str}")
 
     # Cycle number persists across restarts (only resets on memory wipe)
     iteration = state.get("_cycle_number", 0)
@@ -2092,6 +2094,11 @@ def main():
         # --- Sleep / Wake mechanism ---
         sleep_minutes = ctrl.get("cycle_interval_minutes")
         if daemon:
+            # Start the daemon AFTER the first conscious cycle completes
+            # (defers to avoid simultaneous startup race)
+            if not daemon._thread or not daemon._thread.is_alive():
+                daemon.start()
+                safe_print(f"{Fore.CYAN}    subconscious daemon: ACTIVE (started after cycle {iteration})")
             # Update buffer thresholds from controls (conscious may have changed them)
             # Threshold is auto-calibrated by daemon — no manual update needed
             draft_buffer.update_max_drafts(ctrl.get("max_drafts"))
