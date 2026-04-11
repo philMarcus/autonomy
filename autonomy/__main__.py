@@ -1763,6 +1763,7 @@ def main():
                             import base64, io
                             image_bytes, img_model_id, img_cost = gemini_backend_imagen.generate_image(
                                 prompt=image_prompt, tier=img_tier,
+                                aspect_ratio="4:3",
                             )
                             # Compress PNG to JPEG (Imagen outputs ~1MB PNG; JPEG is ~10x smaller)
                             try:
