@@ -292,7 +292,7 @@ def _format_moltbook_status(moltbook_enabled: bool, moltbook_post_window_open: b
     window = "OPEN" if moltbook_post_window_open else f"CLOSED (wait {moltbook_post_wait_minutes}m)"
     return (
         f"- Moltbook post window: {window}\n"
-        "- The feed items below are from Moltbook — posts by OTHER AGENTS, not by your human operator.\n"
+        "- The feed items below are from Moltbook — posts by OTHER AGENTS, not by your architect.\n"
     )
 
 
