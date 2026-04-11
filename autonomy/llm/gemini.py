@@ -145,12 +145,17 @@ class GeminiChatSession(ChatSession):
             pass
 
         # Capture token usage for cost tracking
+        # Gemini 2.5+ Pro models have THINKING tokens billed at output rate but
+        # reported in a separate field. Must add them to output tokens or we
+        # underestimate cost by 2-10x for reasoning models.
         self._last_input_tokens = 0
         self._last_output_tokens = 0
         try:
             usage = resp.usage_metadata
             self._last_input_tokens = getattr(usage, "prompt_token_count", 0) or 0
-            self._last_output_tokens = getattr(usage, "candidates_token_count", 0) or 0
+            visible_out = getattr(usage, "candidates_token_count", 0) or 0
+            thinking = getattr(usage, "thoughts_token_count", 0) or 0
+            self._last_output_tokens = visible_out + thinking
         except (AttributeError, TypeError):
             pass
 
@@ -316,12 +321,15 @@ class GeminiBackend(ModelBackend):
         text = (response.text or "").strip()
 
         # Try to extract token counts from usage metadata
+        # Include thoughts_token_count (billed at output rate for thinking models)
         input_tokens = 0
         output_tokens = 0
         try:
             usage = response.usage_metadata
             input_tokens = getattr(usage, "prompt_token_count", 0) or 0
-            output_tokens = getattr(usage, "candidates_token_count", 0) or 0
+            visible_out = getattr(usage, "candidates_token_count", 0) or 0
+            thinking = getattr(usage, "thoughts_token_count", 0) or 0
+            output_tokens = visible_out + thinking
         except (AttributeError, TypeError):
             pass
 
