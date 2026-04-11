@@ -110,14 +110,30 @@ def parse_json_with_one_repair(
             return parse_json_strict(raw2)
     except Exception as e:
         msg = str(e)
-        # Re-raise 503s so the caller (__main__.py) can retry with a different model
-        if "503" in msg or "UNAVAILABLE" in msg:
+        msg_lower = msg.lower()
+        # Re-raise transient/exhausted-provider errors so the caller
+        # (__main__.py) can fall through to a backup model in the pool.
+        # Without this, credit/quota errors get swallowed and a default
+        # plan is returned, causing the agent to silently WAIT instead
+        # of trying the next model.
+        if (
+            "503" in msg
+            or "UNAVAILABLE" in msg
+            or "credit balance" in msg_lower
+            or "insufficient credit" in msg_lower
+            or "quota" in msg_lower
+            or "insufficient_quota" in msg_lower
+            or "rate_limit" in msg_lower
+            or "429" in msg
+            or "ReadTimeout" in msg
+            or "timed out" in msg_lower
+        ):
             raise
         # Store parsing failures on chat so _planner_unavailable_message can surface them
         chat._last_llm_exception = {
             "tag": call_tag, "error_type": type(e).__name__, "error": msg[:800],
         }
-        if "429" in msg or "RESOURCE_EXHAUSTED" in msg:
+        if "RESOURCE_EXHAUSTED" in msg:
             sleep_s = BUDGET.note_429()
             if telemetry:
                 telemetry.log("llm_backoff", {"tag": call_tag, "sleep_s": sleep_s, "error": msg[:800]})

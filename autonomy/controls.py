@@ -365,6 +365,11 @@ def build_default_registry(model_registry, blacklist_str: str = "") -> ControlRe
                 "Sentry score to trigger strategist (feed items)", "daemon", min_val=0.0, max_val=1.0),
         Control("seed_threshold", "float", 0.3,
                 "Sentry score for human seeds (lower — filters spam only)", "daemon", min_val=0.0, max_val=1.0),
+        Control("sentry_strictness", "float", 0.5,
+                "Asks the sentry model to be more (1.0) or less (0.0) strict in its 0-9 scoring. "
+                "0.0-0.33 = liberal (cast wide net), 0.34-0.66 = neutral, 0.67-1.0 = strict (only clear matches). "
+                "Tunes false-positive rate at the model side; signal_threshold still filters the result.",
+                "daemon", min_val=0.0, max_val=1.0),
         Control("target_wake_minutes", "int", 60,
                 "Target minutes between conscious cycles (auto-calibrates threshold)", "timing",
                 min_val=10, max_val=360),

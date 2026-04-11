@@ -164,14 +164,35 @@ def build_simple_batch_prompt(
     items: List[str],
     directive: str,
     directives_text: str = "",
+    strictness: float = 0.5,
 ) -> str:
     """Simplified batch scoring prompt — one number (0-9) per item.
 
     Designed for models that can't handle the multi-criterion format.
+
+    `strictness` (0.0 - 1.0) injects a one-line bias into the rubric:
+      0.0 - 0.33  liberal: "cast a wide net, anything potentially interesting"
+      0.34 - 0.66 neutral: no bias text
+      0.67 - 1.0  strict:  "be conservative, only clear high-relevance items"
+    Lets the operator (or the conscious agent) tune false-positive rate
+    at the model side without rewriting the threshold cutoff.
     """
     directive_section = ""
     if directives_text:
         directive_section = f"\nFocus: {directives_text}\n"
+
+    if strictness <= 0.33:
+        bias_line = (
+            "Bias: be liberal — cast a wide net. Score anything potentially "
+            "interesting or novel toward the high end. False positives are fine.\n"
+        )
+    elif strictness >= 0.67:
+        bias_line = (
+            "Bias: be strict — only score items in the 6-9 range when they "
+            "have clear, direct relevance to the directive. When in doubt, score lower.\n"
+        )
+    else:
+        bias_line = ""
 
     items_block = ""
     for i, item_text in enumerate(items, 1):
@@ -180,8 +201,9 @@ def build_simple_batch_prompt(
     return (
         f"Score each item 0-9 on relevance to this directive: {directive}\n"
         f"{directive_section}\n"
-        f"Scale: 0-2 = irrelevant/noise, 3-5 = tangential, 6-7 = relevant, 8-9 = core topic\n\n"
-        f"{items_block}\n"
+        f"Scale: 0-2 = irrelevant/noise, 3-5 = tangential, 6-7 = relevant, 8-9 = core topic\n"
+        f"{bias_line}"
+        f"\n{items_block}\n"
         f"Reply with ONLY one number per line (no text, no labels):\n"
     )
 

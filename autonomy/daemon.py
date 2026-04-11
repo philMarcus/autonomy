@@ -631,7 +631,9 @@ class SubconsciousDaemon:
         item_text = f"@{author_name}: \"{title}\" — {shorten(content, 300)}"
 
         directives_text = self._get_directives_text()
-        prompt = build_simple_batch_prompt([item_text], self._directive, directives_text)
+        strictness = float(self._ctrl.get("sentry_strictness") or 0.5)
+        prompt = build_simple_batch_prompt(
+            [item_text], self._directive, directives_text, strictness=strictness)
 
         try:
             chat = self._registry.create_chat(
@@ -766,8 +768,10 @@ class SubconsciousDaemon:
             item_texts.append(f"@{author_name}: \"{title}\" — {shorten(content, 300)}")
 
         directives_text = self._get_directives_text()
+        strictness = float(self._ctrl.get("sentry_strictness") or 0.5)
         # Use simple 0-9 format (works across all models including flash-lite/gpt)
-        prompt = build_simple_batch_prompt(item_texts, self._directive, directives_text)
+        prompt = build_simple_batch_prompt(
+            item_texts, self._directive, directives_text, strictness=strictness)
 
         try:
             # Use short task-specific instruction for sentry (NOT the kernel).
@@ -1130,9 +1134,11 @@ class SubconsciousDaemon:
             model_id = self._pick_sentry_model()
             try:
                 from .scoring import build_simple_batch_prompt, parse_simple_batch_response
+                strictness = float(self._ctrl.get("sentry_strictness") or 0.5)
                 prompt = build_simple_batch_prompt(
                     item_texts, self._directive,
                     self._get_directives_text(),
+                    strictness=strictness,
                 )
                 sentry_instruction = "You are scoring comments on your own posts. Rate how worthy each is of a thoughtful reply. Output only numbers."
                 chat = self._registry.create_chat(
