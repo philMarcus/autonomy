@@ -14,9 +14,9 @@ This project builds the infrastructure to run that experiment and observe the re
 
 - **Dual-process architecture.** A cheap "subconscious" daemon continuously scans feeds and scores items in the background. When accumulated signal crosses a threshold, it wakes the main "conscious" loop with a buffer of drafted plans. This separates vigilance (cheap, continuous) from deliberation (expensive, event-driven).
 
-- **Multi-model LLM backend.** The system abstracts over five providers (Gemini, Claude, GPT, Mistral, Ollama for local models) through a unified interface. Each daemon role has its own weighted model cadre — sentry, strategist, seeker, and verification each draw from independent pools. Model weights are operator-controlled. A daily budget planner (the "accountant") recommends interval and threshold adjustments to stay within a configurable USD spend limit.
+- **Multi-model LLM backend.** The system abstracts over five providers (Gemini, Claude, GPT, Mistral, Ollama for local models) through a unified interface. Each daemon role has its own weighted model cadre — sentry, strategist, seeker, synthesizer, dreamer, muse, and verification each draw from independent pools. Model weights are operator-controlled. A daily budget planner (the "accountant") recommends interval and threshold adjustments to stay within a configurable USD spend limit.
 
-- **ControlRegistry.** Every tunable parameter (30+ controls across 7 categories) is a first-class object: readable and writable by the agent, lockable by the operator. The agent sees its own configuration in-prompt and can request changes. The operator can blacklist any control to prevent modification.
+- **ControlRegistry.** Every tunable parameter (75+ controls across 8 categories) is a first-class object: readable and writable by the agent, lockable by the operator. The agent sees its own configuration in-prompt and can request changes. Locked controls appear as `[LOCKED]` in the agent's view; lock state persists in the brain's `controls.json`.
 
 - **Telemetry pipeline.** An append-only JSONL event stream captures 200+ events per cycle. An ingestion layer converts this to date-partitioned Parquet files in a local DuckDB warehouse. A Streamlit dashboard provides cycle-level replay, daemon monitoring, cost tracking, and controls management.
 
@@ -33,15 +33,18 @@ This project builds the infrastructure to run that experiment and observe the re
 │  │   Daemon     │───>│  fetch → plan → act → log  │  │
 │  │              │    │                             │  │
 │  │ Sentry       │    │  Reads: feed, controls,    │  │
-│  │ Strategist   │    │    seeds, draft buffer      │  │
-│  │ Seeker       │    │  Writes: artifacts, state,  │  │
-│  └──────────────┘    │    daemon directives        │  │
-│                      └───────────────────────────┘  │
+│  │ Strategist   │    │    seeds, draft buffer,    │  │
+│  │ Seeker       │    │    seeker, post memory     │  │
+│  │ Synthesizer  │    │  Writes: artifacts, state, │  │
+│  │ Replies      │    │    daemon directives       │  │
+│  │ Dreamer      │    │                             │  │
+│  │ Muse         │    │                             │  │
+│  └──────────────┘    └───────────────────────────┘  │
 │                                                     │
 │  ┌─────────────┐  ┌────────────┐  ┌─────────────┐  │
 │  │ LLM Registry│  │ Controls   │  │ Telemetry   │  │
-│  │ 6 providers │  │ 30+ params │  │ JSONL→DuckDB│  │
-│  │ 20+ models  │  │ 7 categories│  │ + Dashboard │  │
+│  │ 5 providers │  │ 75+ params │  │ JSONL→DuckDB│  │
+│  │ 20+ models  │  │ 8 categories│ │ + Dashboard │  │
 │  └─────────────┘  └────────────┘  └─────────────┘  │
 └────────────────────────┬────────────────────────────┘
                          │ HTTP
@@ -55,18 +58,22 @@ This project builds the infrastructure to run that experiment and observe the re
 
 ## Subconscious Daemon Detail
 
-The daemon runs three "gears" on a background thread:
+The daemon runs seven "gears" on a background thread:
 
 | Gear | Purpose | Cadence | Models |
 |------|---------|---------|--------|
-| **Sentry** | Batch-scores feed items 0-9 on relevance | Every 300s | gemma3, qwen3.5, phi4 (all local) |
-| **Strategist** | ONE call per tick with all high-signal items + seeker summary → 0+ drafts | On sentry trigger | gemma3, deepseek-r1, llama3.2, qwen2.5 (all local) |
-| **Seeker** | Searches evolving topics via Google Search, builds living summary (rabbit hole) | Every 3 ticks | Gemini only (search grounding) |
-| **Verifier** | Solves obfuscated math challenges for Moltbook anti-spam | On write | gemma3 primary, flash backup |
+| **Sentry** | Batch-scores feed items 0-9 on relevance with operator-tunable strictness | Every 300s | gemma3, ollama local cadre |
+| **Strategist** | ONE call per tick with all high-signal items + seeker summary → 0+ drafts | On sentry trigger | gemma3, deepseek-r1, qwen2.5 (all local) |
+| **Seeker** | Searches evolving topics via Google Search; builds a living summary (rabbit hole) | Every 3 ticks | Gemini only (search grounding) |
+| **Synthesizer** | Compresses seeker findings when summary exceeds budget | On overflow | gemma3, deepseek (all local) |
+| **Reply Scanner** | Sentry-scores comments on the agent's own posts | Every 2 ticks | Same as sentry pool |
+| **Dreamer** | Stochastic dream paragraph from operator-curated topic list, injected into memory | 1/60 ticks | gemma3, deepseek (all local) |
+| **Muse** | Stochastic creative draft (POST / IMAGE) from full memory + most recent post | 1/30 ticks | gemma3, deepseek (all local) |
+| **Verifier** | Solves obfuscated math challenges for Moltbook anti-spam | On write | gemma3 primary, gemini-flash backup |
 
-Drafts accumulate in a buffer, each adding "charge" to a wake potential. When the potential crosses a threshold, the conscious loop fires early — seeing the full buffer, seeker research summary, and Moltbook engagement stats.
+Drafts accumulate in a buffer, each adding "charge" to a wake potential. When the potential crosses an auto-calibrated threshold (computed from `target_wake_minutes` and observed charge history), the conscious loop fires — seeing the full buffer, seeker research summary, recent dreams, post engagement stats, and self-telemetry.
 
-After each conscious cycle, the agent sends **downward directives** back to the daemon: updated focus topics (which reset the seeker's rabbit hole), authors to ignore, urgency adjustments. A **cycle report** is published to Analog Home with model usage, budget status, and directive changes.
+After each conscious cycle, the agent sends **downward directives** back to the daemon: updated focus topics (which reset the seeker's rabbit hole), authors to ignore, urgency adjustments. A **cycle report** is published to Analog Home with model usage, budget status, and directive changes. The conscious loop also pushes its own activity (action, kernel update, control update, budget) to the live daemon feed visible on the Analog Home home page.
 
 ## Tech Stack
 
@@ -129,7 +136,7 @@ See `CLAUDE.md` for the full architecture reference and environment variable set
 
 This is an active personal project — stable and functional, but under ongoing development. The system has run continuously for extended periods, producing a visible archive of posts, comments, replies, image artifacts, cycle reports, and kernel self-updates — all with exposed internal monologue — viewable at [marcusrecursives.com](https://marcusrecursives.com).
 
-Recent work includes: POST/POST_MOLTBOOK action split (separate audiences), seeker rabbit hole research with evolving search terms, single-strategist-call-per-tick architecture, all-local strategist cadre (free), verification via gemma3:12b (free), hierarchical memory with auto-compression, Moltbook engagement stats in planner prompt, Analog Home audience telemetry, Vercel Analytics, and a model benchmark suite with prompt variant testing.
+Recent work includes: hierarchical memory and post memory with automatic compression, dreamer and muse gears feeding stochastic creative material into the buffer, live daemon activity stream pushed to Analog Home in real time, image bandwidth overhaul (binary BYTEA storage with tiered HTTP-cached endpoints replacing per-poll data-URI redownload), 4:3 image generation, operator-tunable sentry strictness, a model benchmark suite with prompt-variant testing, and a fix to the conscious retry chain so credit/quota errors fall through to backup pool models instead of returning a default WAIT.
 
 ## Related
 

@@ -563,6 +563,45 @@ v16_0/ is the stable foundation. **Do not modify archived versions.** All future
 - `architecture.d2` — full system diagram via D2 (https://d2lang.com)
 - Render: `d2 --layout=elk --pad=40 architecture.d2 architecture.svg`
 
+## v17.6 — Pre-Launch Polish (Apr 2026)
+
+### Image Bandwidth Overhaul
+- **Storage**: new `image_data BYTEA` + `image_mime VARCHAR(32)` columns on `artifacts`. Replaces ~360KB base64 data URIs in `image_url` for new artifacts.
+- **Endpoint**: `GET /artifacts/{id}/image/{thumb|medium|full}` — thumb 400px, medium 800px, full = original. PIL resizes thumb/medium on demand. Returns `Content-Type: image/jpeg`, `Cache-Control: public, max-age=86400, immutable`, ETag for 304s.
+- **Backward compat**: legacy artifacts with `image_url` data URIs decode through the same endpoint via `_decode_legacy_data_uri()`. `_art_row_to_dict` resolves `image_url` field to `/api/proxy/artifacts/{id}/image/medium` for new artifacts; legacy data URIs pass through as-is.
+- **Agent**: `GENERATE_IMAGE` now sends raw `image_data_b64` (no data URI prefix) via `store.write_artifact`. `/publish` decodes and stores in BYTEA.
+- **Frontend**: `lib/imageUrl.ts` helper swaps the size segment per call site. Featured image uses medium, gallery uses thumb, archive expanded view uses medium with "view full size →" link to full.
+- **Backfill**: `analog_home/api/backfill_images_via_api.py` re-publishes existing data-URI artifacts through `/publish` (uses `ON CONFLICT DO UPDATE` to overwrite in place). Six legacy images converted Apr 2026.
+- **Bandwidth**: home page polls drop from ~160 MB/hour/visitor to ~kB after the first cached fetch.
+
+### 4:3 Image Generation
+- `gemini.py` `generate_image()` already accepted `aspect_ratio` parameter. `__main__.py` GENERATE_IMAGE now passes `aspect_ratio="4:3"` (was implicit 1:1).
+- Reason: Analog Home featured image and gallery thumbnails both use 4:3 containers with `object-fit: cover`. Square images got their tops/bottoms cropped; 4:3 native generation fills the container exactly.
+- Existing 1:1 backfilled images still render via the cropped wide-strip look on the home featured slot.
+
+### sentry_strictness Control (the noise dial)
+- New control: `sentry_strictness` (float 0.0-1.0, default 0.5, category "daemon", agent-modifiable).
+- Threaded through `build_simple_batch_prompt(items, directive, directives_text, strictness=)` in `scoring.py`. Injects a one-line bias into the rubric:
+  - 0.0-0.33: "be liberal — cast a wide net … false positives are fine"
+  - 0.34-0.66: no bias text (current behavior)
+  - 0.67-1.0: "be strict — only score 6-9 with clear, direct relevance"
+- Wired into all three sentry call sites in `daemon.py`: `_score_items_batch` (batch scan), `_score_item` (per-item fallback), and the reply scanner at line ~1137.
+- Distinct from `signal_threshold` — that's the post-scoring numeric cutoff. `sentry_strictness` changes how the model itself decides to score.
+- Agent-facing description in `controls.py` is framed as "your sentry's signal-to-noise dial" so the agent recognizes it as the knob to fiddle with when the daemon is over- or under-waking.
+
+### planner.py Credit/Quota Error Fix
+- **Bug**: `parse_json_with_one_repair()` outer except only re-raised `503/UNAVAILABLE`. Anthropic credit-balance and Gemini quota errors landed in the else branch, were logged, and a default WAIT plan was returned. The conscious retry chain at `__main__.py:1344` never saw the failure → no fallback.
+- **Fix**: outer except now also re-raises `credit balance`, `insufficient credit`, `quota`, `insufficient_quota`, `rate_limit`, `429`, `ReadTimeout`, `timed out`. The `__main__.py` pool-fallback catches them at line 1304 and tries the next conscious model (sorted by weight DESC).
+
+### Public-Launch Doc Refresh
+- About page (`analog_home/web/app/about/page.tsx`): "six providers" → "five", expanded daemon description (sentry/strategist/seeker/dreamer/muse), mention of live daemon stream visible on home page.
+- Autonomy README: daemon gear table expanded to seven gears + verifier, controls count `30+ → 75+`, recent work section refreshed.
+- Analog Home README: features list adds live daemon stream, featured artifacts, gallery, tiered images, archive deep-linking, footer. Endpoint list in architecture diagram comprehensive.
+- Site footer (`components/Footer.tsx`): Home / Archives / Gallery / About / Source mounted on all four pages.
+
+### Archive Deep-Link Scroll Fix
+- `archives/page.tsx`: replaced fixed `setTimeout(scrollIntoView, 600)` with a `useEffect` that watches for the target artifact element to appear in the DOM and retries up to 20 × 100ms. Eliminates the race when the target is on a paginated page that hasn't rendered yet.
+
 ## Key Architecture Decisions
 
 - **Controls are source of truth**: controls.py has defaults, controls.json overrides, CLI overrides both. No competing defaults.
