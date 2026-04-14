@@ -148,6 +148,50 @@ class DailyBudget:
             lines.append(f"  {model}: ${cost:.4f}")
         return "\n".join(lines)
 
+    def to_state_dict(self) -> Dict[str, Any]:
+        """Serialize current spend for persistence to state.
+
+        Called on each cycle_end so a restart mid-day resumes with the
+        correct amount already spent (rather than resetting to $0).
+        """
+        with self._lock:
+            return {
+                "date": self._spend_date,
+                "spend_by_model": dict(self._spend_by_model),
+            }
+
+    def load_from_state(self, saved: Dict[str, Any]) -> None:
+        """Restore spend from saved state, applying date-boundary rules.
+
+        Rules:
+          - If saved date == today (UTC): restore spend exactly.
+          - If saved date is from a prior day: PRORATE — give back only the
+            budget fraction that matches hours elapsed in today's UTC day.
+            This prevents a restart late in the day from granting a full
+            24h budget. Recorded as a synthetic __prorate__ line item so
+            the starting `spent` correctly reflects "already consumed".
+          - If no saved date at all: prorate from empty.
+        """
+        import datetime
+        today = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d")
+        saved_date = (saved or {}).get("date", "")
+        with self._lock:
+            self._spend_date = today
+            self._spend_by_model.clear()
+            if saved_date == today:
+                for k, v in (saved or {}).get("spend_by_model", {}).items():
+                    try:
+                        self._spend_by_model[k] = float(v)
+                    except (TypeError, ValueError):
+                        pass
+            else:
+                # Prorate: assume budget was used uniformly up to "now".
+                now = datetime.datetime.now(datetime.timezone.utc)
+                hours_elapsed = now.hour + now.minute / 60.0
+                prorated_spent = self.daily_limit_usd * (hours_elapsed / 24.0)
+                if prorated_spent > 0:
+                    self._spend_by_model["__prorate__"] = prorated_spent
+
     def spend_summary_for_planning(self, registry=None) -> str:
         """Extended budget summary with cost projections for budget planning.
 

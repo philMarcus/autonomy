@@ -748,6 +748,16 @@ def main():
     store = LocalFileStore(state_path, analog_home_url=analog_home_url, run_id=run_id)
     state = store.load_state()
 
+    # Restore budget spend across restarts. Same UTC day: exact restore.
+    # Prior day or no prior state: prorate (grant only the fraction of budget
+    # that matches hours remaining in today's UTC day).
+    _saved_budget = state.get("_budget_state") or {}
+    budget.load_from_state(_saved_budget)
+    if _saved_budget.get("date"):
+        print(f"{Fore.GREEN}[BUDGET] Restored from state: {budget.spent_today_usd():.4f} spent of ${budget.daily_limit_usd:.2f}")
+    else:
+        print(f"{Fore.GREEN}[BUDGET] Prorated for UTC day: {budget.spent_today_usd():.4f} already consumed (time-of-day), ${budget.remaining_usd():.4f} remaining")
+
     # Migrate legacy cooldown format (next_post_time / next_comment_time → state["cooldowns"])
     if migrate_legacy_cooldowns(state):
         store.save_state(state)
@@ -2267,6 +2277,13 @@ def main():
             pass
 
         telemetry.log("cycle_end", {"cycle": iteration})
+
+        # Persist budget spend so a restart resumes mid-day (no free reset)
+        try:
+            state["_budget_state"] = budget.to_state_dict()
+            store.save_state(state)
+        except Exception:
+            pass
 
         # Show budget for this cycle in terminal + live daemon
         try:

@@ -361,9 +361,10 @@ def build_default_registry(model_registry, blacklist_str: str = "") -> ControlRe
                 "much sooner via target_wake_minutes; this is a fallback for quiet periods.",
                 "wake", min_val=30, max_val=1440, audience="operator"),
         Control("sentry_interval_seconds", "int", 300,
-                "Seconds between sentry scans. Lower = more responsive + more compute. "
+                "Seconds between sentry scans. Lower = more responsive (daemon ticks more often). "
+                "Sentry uses local models so this is not a budget lever — tune for feed responsiveness. "
                 "Must be ≤ target_wake_minutes*60 for wake target to be achievable.",
-                "wake", min_val=10, audience="accountant"),
+                "wake", min_val=10),
         Control("target_wake_minutes", "int", 60,
                 "Target avg minutes between conscious wakes (auto-calibrates threshold). "
                 "Cannot be faster than sentry_interval_seconds/60. "
