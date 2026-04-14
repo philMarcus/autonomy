@@ -143,15 +143,11 @@ class SubconsciousDaemon:
         """Start the daemon background thread."""
         if self._thread and self._thread.is_alive():
             return
-        # Clear old daemon ticks from Analog Home on each restart
-        if self._store and hasattr(self._store, '_analog_home_url') and self._store._analog_home_url:
-            try:
-                import requests
-                from urllib.parse import urljoin
-                url = urljoin(self._store._analog_home_url.rstrip("/") + "/", f"daemon-ticks?run_id={self._store._run_id}")
-                requests.delete(url, timeout=3)
-            except Exception:
-                pass
+        # NOTE: previously this deleted all ticks with the current run_id to clear
+        # stale state on restart. That was a bug — it also wiped the conscious-loop
+        # pushes (SESSION START, [BUDGET], [ACCOUNTANT], etc.) that had already been
+        # written earlier in the same session. The equivalent cleanup now happens in
+        # __main__.py at startup BEFORE any emit_status fires.
         self._stop_event.clear()
         self._thread = threading.Thread(
             target=self._run, name="subconscious-daemon", daemon=True
@@ -1213,6 +1209,11 @@ class SubconsciousDaemon:
             with self._directives_lock:
                 terms = list(self._directives.get("focus_topics", []))
         if not terms:
+            # Still emit a visible line so the operator sees the gear was reached.
+            # This is the common fresh-restart case — seeker has nothing to search
+            # until either a prior run built up terms or conscious sets focus_topics.
+            self._emit("  SEEKER (idle — no focus topics; waiting for directives)", Fore.MAGENTA)
+            self._flush_tick_lines()
             return
 
         _seeker_weights = self._ctrl.get("seeker_model_weights") or "gemini-2.5-flash-lite=1"

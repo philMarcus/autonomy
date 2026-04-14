@@ -737,8 +737,6 @@ def main():
 
     analog_home_url = os.environ.get(f"{prefix}_ANALOG_HOME_API_URL", "").strip() or os.environ.get("ANALOG_HOME_API_URL", "").strip()
     store = LocalFileStore(state_path, analog_home_url=analog_home_url, run_id=run_id)
-    # Pre-seed live context with store; daemon slot filled later if enabled.
-    _set_live_context(store if analog_home_url else None, None)
     state = store.load_state()
 
     # Restore budget spend across restarts. Same UTC day: exact restore.
@@ -819,6 +817,24 @@ def main():
 
     # Update store's run_id to use session_id (groups restarts together)
     store._run_id = session_id
+
+    # Clear any stale daemon_ticks for this session_id (handles the restart-with-
+    # same-session case where old tick N rows would otherwise accumulate lines
+    # from this fresh restart). Must run BEFORE any emit_status fires so this
+    # session's own pushes aren't wiped.
+    if analog_home_url:
+        try:
+            import requests as _req_mod
+            from urllib.parse import urljoin as _urljoin
+            _del_url = _urljoin(analog_home_url.rstrip("/") + "/", f"daemon-ticks?run_id={session_id}")
+            _req_mod.delete(_del_url, timeout=3)
+        except Exception:
+            pass
+
+    # NOW set live context — all subsequent emit_status calls push with the
+    # real session_id, and the backend-side insert-time DELETE WHERE run_id != X
+    # takes care of cleaning up any cross-session leftovers.
+    _set_live_context(store if analog_home_url else None, None)
 
     if analog_home_url:
         session_type = "New session" if fresh_session else "Agent restart"
