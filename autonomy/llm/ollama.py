@@ -71,7 +71,12 @@ class OllamaChatSession(ChatSession):
         resp.raise_for_status()
         data = resp.json()
 
-        text = data.get("message", {}).get("content", "").strip()
+        msg = data.get("message", {}) or {}
+        text = (msg.get("content") or "").strip()
+        # Ollama returns the thought trace separately from content for thinking models
+        # (qwen3, deepseek-r1). Callers can read `session._last_thinking` to surface
+        # reasoning without risking JSON parse failures on the primary response.
+        self._last_thinking = (msg.get("thinking") or "").strip()
 
         # Track token usage
         self._last_input_tokens = data.get("prompt_eval_count", 0) or 0

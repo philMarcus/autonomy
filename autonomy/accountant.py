@@ -202,8 +202,17 @@ def build_budget_plan_prompt(
 
 
 def parse_budget_plan(text: str) -> Optional[Dict[str, Any]]:
-    """Parse the budget plan JSON from the conscious model's response."""
+    """Parse the budget plan JSON from the accountant's response.
+
+    Handles common local-model quirks:
+      - Markdown fences (```json ... ```)
+      - Thinking models that leak <think>...</think> blocks (qwen3, deepseek-r1)
+      - Plain prose preceding or following the JSON
+    """
+    import re
     text = text.strip()
+    # Strip <think>...</think> blocks (thinking-model leakage)
+    text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL).strip()
     # Strip markdown fences
     if text.startswith("```"):
         lines = text.split("\n")
@@ -213,7 +222,7 @@ def parse_budget_plan(text: str) -> Optional[Dict[str, Any]]:
         return json.loads(text)
     except (json.JSONDecodeError, ValueError):
         pass
-    # Find JSON object in text
+    # Find last balanced JSON object in text (in case prose precedes it)
     start = text.find("{")
     end = text.rfind("}")
     if start >= 0 and end > start:

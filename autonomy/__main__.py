@@ -1025,6 +1025,14 @@ def main():
                         max_output_tokens=1024,
                     )
                     bp_raw = bp_chat.send_message(bp_prompt)
+                    # Surface the thought trace (if any) — thinking models like qwen3:14b
+                    # emit this as a separate field; we don't parse it but logging the
+                    # first line gives operator visibility into the accountant's reasoning.
+                    _bp_thinking = getattr(bp_chat, "_last_thinking", "") or ""
+                    if _bp_thinking:
+                        _thought_preview = _bp_thinking.strip().split("\n")[0][:120]
+                        emit_status("[ACCOUNTANT thinking]", _thought_preview,
+                                    color=Fore.CYAN, cycle=iteration)
                     _acc_elapsed = time.time() - _acc_t0
                     emit_status("[ACCOUNTANT]", f"← done ({_acc_elapsed:.1f}s)", color=Fore.CYAN, cycle=iteration)
                     from .llm.base import LLMResponse as _LLMResp
@@ -1034,6 +1042,38 @@ def main():
                         text=bp_raw, input_tokens=_bp_in, output_tokens=_bp_out,
                         model_id=_accountant_model))
                     bp_plan = parse_budget_plan(bp_raw)
+                    # Fall back to gemma3:12b if primary (e.g. qwen3:14b thinking model)
+                    # produced something we can't parse. Always log raw response on fail so
+                    # we can see *what* was emitted.
+                    if bp_plan is None:
+                        telemetry.log("budget_plan_parse_fail", {
+                            "cycle": iteration,
+                            "model": _accountant_model,
+                            "raw_response": bp_raw[:2000],
+                            "raw_length": len(bp_raw),
+                        })
+                        if _accountant_model != "ollama:gemma3:12b":
+                            emit_status("[ACCOUNTANT]", f"parse failed on {_acc_model_short}, falling back to gemma3:12b",
+                                        color=Fore.YELLOW, cycle=iteration)
+                            try:
+                                _fallback_chat = registry.create_chat(
+                                    model_id="ollama:gemma3:12b",
+                                    system_instruction="You are a budget planner. Respond with valid JSON only.",
+                                    temperature=0.3,
+                                    max_output_tokens=1024,
+                                )
+                                bp_raw = _fallback_chat.send_message(bp_prompt)
+                                bp_plan = parse_budget_plan(bp_raw)
+                                if bp_plan is None:
+                                    telemetry.log("budget_plan_parse_fail", {
+                                        "cycle": iteration,
+                                        "model": "ollama:gemma3:12b (fallback)",
+                                        "raw_response": bp_raw[:2000],
+                                        "raw_length": len(bp_raw),
+                                    })
+                            except Exception as _fb_err:
+                                emit_status("[ACCOUNTANT]", f"fallback also failed: {str(_fb_err)[:100]}",
+                                            color=Fore.RED, cycle=iteration)
                     if bp_plan:
                         _accountant_control_changes = apply_budget_plan(bp_plan, ctrl)
                         _accountant_reasoning = bp_plan.get("reasoning", "")
