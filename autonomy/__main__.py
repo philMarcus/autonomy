@@ -1278,7 +1278,7 @@ def main():
                 telemetry=telemetry,
             )
 
-        hist_txt = history_context(state)
+        hist_txt = history_context(state, n=ctrl.get("history_context_n"))
         mem_txt = memory_context(state)
         config_hint = ""
         if ctrl.get("priority") == "outside_first":

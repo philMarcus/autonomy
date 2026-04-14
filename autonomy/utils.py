@@ -395,9 +395,19 @@ def add_history(state: Dict[str, Any], entry: Dict[str, Any]) -> None:
     state["history"] = state["history"][-HISTORY_KEEP:]
 
 
-def history_context(state: Dict[str, Any]) -> str:
+def history_context(state: Dict[str, Any], n: Optional[int] = None) -> str:
+    """Format the most recent action history for the planner prompt.
+
+    Args:
+      state: agent state dict.
+      n: number of recent entries to include. Falls back to HISTORY_CONTEXT_N
+         constant (config.py) when not provided — callers should pass the
+         `history_context_n` control value to honor runtime tuning.
+    """
+    if n is None or n <= 0:
+        n = HISTORY_CONTEXT_N
     lines: List[str] = []
-    hist = state.get("history", [])[-HISTORY_CONTEXT_N:]
+    hist = state.get("history", [])[-n:]
     for h in hist:
         action = h.get("action", "?")
         target = h.get("target", "")
