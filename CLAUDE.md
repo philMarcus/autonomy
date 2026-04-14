@@ -602,6 +602,76 @@ v16_0/ is the stable foundation. **Do not modify archived versions.** All future
 ### Archive Deep-Link Scroll Fix
 - `archives/page.tsx`: replaced fixed `setTimeout(scrollIntoView, 600)` with a `useEffect` that watches for the target artifact element to appear in the DOM and retries up to 20 × 100ms. Eliminates the race when the target is on a paginated page that hasn't rendered yet.
 
+## v17.7 — Accountant Ownership + CEO/CFO Split (Apr 2026)
+
+### Architectural shift: conscious and accountant split by control category
+Previously both the conscious model and accountant could tune wake/budget controls. The conscious would burn pro-tier cognition on mechanical "is my sentry interval coherent with my wake target?" decisions, and two owners could make incompatible changes (e.g., conscious sets `target_wake_minutes=30` while sentry still ticks every hour). v17.7 resolves this by making the accountant the sole owner of wake mechanics.
+
+### New `audience` field on Control
+- `Control` dataclass in `autonomy/controls.py` gains `audience: str = "both"` — one of `"conscious"`, `"accountant"`, `"both"`.
+- `to_llm_block(audience="conscious")` filters out controls that don't include the caller.
+- Marked `audience="accountant"` (hidden from conscious prompt):
+  - Wake mechanics: `cycle_interval_minutes`, `sentry_interval_seconds`, `target_wake_minutes`, `signal_threshold`, `charge_weight_feed`, `charge_weight_reply`, `wake_refractory`
+  - Model pools: `conscious_model_weights`, `subconscious_model_weights`, `budget_exhausted_model_weights`, `accountant_model_weights`
+- `sentry_strictness` stays `audience="both"` — it's a signal/noise judgment (is the daemon over/under-waking?), not a budget knob. Conscious keeps that call.
+
+### Accountant runs every cycle
+- `should_run_budget_plan()` simplified: just returns `budget_plan_enabled`. The old threshold + 8h + first-of-day gates are gone.
+- Runs on the accountant cadre (`accountant_model_weights`, default `ollama:qwen3:14b=2,ollama:gemma3:12b=1`) — free local inference, ~5-15s per cycle.
+- Fires **before** conscious model selection so accountant weight changes take effect this cycle.
+- Fixed pre-existing bug where `conscious_model` was hardcoded to `"gemini-2.5-pro"` after accountant ran — now properly re-selects from (potentially updated) weights.
+
+### `apply_budget_plan` updates
+- Expanded updatable list: `wake_refractory`, `charge_weight_reply`, `budget_exhausted_model_weights` in addition to the original seven.
+- **Oscillation guard**: skips numeric changes within 10% of current value. Prevents accountant from jittering knobs each cycle on noise.
+- `sentry_strictness` deliberately NOT in the updatable list.
+- Accountant prompt rewritten to explicitly state ownership, coherence rules (e.g., `target_wake_minutes*60 >= sentry_interval_seconds`), and an expanded JSON schema.
+
+### Cycle report consolidation
+- Removed the standalone `system_controls_update` artifact. Previously, conscious control changes got their own artifact; accountant changes didn't — inconsistent.
+- Now both origins fold into the `system_cycle_report` artifact with `[accountant]` / `[conscious]` prefixes, followed by the accountant's `reasoning` string. The report runs every cycle, so there's always a single place to see "what changed and why."
+- Conscious-origin changes tracked in `_conscious_control_changes`, accountant-origin in `_accountant_control_changes` + `_accountant_reasoning`.
+
+### Budget-exhausted conscious fallback
+- When `budget.remaining_usd() <= 0`, the conscious model pool swaps to `budget_exhausted_model_weights` (default `ollama:qwen3:14b=2,ollama:gemma3:12b=2,ollama:deepseek-r1:8b=1`).
+- Local models still decide any action — they're not forced to WAIT. A thoughtful local POST is strictly better than a paid gemini-3.1-pro-preview deciding WAIT.
+- The retry chain at `__main__.py:~1406` uses the same `active_conscious_weights` variable, so fallback during budget exhaustion stays on local models rather than escalating back to paid.
+
+### sentry_strictness kept in conscious domain
+- Despite the accountant owning all other wake-related numbers, `sentry_strictness` stays visible to conscious and is NOT in the accountant's updatable list.
+- Rationale: it's not a budget control — it's a signal/noise judgment. If the conscious raises strictness (because the daemon is waking on irrelevant items), the accountant may *compensate* by adjusting other knobs, but should never override the strictness itself.
+
+### Removed: control_validators.py
+- The validator module and its post-update coherence checks were deleted.
+- Rationale: with single-owner accountant making coherent changes each cycle, the validator becomes redundant safety net on a path where bugs should no longer surface. If we see incoherent states in practice, it can come back.
+
+### Conscious prompt now simpler
+- The `controls_block` in the conscious planner prompt dropped from 8,190 chars / 92 lines → 6,485 chars / 79 lines (~21% of the controls section, ~2.5% of the full ~66KB prompt).
+- More important than the token savings: the conscious no longer sees wake/budget knobs, so it doesn't spend cognition deciding whether to touch them.
+
+## v17.6.5 — Image Recovery + Memory Sliding Window + Muse Fixes (Apr 2026)
+
+### Muse draft visibility fixes
+- Added `[MUSE]` source tag in `_format_draft_context()` so muse drafts are visually distinct (alongside `[HUMAN SEED]` and `[SEARCH]`).
+- `DraftBuffer.add_draft()` eviction policy: now pops oldest **non-muse** draft when buffer exceeds `max_drafts`. Muse drafts protected from FIFO eviction. Fallback to strict FIFO if all drafts are muse (breaks after one pop to avoid infinite loop).
+- `DraftBuffer.drain()` signature changed: returns `(kept_drafts, overflow_drafts, wake_potential)`. Sorts non-muse by `signal_score` DESC, keeps top 10 non-muse + all muse, overflow returned for caller to compress.
+- Defaults: `max_drafts` 10 → 40, `max_saved_plans` new control = 15, `muse_interval_ticks` default 30 → 15, `dream_interval_ticks` 30 → 60.
+
+### Draft digest compression
+- New `_compress_drafts_to_digest()` in `__main__.py`: takes overflow drafts (below top-10 by score) and synthesizes a 3-5 sentence thematic paragraph via the compressor cadre (default gemma3:12b).
+- Digest regenerates fresh each drain, doesn't persist.
+- Rendered in `_format_draft_context()` as "Your subconscious also noticed these less-prominent themes" — gives the conscious a thematic summary of what didn't make the cut without the verbosity of 30+ individual drafts.
+
+### Post memory sliding-window redesign
+- Old: `_post_memory_buffer` accumulated 4 posts, then compressed all 4 into one summary and reset. Lost per-post structure; gaps while accumulating.
+- New: `_post_memory_fresh` keeps last N (default 4) full posts. On new post: prepend; if overflow, pop oldest single post, compress into one summary, prepend to `post_tiers.recent`. Each compressed entry retains individual identity.
+- Cascade unchanged: `recent` (cap 10) → `compressed` (cap 10) → `deep` (cap 5) via oldest-half compression.
+- `_build_recent_posts()` reads from local `_post_memory_fresh` instead of the Analog Home `/artifacts` API — faster, offline-safe, deterministic.
+
+### Image generation failure recovery
+- `GENERATE_IMAGE` on error now: (1) retries with `imagen-ultra` if original tier was different, (2) falls back to publishing `plan.content` as a text `artifact_type="post"` to Analog Home so the essay isn't lost, (3) saves the failed `image_prompt` to `state["_failed_image_prompts"]` (capped 5) for future retry, (4) adds history entry and logs full telemetry (no truncation).
+- Fixed stale imagen model IDs: `imagen-3.0-fast-generate-001` → `imagen-4.0-fast-generate-001`, `imagen-3.0-generate-002` → `imagen-4.0-generate-001`.
+
 ## Key Architecture Decisions
 
 - **Controls are source of truth**: controls.py has defaults, controls.json overrides, CLI overrides both. No competing defaults.

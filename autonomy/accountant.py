@@ -23,32 +23,11 @@ def should_run_budget_plan(
 ) -> bool:
     """Return True if the accountant should run.
 
-    Triggers:
-    - budget_plan_enabled control is False -> never run
-    - First cycle of the day (last_plan_time is 0 or from yesterday)
-    - Budget crossed the conserve_threshold
-    - 8+ hours since last plan
+    The accountant owns wake/budget mechanics and runs every cycle when enabled.
+    Running is cheap (local model, a few seconds) and keeps the controls coherent
+    with changing spend rate / headroom. Gate only on the enabled control.
     """
-    if not ctrl.get("budget_plan_enabled"):
-        return False
-
-    now = time.time()
-
-    # First cycle of day (no plan yet or plan was yesterday)
-    if last_plan_time <= 0:
-        return True
-
-    hours_since = (now - last_plan_time) / 3600
-    if hours_since >= 8:
-        return True
-
-    # Budget threshold check
-    remaining = budget.remaining_fraction()
-    threshold = float(ctrl.get("budget_conserve_threshold"))
-    if remaining <= threshold:
-        return True
-
-    return False
+    return bool(ctrl.get("budget_plan_enabled"))
 
 
 def estimate_daily_cost(ctrl) -> Dict[str, float]:
@@ -156,37 +135,50 @@ def build_budget_plan_prompt(
             pass
 
     prompt_parts.extend([
-        "\n--- INSTRUCTIONS ---",
-        "Based on the above, recommend settings adjustments.",
+        "\n--- YOUR ROLE ---",
+        "You are the accountant. You run every cycle and own the wake/budget mechanics.",
+        "You set them coherently based on current state. The conscious planner is busy with",
+        "content and relationships; it does NOT tune these knobs. If you leave a value alone,",
+        "it stays. Only include fields in your JSON if you want to change them.",
         "",
-        "IMPORTANT — How conscious invocations actually work:",
-        "The daemon's sentry scans the feed and scores items. High-scoring items trigger the",
-        "strategist, which adds charge to wake_potential. The wake threshold is auto-calibrated",
-        "conscious fires — usually BEFORE cycle_interval_minutes elapses. This means the daemon",
-        "wake mechanism is the primary driver of conscious cost, not the cycle interval.",
+        "How wake works:",
+        "The daemon's sentry ticks every sentry_interval_seconds and scores feed items.",
+        "Above-threshold items add charge_weight_feed to wake_potential. When wake_potential",
+        "crosses an auto-calibrated threshold (tuned to target_wake_minutes on average),",
+        "conscious fires. If no wake by cycle_interval_minutes, conscious fires anyway.",
         "",
-        "Budget conservation priority (try in this order):",
-        "1. Increase sentry_interval_seconds — fewer scans = fewer charge events",
-        "2. Raise target_wake_minutes — longer intervals between conscious cycles",
-        "3. Raise signal_threshold — sentry becomes more selective, fewer items reach strategist",
-        "4. Reduce charge_weight_feed — each qualifying item contributes less wake charge",
-        "5. Increase cycle_interval_minutes — only affects the guaranteed max sleep between wakes",
-        "6. Downgrade conscious_model_weights ONLY as a last resort — quality matters more than frequency",
+        "COHERENCE RULES (check before outputting):",
+        "- target_wake_minutes * 60 must be >= sentry_interval_seconds (can't wake faster than sentry ticks)",
+        "- cycle_interval_minutes * 60 must be >= sentry_interval_seconds (sentry must tick at least once per cycle)",
+        "- cycle_interval_minutes should be >= target_wake_minutes (otherwise target has no effect)",
         "",
-        "Also consider:",
-        "- Free models (Gemini 2.0 Flash, local models) have no cost but lower quality",
-        "- If well under budget, you may decrease intervals or thresholds for more output",
+        "Budget conservation priority (try in this order when spend is high):",
+        "1. Raise sentry_interval_seconds — fewer scans = fewer charge events",
+        "2. Raise target_wake_minutes — longer average intervals between conscious cycles",
+        "3. Raise signal_threshold — sentry becomes more selective",
+        "4. Reduce charge_weight_feed — each qualifying item contributes less charge",
+        "5. Raise cycle_interval_minutes — affects the max-sleep floor",
+        "6. Downgrade conscious_model_weights ONLY as a last resort",
         "",
-        "Respond with ONLY valid JSON (include only fields you want to change):",
+        "Budget relaxation (when well under budget with headroom):",
+        "- Lower sentry_interval_seconds or target_wake_minutes to get more engagement",
+        "- Don't make changes <10% of current — skip trivial tweaks",
+        "- If budget is 0 or negative remaining, the conscious already auto-swaps to the",
+        "  budget_exhausted_model_weights pool. You don't need to force it.",
+        "",
+        "Respond with ONLY valid JSON (include only fields you want to change; empty JSON is fine):",
         '{',
         '  "conscious_model_weights": "model=weight,...",',
         '  "subconscious_model_weights": "model=weight,...",',
+        '  "budget_exhausted_model_weights": "model=weight,...",',
         '  "sentry_interval_seconds": <int>,',
         '  "cycle_interval_minutes": <int>,',
         '  "target_wake_minutes": <int>,',
         '  "signal_threshold": <float>,',
         '  "charge_weight_feed": <float>,',
-        '  "reasoning": "brief explanation of your budget strategy"',
+        '  "charge_weight_reply": <float>,',
+        '  "wake_refractory": <float>,',
+        '  "reasoning": "brief explanation"',
         '}',
     ])
 
@@ -216,29 +208,40 @@ def parse_budget_plan(text: str) -> Optional[Dict[str, Any]]:
     return None
 
 
+_ACCOUNTANT_UPDATABLE = [
+    "conscious_model_weights", "subconscious_model_weights",
+    "budget_exhausted_model_weights",
+    "sentry_interval_seconds", "cycle_interval_minutes",
+    "target_wake_minutes", "signal_threshold", "charge_weight_feed",
+    "charge_weight_reply", "wake_refractory",
+]
+
+
 def apply_budget_plan(plan: Dict[str, Any], ctrl) -> Dict[str, str]:
     """Apply the budget plan by updating controls.
 
-    Only updates controls that are present in the plan and not locked.
+    - Only touches the accountant-owned control list (excludes sentry_strictness etc.)
+    - Oscillation guard: skips numeric changes within 10% of the current value so the
+      accountant can't jitter knobs each cycle on noise.
     Returns dict of {key: "old -> new"} for logging.
     """
     changes = {}
-    updatable = [
-        "conscious_model_weights", "subconscious_model_weights",
-        "sentry_interval_seconds", "cycle_interval_minutes",
-        "target_wake_minutes", "signal_threshold", "charge_weight_feed",
-    ]
 
-    for key in updatable:
+    for key in _ACCOUNTANT_UPDATABLE:
         if key not in plan:
             continue
         new_val = plan[key]
         old_val = ctrl.get(key)
-        if str(new_val) != str(old_val):
-            try:
-                ctrl.set(key, new_val, source="accountant")
-                changes[key] = f"{old_val} -> {new_val}"
-            except (ValueError, KeyError):
-                pass  # Locked or invalid
+        if str(new_val) == str(old_val):
+            continue
+        # Oscillation guard — skip tiny numeric nudges.
+        if isinstance(old_val, (int, float)) and isinstance(new_val, (int, float)):
+            if old_val != 0 and abs(new_val - old_val) / abs(old_val) < 0.10:
+                continue
+        try:
+            ctrl.set(key, new_val, source="accountant")
+            changes[key] = f"{old_val} -> {new_val}"
+        except (ValueError, KeyError):
+            pass  # Locked or invalid
 
     return changes

@@ -343,8 +343,8 @@ class GeminiBackend(ModelBackend):
 
     # Imagen model tiers: fast ($0.02), standard ($0.04), ultra ($0.06)
     IMAGEN_MODELS = {
-        "imagen-fast": {"model_id": "imagen-3.0-fast-generate-001", "cost": 0.02},
-        "imagen-standard": {"model_id": "imagen-3.0-generate-002", "cost": 0.04},
+        "imagen-fast": {"model_id": "imagen-4.0-fast-generate-001", "cost": 0.02},
+        "imagen-standard": {"model_id": "imagen-4.0-generate-001", "cost": 0.04},
         "imagen-ultra": {"model_id": "imagen-4.0-ultra-generate-001", "cost": 0.06},
     }
 

@@ -65,13 +65,14 @@ def safe_print(text: str) -> None:
 
 
 def _format_draft_context(drafts: list, saved_plans: list,
-                          wake_potential: float, threshold: float) -> str:
+                          wake_potential: float, threshold: float,
+                          digest: str = "") -> str:
     """Format subconscious drafts + saved plans for inclusion in the planner prompt."""
     lines = []
     if drafts:
         lines.append(f"Your subconscious noticed {len(drafts)} NEW item(s) of interest:")
         for i, d in enumerate(drafts, 1):
-            source_tag = " [HUMAN SEED]" if d.source == "seed" else " [SEARCH]" if d.source == "search" else ""
+            source_tag = " [HUMAN SEED]" if d.source == "seed" else " [SEARCH]" if d.source == "search" else " [MUSE]" if d.source == "muse" else ""
             model_tag = f" [by {d.model}]" if d.model else ""
             lines.append(f"\n{i}. [sentry score: {d.signal_score:.2f}]{source_tag}{model_tag} {d.target_summary}")
             lines.append(f"   Suggested: {d.suggested_action} — {d.reasoning}")
@@ -81,13 +82,16 @@ def _format_draft_context(drafts: list, saved_plans: list,
     if saved_plans:
         lines.append(f"\nSAVED PLANS ({len(saved_plans)} from previous cycles — use or discard):")
         for i, d in enumerate(saved_plans, 1):
-            source_tag = " [HUMAN SEED]" if d.source == "seed" else " [SEARCH]" if d.source == "search" else ""
+            source_tag = " [HUMAN SEED]" if d.source == "seed" else " [SEARCH]" if d.source == "search" else " [MUSE]" if d.source == "muse" else ""
             model_tag = f" [by {d.model}]" if d.model else ""
             age = f"saved {d.cycles_saved} cycle(s) ago"
             lines.append(f"\n  S{i}. [sentry score: {d.signal_score:.2f}]{source_tag}{model_tag} {d.target_summary} ({age})")
             lines.append(f"      Suggested: {d.suggested_action} — {d.reasoning}")
             if d.draft_content:
                 lines.append(f"      Draft: {d.draft_content[:200]}")
+    if digest:
+        lines.append("\nYour subconscious also noticed these less-prominent themes (lower-scoring drafts, summarized):")
+        lines.append(digest)
     if drafts or saved_plans:
         lines.append("\nYou may act on any of these, synthesize multiple into one action, or ignore them.")
         lines.append("Plans you don't act on will be saved for future cycles (up to 5 cycles).")
@@ -116,57 +120,106 @@ def _format_model_name(model_id: str) -> str:
     return f"{model_id} (api)"
 
 
+def _compress_drafts_to_digest(overflow_drafts, registry, ctrl) -> str:
+    """Compress low-scoring overflow drafts into a thematic digest paragraph.
+
+    Called at drain time when the draft buffer exceeds the score-kept top N.
+    Uses the compressor_model (default gemma3:12b).
+    """
+    if not overflow_drafts:
+        return ""
+    compressor = ctrl.get("compressor_model") if ctrl else "ollama:gemma3:12b"
+    lines = []
+    for d in overflow_drafts:
+        lines.append(f"- [{d.signal_score:.2f}] {d.suggested_action} on {d.target_summary}: {d.reasoning[:160]}")
+    bullets = "\n".join(lines)
+    prompt = (
+        "Your subconscious considered these lower-scoring items but none broke through to the top. "
+        "Write a 3-5 sentence thematic digest summarizing what patterns or topics were noticed, "
+        "without listing each item. No intro, no bullet points, just the paragraph.\n\n"
+        f"{bullets}\n\n"
+        "Digest:"
+    )
+    try:
+        chat = registry.create_chat(
+            model_id=compressor, system_instruction="Summarize concisely.",
+            temperature=0.4, max_output_tokens=400,
+        )
+        return chat.send_message(prompt).strip()
+    except Exception as e:
+        safe_print(f"{Fore.YELLOW}[DAEMON] digest compression failed: {e}")
+        return ""
+
+
 def _compress_post_memory(state, registry, ctrl):
-    """Compress the post memory buffer and cascade tiers."""
+    """Sliding-window post memory compression.
+
+    Structure (newest-first in each list):
+      state["_post_memory_fresh"]: full posts {cycle, type, title, body}, cap post_memory_fresh_cap
+      state["post_tiers"]["recent"]: 1-per-post summaries, cap post_memory_recent_cap
+      state["post_tiers"]["compressed"]: mega-summaries, cap post_memory_compressed_cap
+      state["post_tiers"]["deep"]: ultra-summaries, cap post_memory_deep_cap
+
+    Call this after a new post is prepended to _post_memory_fresh. If fresh exceeds its
+    cap, pop the oldest (list end), compress that single post, prepend to recent.
+    Then cascade: if recent exceeds cap, compress oldest half into one mega-summary
+    and prepend to compressed. Same for compressed→deep and deep→deep-ultra.
+    """
     from .utils import compress_post_tier
-    buf = state.get("_post_memory_buffer", [])
-    batch = int(ctrl.get("post_memory_batch") if ctrl else 4)
-    if len(buf) < batch:
+    fresh = state.get("_post_memory_fresh", [])
+    fresh_cap = int(ctrl.get("post_memory_fresh_cap") if ctrl else 4)
+    if len(fresh) <= fresh_cap:
         return
 
-    _compressor = ctrl.get("compressor_model") if ctrl else "ollama:qwen2.5:1.5b"
+    _compressor = ctrl.get("compressor_model") if ctrl else "ollama:gemma3:12b"
     def _compress_fn(prompt):
         _c = registry.create_chat(
             model_id=_compressor, system_instruction="Summarize concisely.",
             temperature=0.3, max_output_tokens=512)
         return _c.send_message(prompt)
 
-    to_compress = buf[:batch]
-    result = compress_post_tier(to_compress, _compress_fn)
-    if result:
-        state["_post_memory_buffer"] = buf[batch:]
-        tiers = state.setdefault("post_tiers", {"recent": [], "compressed": [], "deep": []})
-        tiers["recent"].append(result)
-        safe_print(f"{Fore.CYAN}[POST MEMORY] {batch} posts → summary: {result['summary'][:80]}...")
+    tiers = state.setdefault("post_tiers", {"recent": [], "compressed": [], "deep": []})
 
-        # Cascade
-        _recent_cap = int(ctrl.get("post_memory_recent_cap") if ctrl else 8)
-        _compressed_cap = int(ctrl.get("post_memory_compressed_cap") if ctrl else 8)
-        _deep_cap = int(ctrl.get("post_memory_deep_cap") if ctrl else 5)
+    # Pop oldest fresh post(s) and compress each individually
+    while len(fresh) > fresh_cap:
+        oldest = fresh.pop()  # remove from tail (oldest)
+        result = compress_post_tier([oldest], _compress_fn)
+        if result:
+            tiers["recent"].insert(0, result)
+            safe_print(f"{Fore.CYAN}[POST MEMORY] 1 fresh → recent: {result['summary'][:80]}...")
+    state["_post_memory_fresh"] = fresh
 
-        if len(tiers["recent"]) >= _recent_cap:
-            half = _recent_cap // 2
-            r = compress_post_tier(tiers["recent"][:half], _compress_fn)
-            if r:
-                tiers["recent"] = tiers["recent"][half:]
-                tiers["compressed"].append(r)
-                safe_print(f"{Fore.CYAN}[POST MEMORY] {half} recent → compressed")
+    # Cascade: recent → compressed
+    _recent_cap = int(ctrl.get("post_memory_recent_cap") if ctrl else 10)
+    _compressed_cap = int(ctrl.get("post_memory_compressed_cap") if ctrl else 10)
+    _deep_cap = int(ctrl.get("post_memory_deep_cap") if ctrl else 5)
 
-        if len(tiers["compressed"]) >= _compressed_cap:
-            half = _compressed_cap // 2
-            r = compress_post_tier(tiers["compressed"][:half], _compress_fn)
-            if r:
-                tiers["compressed"] = tiers["compressed"][half:]
-                tiers["deep"].append(r)
-                safe_print(f"{Fore.CYAN}[POST MEMORY] {half} compressed → deep")
+    if len(tiers["recent"]) >= _recent_cap:
+        half = _recent_cap // 2
+        oldest_half = tiers["recent"][-half:]  # tail = oldest
+        r = compress_post_tier(oldest_half, _compress_fn)
+        if r:
+            tiers["recent"] = tiers["recent"][:-half]
+            tiers["compressed"].insert(0, r)
+            safe_print(f"{Fore.CYAN}[POST MEMORY] {half} recent → compressed")
 
-        if len(tiers["deep"]) >= _deep_cap:
-            half = _deep_cap // 2
-            r = compress_post_tier(tiers["deep"][:half], _compress_fn)
-            if r:
-                tiers["deep"] = tiers["deep"][half:]
-                tiers["deep"].insert(0, r)
-                safe_print(f"{Fore.CYAN}[POST MEMORY] {half} deep → ultra-deep")
+    if len(tiers["compressed"]) >= _compressed_cap:
+        half = _compressed_cap // 2
+        oldest_half = tiers["compressed"][-half:]
+        r = compress_post_tier(oldest_half, _compress_fn)
+        if r:
+            tiers["compressed"] = tiers["compressed"][:-half]
+            tiers["deep"].insert(0, r)
+            safe_print(f"{Fore.CYAN}[POST MEMORY] {half} compressed → deep")
+
+    if len(tiers["deep"]) >= _deep_cap:
+        half = _deep_cap // 2
+        oldest_half = tiers["deep"][-half:]
+        r = compress_post_tier(oldest_half, _compress_fn)
+        if r:
+            tiers["deep"] = tiers["deep"][:-half]
+            tiers["deep"].insert(0, r)
+            safe_print(f"{Fore.CYAN}[POST MEMORY] {half} deep → ultra-deep")
 
 
 def _build_featured_note(store) -> str:
@@ -241,36 +294,22 @@ def _build_post_engagement(platform, state: dict, count: int = 5) -> str:
         return ""
 
 
-def _build_recent_posts(store, run_id: str, count: int = 4) -> str:
-    """Fetch recent artifact bodies from Analog Home for the planner prompt."""
-    if not store._analog_home_url or count <= 0:
+def _build_recent_posts(state, count: int = 4) -> str:
+    """Render the last N full posts from local _post_memory_fresh for the planner prompt.
+
+    Replaces the earlier API-fetch approach. Local-first is faster, survives Analog Home
+    outages, and keeps the prompt context deterministic with what the agent just wrote.
+    """
+    fresh = (state.get("_post_memory_fresh") or [])[:count]
+    if not fresh:
         return ""
-    try:
-        import requests
-        from urllib.parse import urljoin
-        url = urljoin(store._analog_home_url.rstrip("/") + "/",
-                      f"artifacts?run_id={run_id}&limit={count}&sort=desc")
-        resp = requests.get(url, timeout=10)
-        if resp.status_code >= 400:
-            return ""
-        arts = resp.json()
-        # Filter to content artifacts only
-        content_arts = [a for a in arts if a.get("artifact_type") in ("post", "comment", "reply", "image")]
-        if not content_arts:
-            return ""
-        lines = []
-        for a in content_arts:
-            atype = a.get("artifact_type", "")
-            title = a.get("title", "")
-            body = a.get("body_markdown", "")
-            # Truncate extremely long bodies
-            _max_body = 5000
-            if len(body) > _max_body:
-                body = body[:_max_body - 3] + "..."
-            lines.append(f"[{atype}] {title}\n{body}")
-        return "\n\n".join(lines)
-    except Exception:
-        return ""
+    lines = []
+    for a in fresh:
+        atype = a.get("type", "post")
+        title = a.get("title", "")
+        body = a.get("body", "")
+        lines.append(f"[{atype}] {title}\n{body}")
+    return "\n\n".join(lines)
 
 
 def _build_self_telemetry(state: dict, budget, iteration: int, daemon=None) -> str:
@@ -889,6 +928,7 @@ def main():
             pass
 
     prev_feed_available = None  # Track feed state transitions
+
     while True:
         iteration += 1
         state["_cycle_number"] = iteration
@@ -945,10 +985,68 @@ def main():
                     analog_trajectory["last_vote_at"] = _audience.get("last_vote_at")
                     analog_trajectory["last_seed_at"] = _audience.get("last_seed_at")
 
-        # Read current conscious model — use weighted pool if set
+        # Track control changes for the cycle report (both origins).
+        _accountant_control_changes: Dict[str, str] = {}
+        _accountant_reasoning: str = ""
+        _conscious_control_changes: Dict[str, Any] = {}
+
+        # --- Budget planning (accountant) — runs every cycle when enabled ---
+        # The accountant owns wake/budget mechanics. It fires before the conscious model is
+        # selected so any weight changes take effect this cycle.
         from .daemon import _pick_weighted_model
+        if ctrl.get("budget_plan_enabled"):
+            from .accountant import should_run_budget_plan, build_budget_plan_prompt, parse_budget_plan, apply_budget_plan
+            if should_run_budget_plan(budget, ctrl, state.get("_last_budget_plan_time", 0)):
+                try:
+                    bp_prompt = build_budget_plan_prompt(budget, ctrl, registry)
+                    _accountant_model = _pick_weighted_model(
+                        ctrl.get("accountant_model_weights"),
+                        "ollama:gemma3:12b",
+                    )
+                    bp_chat = registry.create_chat(
+                        model_id=_accountant_model,
+                        system_instruction="You are a budget planner. Respond with valid JSON only.",
+                        temperature=0.3,
+                        max_output_tokens=1024,
+                    )
+                    bp_raw = bp_chat.send_message(bp_prompt)
+                    from .llm.base import LLMResponse as _LLMResp
+                    _bp_in = getattr(bp_chat, "_last_input_tokens", 0) or (len(bp_prompt) // 4)
+                    _bp_out = getattr(bp_chat, "_last_output_tokens", 0) or (len(bp_raw) // 4)
+                    budget.record_usage(_accountant_model, _LLMResp(
+                        text=bp_raw, input_tokens=_bp_in, output_tokens=_bp_out,
+                        model_id=_accountant_model))
+                    bp_plan = parse_budget_plan(bp_raw)
+                    if bp_plan:
+                        _accountant_control_changes = apply_budget_plan(bp_plan, ctrl)
+                        _accountant_reasoning = bp_plan.get("reasoning", "")
+                        state["_last_budget_plan_time"] = time.time()
+                        if _accountant_control_changes:
+                            store.save_state(state)
+                            print(f"{Fore.CYAN}[BUDGET] Accountant applied: {_accountant_control_changes}")
+                            _push_to_live(store, [f"[BUDGET] {_accountant_control_changes}"], daemon, cycle=iteration)
+                        telemetry.log("budget_plan", {
+                            "cycle": iteration,
+                            "changes": _accountant_control_changes,
+                            "reasoning": _accountant_reasoning,
+                        })
+                except Exception as bp_err:
+                    telemetry.log("budget_plan_error", {
+                        "cycle": iteration, "error": str(bp_err),
+                    })
+
+        # Select conscious model AFTER the accountant may have adjusted weights.
+        # When daily budget is exhausted, swap to the local fallback pool so WAIT-probable
+        # cycles cost $0. Local models can still choose any action; they're not forced to WAIT.
+        _budget_exhausted = budget is not None and budget.remaining_usd() <= 0
+        if _budget_exhausted:
+            active_conscious_weights = ctrl.get("budget_exhausted_model_weights") or \
+                "ollama:qwen3:14b=2,ollama:gemma3:12b=2,ollama:deepseek-r1:8b=1"
+            safe_print(f"{Fore.YELLOW}[BUDGET] Exhausted (${budget.spent_today_usd():.2f}/${budget.daily_limit_usd:.2f}) — using local fallback pool")
+        else:
+            active_conscious_weights = ctrl.get("conscious_model_weights")
         conscious_model = _pick_weighted_model(
-            ctrl.get("conscious_model_weights"),
+            active_conscious_weights,
             "gemini-2.5-pro",
         )
         _is_local = conscious_model.startswith("ollama:")
@@ -957,51 +1055,6 @@ def main():
         _model_tag = "local" if _is_local else "api"
         safe_print(f"{_model_color}── CYCLE {iteration} ── conscious: {_model_short} ({_model_tag}) ──{Style.RESET_ALL}")
         _push_to_live(store, [f"── CYCLE {iteration} ── conscious: {_model_short} ({_model_tag}) ──"], daemon, cycle=iteration)
-
-        # --- Budget planning (accountant) ---
-        if ctrl.get("budget_plan_enabled"):
-            from .accountant import should_run_budget_plan, build_budget_plan_prompt, parse_budget_plan, apply_budget_plan
-            _last_budget_plan = state.get("_last_budget_plan_time", 0)
-            if should_run_budget_plan(budget, ctrl, _last_budget_plan):
-                try:
-                    bp_prompt = build_budget_plan_prompt(budget, ctrl, registry)
-                    bp_chat = registry.create_chat(
-                        model_id=conscious_model,
-                        system_instruction="You are a budget planner. Respond with valid JSON only.",
-                        temperature=0.3,
-                        max_output_tokens=1024,
-                    )
-                    bp_raw = bp_chat.send_message(bp_prompt)
-                    # Record accountant spend
-                    from .llm.base import LLMResponse as _LLMResp
-                    from .llm.budget import estimate_cost as _est_cost
-                    _bp_in = getattr(bp_chat, "_last_input_tokens", 0) or (len(bp_prompt) // 4)
-                    _bp_out = getattr(bp_chat, "_last_output_tokens", 0) or (len(bp_raw) // 4)
-                    budget.record_usage(conscious_model, _LLMResp(
-                        text=bp_raw, input_tokens=_bp_in, output_tokens=_bp_out,
-                        model_id=conscious_model))
-                    bp_plan = parse_budget_plan(bp_raw)
-                    if bp_plan:
-                        bp_changes = apply_budget_plan(bp_plan, ctrl)
-                        state["_last_budget_plan_time"] = time.time()
-                        store.save_state(state)
-                        # Re-read conscious model in case accountant changed it
-                        conscious_model = "gemini-2.5-pro"
-                        telemetry.log("budget_plan", {
-                            "cycle": iteration,
-                            "changes": bp_changes,
-                            "reasoning": bp_plan.get("reasoning", ""),
-                        })
-                        if bp_changes:
-                            try:
-                                print(f"{Fore.CYAN}[BUDGET] Plan applied: {bp_changes}")
-                                _push_to_live(store, [f"[BUDGET] {bp_changes}"], daemon, cycle=iteration)
-                            except Exception:
-                                pass
-                except Exception as bp_err:
-                    telemetry.log("budget_plan_error", {
-                        "cycle": iteration, "error": str(bp_err),
-                    })
 
         # Recreate chat each cycle to avoid token accumulation
         # Use registry directly so backend is resolved per-model (supports cross-provider model switching)
@@ -1187,8 +1240,15 @@ def main():
         seeker_findings = ""
         fresh_drafts = []
         saved_plans = []
+        draft_digest = ""
         if daemon:
-            fresh_drafts, wake_pot = draft_buffer.drain(refractory=ctrl.get("wake_refractory"))
+            fresh_drafts, overflow_drafts, wake_pot = draft_buffer.drain(
+                refractory=ctrl.get("wake_refractory"),
+                top_keep=10,
+            )
+            if overflow_drafts:
+                safe_print(f"{Fore.MAGENTA}[DAEMON] {len(overflow_drafts)} low-score draft(s) → digest")
+                draft_digest = _compress_drafts_to_digest(overflow_drafts, registry, ctrl)
             if fresh_drafts:
                 safe_print(f"{Fore.MAGENTA}[DAEMON] {len(fresh_drafts)} draft(s) from subconscious (wake_potential={wake_pot:.2f})")
                 # Show model distribution in drafts
@@ -1219,9 +1279,10 @@ def main():
             ]
             if saved_plans:
                 safe_print(f"{Fore.MAGENTA}[SAVED] {len(saved_plans)} plan(s) from previous cycles")
-            if fresh_drafts or saved_plans:
+            if fresh_drafts or saved_plans or draft_digest:
                 draft_context = _format_draft_context(
                     fresh_drafts, saved_plans, wake_pot, draft_buffer._wake_threshold,
+                    digest=draft_digest,
                 )
 
         # Platform write status for planner awareness
@@ -1288,7 +1349,7 @@ def main():
             platform_status=platform_status,
             nudge_note=nudge_note,
             self_telemetry=_build_self_telemetry(state, budget, iteration, daemon) + "\n" + _build_featured_note(store),
-            recent_posts=_build_recent_posts(store, state.get("_session_id", ""),
+            recent_posts=_build_recent_posts(state,
                                              count=int(ctrl.get("recent_posts_in_prompt") or 4)),
             post_engagement=_build_post_engagement(platform, state),
             post_memory=post_memory_context(state),
@@ -1342,9 +1403,10 @@ def main():
                             safe_print(f"{Fore.YELLOW}[QUOTA] Paid Gemini also failed: {str(_paid_err)[:100]}")
 
                     if not _success:
-                        # Try each conscious pool model until one works (highest weight first)
+                        # Try each conscious pool model until one works (highest weight first).
+                        # Use the same pool that was active (local fallback pool when budget exhausted).
                         _con_pairs = []
-                        for p in (ctrl.get("conscious_model_weights") or "").split(","):
+                        for p in (active_conscious_weights or "").split(","):
                             if "=" in p:
                                 _m, _w = p.rsplit("=", 1)
                                 try: _con_pairs.append((_m.strip(), float(_w.strip())))
@@ -1618,17 +1680,19 @@ def main():
                     "blocked_count": len(blocked),
                 })
 
+                # Record conscious-originated changes for the cycle report (no separate artifact).
+                _conscious_control_changes = {ck: ctrl.get(ck) for ck in applied.keys()}
+
                 _ctrl_live_lines = []
                 for ck, cv in results.items():
                     if cv == "ok":
-                        safe_print(f"{Fore.GREEN}  [CTRL] {ck} -> {ctrl.get(ck)}")
+                        safe_print(f"{Fore.GREEN}  [CTRL conscious] {ck} -> {ctrl.get(ck)}")
                         _ctrl_live_lines.append(f"[CONTROL] {ck} → {ctrl.get(ck)}")
                     elif cv == "blocked":
                         safe_print(f"{Fore.YELLOW}  [CTRL] {ck} BLOCKED (blacklisted)")
                         _ctrl_live_lines.append(f"[CONTROL] {ck} BLOCKED")
                 if _ctrl_live_lines:
                     _push_to_live(store, _ctrl_live_lines, daemon, cycle=iteration)
-
 
                 # Actuate budget change
                 if results.get("daily_budget_usd") == "ok":
@@ -1640,23 +1704,6 @@ def main():
                     ok = store.set_default_temperature(new_default)
                     safe_print(f"{Fore.CYAN}  [CTRL] Agent temperature preference -> {new_default:.2f} "
                                f"({'synced to Analog Home' if ok else 'local only — no Analog Home'})")
-
-                # Publish control changes to Analog Home
-                if applied:
-                    changes_lines = []
-                    for ck in sorted(applied.keys()):
-                        changes_lines.append(f"{ck}: {ctrl.get(ck)}")
-                    if blocked:
-                        changes_lines.append("")
-                        for ck in sorted(blocked.keys()):
-                            changes_lines.append(f"{ck}: BLOCKED")
-                    store.write_artifact(iteration, {
-                        "brain": brain_name,
-                        "artifact_type": "system_controls_update",
-                        "title": "Controls Updated",
-                        "body_markdown": "\n".join(changes_lines),
-                        "temperature": cycle_temperature,
-                    })
 
             # --- Handle daemon directives (downward causality) ---
             daemon_directives = plan.pop("daemon_directives", None)
@@ -1714,6 +1761,15 @@ def main():
                     note = daemon_directives.get("note", "")
                     if note:
                         report_parts.append(f"Directives — Note: {note}")
+                # Control changes (both origins) folded into the cycle report.
+                if _accountant_control_changes or _conscious_control_changes:
+                    report_parts.append("")
+                    for _k, _delta in sorted(_accountant_control_changes.items()):
+                        report_parts.append(f"[accountant] {_k}: {_delta}")
+                    for _k, _v in sorted(_conscious_control_changes.items()):
+                        report_parts.append(f"[conscious] {_k} → {_v}")
+                    if _accountant_reasoning:
+                        report_parts.append(f"Accountant: {_accountant_reasoning}")
                 store.write_artifact(iteration, {
                     "brain": brain_name,
                     "artifact_type": "system_cycle_report",
@@ -1817,13 +1873,94 @@ def main():
                             })
                             store.save_state(state)
 
-                        except Exception as e:
-                            safe_print(f"{Fore.RED}[IMAGE] Generation failed: {e}")
-                            telemetry.log("image_error", {
-                                "cycle": iteration,
-                                "prompt": image_prompt[:500],
-                                "error": str(e)[:500],
-                            })
+                        except Exception as first_error:
+                            image_ok = False
+                            # Retry once with imagen-ultra if original tier was different
+                            if img_tier != "imagen-ultra":
+                                safe_print(f"{Fore.YELLOW}[IMAGE] {first_error} — retrying with imagen-ultra...")
+                                try:
+                                    image_bytes, img_model_id, img_cost = gemini_backend_imagen.generate_image(
+                                        prompt=image_prompt, tier="imagen-ultra",
+                                        aspect_ratio="4:3",
+                                    )
+                                    try:
+                                        from PIL import Image as _PILImage
+                                        _pil_img = _PILImage.open(io.BytesIO(image_bytes))
+                                        _jpeg_buf = io.BytesIO()
+                                        _pil_img.convert("RGB").save(_jpeg_buf, format="JPEG", quality=85)
+                                        image_bytes = _jpeg_buf.getvalue()
+                                        _img_mime = "image/jpeg"
+                                    except ImportError:
+                                        _img_mime = "image/png"
+                                    image_b64 = base64.b64encode(image_bytes).decode("ascii")
+                                    from .llm.base import LLMResponse as _ImgResp
+                                    budget.record_usage(img_model_id, _ImgResp(
+                                        text="", input_tokens=0, output_tokens=0,
+                                        cost_usd=img_cost, model_id=img_model_id,
+                                    ))
+                                    set_cooldown(state, "GENERATE_IMAGE", ctrl=ctrl)
+                                    store.write_artifact(iteration, {
+                                        "brain": brain_name,
+                                        "artifact_type": "image",
+                                        "title": shorten(plan.get("title", "Visual Artifact"), 200),
+                                        "body_markdown": plan.get("content", ""),
+                                        "monologue_public": preamble,
+                                        "image_data_b64": image_b64,
+                                        "image_mime": _img_mime,
+                                        "temperature": cycle_temperature,
+                                    })
+                                    safe_print(f"{Fore.GREEN}[IMAGE] Retry succeeded ({len(image_bytes)} bytes, imagen-ultra)")
+                                    telemetry.log("image_generated", {
+                                        "cycle": iteration, "prompt": image_prompt[:500],
+                                        "size_bytes": len(image_bytes), "model": img_model_id,
+                                        "tier": "imagen-ultra", "cost_usd": img_cost,
+                                        "retry": True, "original_tier": img_tier,
+                                    })
+                                    add_history(state, {
+                                        "action": "GENERATE_IMAGE",
+                                        "target": "analog_home",
+                                        "summary": plan.get("summary", "Generated image (retry)"),
+                                    })
+                                    store.save_state(state)
+                                    image_ok = True
+                                except Exception as retry_error:
+                                    safe_print(f"{Fore.RED}[IMAGE] Retry also failed: {retry_error}")
+
+                            if not image_ok:
+                                # Fallback: publish essay as text POST to Analog Home
+                                essay_content = plan.get("content", "")
+                                if essay_content.strip():
+                                    safe_print(f"{Fore.YELLOW}[IMAGE] Publishing essay as text post (image failed)")
+                                    store.write_artifact(iteration, {
+                                        "brain": brain_name,
+                                        "artifact_type": "post",
+                                        "title": shorten(plan.get("title", "Untitled"), 200),
+                                        "body_markdown": essay_content,
+                                        "monologue_public": preamble,
+                                        "temperature": cycle_temperature,
+                                    })
+                                    add_history(state, {
+                                        "action": "POST",
+                                        "target": "analog_home",
+                                        "summary": f"[IMAGE FALLBACK] {plan.get('summary', 'Essay published after image failure')}",
+                                    })
+                                # Save image prompt for potential retry
+                                failed = state.setdefault("_failed_image_prompts", [])
+                                failed.append({
+                                    "cycle": iteration,
+                                    "image_prompt": image_prompt,
+                                    "title": plan.get("title", ""),
+                                    "error": str(first_error)[:500],
+                                })
+                                state["_failed_image_prompts"] = failed[-5:]
+                                telemetry.log("image_error", {
+                                    "cycle": iteration,
+                                    "prompt": image_prompt,
+                                    "content_length": len(plan.get("content", "")),
+                                    "error": str(first_error),
+                                    "fallback": "post_published" if essay_content.strip() else "no_content",
+                                })
+                                store.save_state(state)
 
             elif act == "DEV_REQUEST":
                 # --- Dev request: agent asks for software changes ---
@@ -2065,17 +2202,15 @@ def main():
                         })
                         _push_to_live(store, [f"ACTION: {act_upper} \"{(artifact_title or '')[:60]}\""], daemon, cycle=iteration)
 
-                        # --- Post memory buffer ---
-                        _post_buf = state.setdefault("_post_memory_buffer", [])
-                        _post_buf.append({
+                        # --- Post memory: prepend to fresh (newest first), compress if over cap ---
+                        _fresh = state.setdefault("_post_memory_fresh", [])
+                        _fresh.insert(0, {
                             "cycle": iteration,
                             "type": artifact_type,
                             "title": (artifact_title or "")[:100],
                             "body": (executed_plan.get("content", "") or "")[:1500],
                         })
-                        _batch_size = int(ctrl.get("post_memory_batch") if ctrl else 4)
-                        if len(_post_buf) >= _batch_size:
-                            _compress_post_memory(state, registry, ctrl)
+                        _compress_post_memory(state, registry, ctrl)
 
         except Exception as e:
             telemetry.log("error", {"cycle": iteration, "error": str(e)})
@@ -2100,8 +2235,8 @@ def main():
                 d.cycles_saved += 1
                 if d.cycles_saved <= ctrl.get("saved_plan_max_cycles"):
                     next_saved.append(d)
-            # Keep max_drafts worth of saved plans (highest score first)
-            max_saved = ctrl.get("max_drafts")
+            # Keep top-scored saved plans across cycles (separate cap from live buffer)
+            max_saved = int(ctrl.get("max_saved_plans") or 15)
             next_saved.sort(key=lambda x: x.signal_score, reverse=True)
             next_saved = next_saved[:max_saved]
             state["saved_plans"] = [d.to_dict() for d in next_saved]

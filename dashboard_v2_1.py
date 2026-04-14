@@ -1246,7 +1246,7 @@ CONTROLS_META = [
     ("cycle_interval_minutes",   "int",   60,     "Max minutes between cycles (daemon may wake sooner)", "timing", 1, 120,   None),
     ("sentry_interval_seconds",  "int",   300,    "Seconds between sentry scans",                   "timing",   10,   None,  None),
     ("seeker_every_n_ticks",     "int",   3,      "Seeker runs every N sentry ticks",               "timing",   1,    20,    None),
-    ("target_wake_minutes",      "int",   60,     "Target avg minutes between conscious wakes (auto-calibrates threshold)", "timing", 5, 240, None),
+    ("target_wake_minutes",      "int",   60,     "Target avg minutes between conscious wakes (auto-calibrates threshold)", "timing", 5, 360, None),
     ("image_cooldown_minutes",   "int",   1440,   "Min minutes between image generations",          "timing",   10,   None,  None),
     # --- Wake Mechanics ---
     ("wake_refractory",          "float", -2.0,   "Wake potential reset after firing (negative = cooldown)", "wake", -10.0, 0.0, None),
@@ -1278,7 +1278,8 @@ CONTROLS_META = [
     ("reply_max_comments",       "int",   25,     "Max comments evaluated per thread",              "moltbook", 5,    100,   None),
     ("thread_comments_for_engagement", "int", 12, "Dogpile guard threshold",                        "moltbook", 1,    100,   None),
     # --- Daemon ---
-    ("max_drafts",               "int",   10,     "Max drafts in buffer",                           "daemon",   1,    50,    None),
+    ("max_drafts",               "int",   40,     "Max non-muse drafts in buffer before compression","daemon",   10,   200,   None),
+    ("max_saved_plans",          "int",   15,     "Max top-scored drafts preserved across cycles",  "daemon",   1,    50,    None),
     ("sentry_max_tokens",        "int",   256,    "Max output tokens for sentry",                   "daemon",   64,   1024,  None),
     ("strategist_max_tokens",    "int",   4096,   "Max output tokens for strategist",               "daemon",   128,  8192,  None),
     ("seeker_max_tokens",        "int",   4096,   "Max output tokens for seeker",                   "daemon",   256,  8192,  None),
@@ -1309,9 +1310,9 @@ CONTROLS_META = [
     ("memory_compressed_capacity","int",  10,     "Compressed memories before deep compression",    "context",  3,    50,    None),
     ("memory_deep_capacity",     "int",   10,     "Deep memories before further compression",       "context",  3,    50,    None),
     # Post memory tiers
-    ("post_memory_batch",        "int",   4,      "Artifacts before post memory compression",       "context",  2,    20,    None),
-    ("post_memory_recent_cap",   "int",   8,      "Post summaries before deeper compression",       "context",  3,    50,    None),
-    ("post_memory_compressed_cap","int",  8,      "Compressed post summaries before deep",          "context",  3,    50,    None),
+    ("post_memory_fresh_cap",    "int",   4,      "Full posts kept locally before sliding compression","context",1,    20,    None),
+    ("post_memory_recent_cap",   "int",   10,     "Per-post summaries in recent tier before cascade","context",  3,    30,    None),
+    ("post_memory_compressed_cap","int",  10,     "Compressed post summaries before deep",          "context",  3,    20,    None),
     ("post_memory_deep_cap",     "int",   5,      "Deep post summaries before ultra-compression",   "context",  2,    20,    None),
 ]
 

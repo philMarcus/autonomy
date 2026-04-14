@@ -100,9 +100,14 @@ class DraftBuffer:
             self._drafts.append(draft)
             self._wake_potential += draft.charge
 
-            # Prune oldest if over capacity
+            # Prune oldest non-muse if over capacity (protect muse drafts)
             while len(self._drafts) > self._max_drafts:
-                self._drafts.pop(0)
+                evict_idx = next((i for i, d in enumerate(self._drafts) if d.source != "muse"), None)
+                if evict_idx is not None:
+                    self._drafts.pop(evict_idx)
+                else:
+                    self._drafts.pop(0)
+                    break
 
             if self._wake_potential >= self._wake_threshold:
                 self._wake_event.set()
@@ -128,21 +133,26 @@ class DraftBuffer:
     # Reader side (conscious thread)
     # ------------------------------------------------------------------
 
-    def drain(self, refractory: float = 0.0) -> Tuple[List[Draft], float]:
-        """Return all drafts and wake_potential, then reset the buffer.
+    def drain(self, refractory: float = 0.0, top_keep: int = 10) -> Tuple[List[Draft], List[Draft], float]:
+        """Return (kept_drafts, overflow_drafts, wake_potential), then reset the buffer.
 
-        Called by the conscious loop when it wakes (by signal or timeout).
-        Args:
-            refractory: Value to set wake_potential to after draining.
-                        Use negative values for a refractory period.
+        kept_drafts: all muse-source drafts + top `top_keep` non-muse by signal_score DESC.
+        overflow_drafts: remaining non-muse drafts — caller should compress into a digest.
         """
         with self._lock:
-            drafts = list(self._drafts)
+            all_drafts = list(self._drafts)
             potential = self._wake_potential
             self._drafts.clear()
             self._wake_potential = refractory
             self._wake_event.clear()
-            return drafts, potential
+
+        muse = [d for d in all_drafts if d.source == "muse"]
+        non_muse = [d for d in all_drafts if d.source != "muse"]
+        non_muse.sort(key=lambda d: d.signal_score, reverse=True)
+        kept_non_muse = non_muse[:top_keep]
+        overflow = non_muse[top_keep:]
+        kept = muse + kept_non_muse
+        return kept, overflow, potential
 
     def wait_for_wake(self, timeout: float) -> bool:
         """Block until the daemon signals a wake, or until timeout.

@@ -23,10 +23,11 @@ class Control:
     min_val: Any = None     # numeric lower bound (inclusive)
     max_val: Any = None     # numeric upper bound (inclusive)
     choices: Optional[List[str]] = None  # valid values for str controls
+    audience: str = "both"  # "conscious" | "accountant" | "both" — who sees this in prompts
 
 
 # Category display order for LLM prompt
-_CATEGORY_ORDER = ["llm", "cost", "timing", "output", "social", "daemon", "context"]
+_CATEGORY_ORDER = ["llm", "cost", "wake", "timing", "output", "social", "daemon", "context"]
 
 
 class ControlRegistry:
@@ -151,14 +152,20 @@ class ControlRegistry:
     # Formatting for LLM prompt
     # ------------------------------------------------------------------
 
-    def to_llm_block(self) -> str:
-        """Format all controls as a text block for the planner prompt."""
+    def to_llm_block(self, audience: str = "conscious") -> str:
+        """Format controls as a text block for a planner prompt.
+
+        Controls whose `audience` excludes the caller are hidden. Defaults to
+        the conscious audience (the main planner prompt).
+        """
         by_cat: Dict[str, List[str]] = {}
         for cat in _CATEGORY_ORDER:
             by_cat[cat] = []
 
         for key in sorted(self._defs.keys()):
             defn = self._defs[key]
+            if defn.audience != "both" and defn.audience != audience:
+                continue
             cat = defn.category if defn.category in by_cat else "context"
             val = self._values[key]
             locked = key in self._blacklist
@@ -290,11 +297,19 @@ def build_default_registry(model_registry, blacklist_str: str = "") -> ControlRe
         # --- LLM ---
         Control("conscious_model_weights", "weights", "gemini-2.5-pro=1",
                 "Weighted model pool for conscious (pro-tier only)", "llm",
-                choices=conscious_choices),
+                choices=conscious_choices, audience="accountant"),
+        Control("budget_exhausted_model_weights", "weights",
+                "ollama:qwen3:14b=2,ollama:gemma3:12b=2,ollama:deepseek-r1:8b=1",
+                "Weighted pool used for conscious when daily budget is exhausted", "llm",
+                choices=subconscious_choices, audience="accountant"),
+        Control("accountant_model_weights", "weights",
+                "ollama:qwen3:14b=2,ollama:gemma3:12b=1",
+                "Weighted pool for the budget accountant (analytical task, local-friendly)", "llm",
+                choices=subconscious_choices, audience="accountant"),
         Control("subconscious_model_weights", "weights",
                 "ollama:gemma3:12b=3,ollama:qwen3.5:9b=1,ollama:phi4:latest=0.5",
                 "Weighted model pool for SENTRY scoring", "llm",
-                choices=subconscious_choices),
+                choices=subconscious_choices, audience="accountant"),
         Control("strategist_model_weights", "weights",
                 "ollama:gemma3:12b=2,ollama:deepseek-r1:8b=1.5,"
                 "ollama:llama3.2:3b=0,ollama:qwen2.5:1.5b=0",
@@ -333,9 +348,34 @@ def build_default_registry(model_registry, blacklist_str: str = "") -> ControlRe
                 "Switch to cheaper models below this remaining fraction", "cost",
                 min_val=0.05, max_val=0.9),
 
-        # --- Timing ---
+        # --- Wake mechanics (controls that drive when conscious fires) ---
+        # These interact. The daemon ticks every sentry_interval_seconds, scoring feed items.
+        # High-score items add charge_weight_feed to wake_potential. When wake_potential
+        # crosses an auto-calibrated threshold (tuned to hit target_wake_minutes on average),
+        # conscious fires. If no wake event by cycle_interval_minutes, conscious fires anyway.
         Control("cycle_interval_minutes", "int", 60,
-                "Minutes between cycles", "timing", min_val=1, max_val=120),
+                "Max minutes between cycles (hard floor — daemon usually wakes sooner)", "wake",
+                min_val=1, max_val=240, audience="accountant"),
+        Control("sentry_interval_seconds", "int", 300,
+                "Seconds between sentry scans. Lower = more responsive + more compute. "
+                "Must be ≤ target_wake_minutes*60 for wake target to be achievable.",
+                "wake", min_val=10, audience="accountant"),
+        Control("target_wake_minutes", "int", 60,
+                "Target avg minutes between conscious wakes (auto-calibrates threshold). "
+                "Cannot be faster than sentry_interval_seconds/60.",
+                "wake", min_val=10, max_val=360, audience="accountant"),
+        Control("signal_threshold", "float", 0.67,
+                "Sentry score cutoff (0-1) to trigger strategist. Items scoring below this "
+                "add no charge. Raise for selectivity.",
+                "wake", min_val=0.0, max_val=1.0, audience="accountant"),
+        Control("charge_weight_feed", "float", 0.05,
+                "Charge added per above-threshold feed item. Low by design — needs accumulation.",
+                "wake", min_val=0.0, max_val=5.0, audience="accountant"),
+        Control("wake_refractory", "float", -2.0,
+                "Wake potential after firing (negative = cooldown period)", "wake",
+                min_val=-10.0, max_val=0.0, audience="accountant"),
+
+        # --- Timing (other) ---
         Control("post_interval_minutes", "int", 30,
                 "Minutes between Moltbook posts", "timing", min_val=5, max_val=1440),
         Control("image_cooldown_minutes", "int", 1440,
@@ -357,36 +397,20 @@ def build_default_registry(model_registry, blacklist_str: str = "") -> ControlRe
                 "Reply priority", "social",
                 choices=["replies_first", "outside_first"]),
 
-        # --- Daemon (Phase 5 will consume; registered now with defaults) ---
-        Control("sentry_interval_seconds", "int",
-                300,
-                "Seconds between sentry scans", "daemon", min_val=10),
-        Control("signal_threshold", "float", 0.67,
-                "Sentry score to trigger strategist (feed items)", "daemon", min_val=0.0, max_val=1.0),
+        # --- Daemon (scoring + charge weights not in WAKE) ---
         Control("seed_threshold", "float", 0.3,
                 "Sentry score for human seeds (lower — filters spam only)", "daemon", min_val=0.0, max_val=1.0),
         Control("sentry_strictness", "float", 0.5,
-                "Your sentry's signal-to-noise dial. This is the knob to use when the daemon "
-                "is waking you on things you don't care about (raise it) or missing interesting "
-                "items (lower it). 0.0-0.33 liberal — sentry casts a wide net, more false "
-                "positives. 0.5 neutral. 0.67-1.0 strict — sentry only flags items with clear, "
-                "direct relevance. Distinct from signal_threshold: that's a numeric cutoff applied "
-                "AFTER scoring; this changes how the sentry model itself decides to score. Tune "
-                "this first; fall back to signal_threshold for fine adjustment.",
+                "Sentry noise dial (0-1). 0=liberal/wide net, 0.5=neutral, 1=strict/only clear relevance. "
+                "Changes HOW the sentry scores; signal_threshold is a cutoff applied AFTER scoring.",
                 "daemon", min_val=0.0, max_val=1.0),
-        Control("target_wake_minutes", "int", 60,
-                "Target minutes between conscious cycles (auto-calibrates threshold)", "timing",
-                min_val=10, max_val=360),
-        Control("wake_refractory", "float", -2.0,
-                "Wake potential after firing (negative=cooldown)", "daemon", min_val=-10.0, max_val=0.0),
-        Control("charge_weight_feed", "float", 0.05,
-                "Charge per above-threshold feed item (low — accumulate many)", "daemon", min_val=0.0, max_val=5.0),
         Control("charge_weight_seed", "float", 3.0,
                 "Charge multiplier for strategist drafts inspired by seed items "
                 "(seed sentry charge itself uses wake_threshold * score; -P architect seeds get 999)",
                 "daemon", min_val=0.0, max_val=1000.0),
         Control("charge_weight_reply", "float", 1.5,
-                "Charge per worthy reply candidate", "daemon", min_val=0.0, max_val=5.0),
+                "Charge per worthy reply candidate", "daemon", min_val=0.0, max_val=5.0,
+                audience="accountant"),
         Control("max_replies_per_post", "int", 3,
                 "Max replies to any single post", "social", min_val=1, max_val=10),
         Control("reply_scan_interval_ticks", "int", 2,
@@ -399,18 +423,20 @@ def build_default_registry(model_registry, blacklist_str: str = "") -> ControlRe
                 "Compressed memories before deep compression", "context", min_val=3, max_val=20),
         Control("memory_deep_capacity", "int", 10,
                 "Deep memories before further compression", "context", min_val=3, max_val=20),
-        Control("compressor_model", "str", "ollama:qwen2.5:1.5b",
+        Control("compressor_model", "str", "ollama:gemma3:12b",
                 "Model for automatic memory compression", "context"),
-        Control("post_memory_batch", "int", 4,
-                "Artifacts before post memory compression triggers", "context", min_val=2, max_val=10),
-        Control("post_memory_recent_cap", "int", 8,
-                "Post summaries before deeper compression", "context", min_val=3, max_val=20),
-        Control("post_memory_compressed_cap", "int", 8,
+        Control("post_memory_fresh_cap", "int", 4,
+                "Full posts kept locally before sliding-window compression", "context", min_val=1, max_val=20),
+        Control("post_memory_recent_cap", "int", 10,
+                "Per-post summaries in recent tier before cascade", "context", min_val=3, max_val=30),
+        Control("post_memory_compressed_cap", "int", 10,
                 "Compressed post summaries before deep", "context", min_val=3, max_val=20),
         Control("post_memory_deep_cap", "int", 5,
                 "Deep post summaries before ultra-compression", "context", min_val=2, max_val=10),
-        Control("max_drafts", "int", 10,
-                "Max drafts in buffer before pruning oldest", "daemon", min_val=1, max_val=50),
+        Control("max_drafts", "int", 40,
+                "Max non-muse drafts in buffer before compression", "daemon", min_val=10, max_val=200),
+        Control("max_saved_plans", "int", 15,
+                "Max top-scored drafts preserved across cycles", "daemon", min_val=1, max_val=50),
         Control("sentry_max_tokens", "int", 256,
                 "Max output tokens for sentry scoring", "daemon", min_val=64, max_val=1024),
         Control("strategist_max_tokens", "int", 6144,
@@ -431,7 +457,7 @@ def build_default_registry(model_registry, blacklist_str: str = "") -> ControlRe
                 "Max focus topics to search per sweep", "daemon", min_val=1, max_val=10),
         Control("dream_interval_ticks", "int", 60,
                 "Average ticks between dreams (stochastic)", "daemon", min_val=10, max_val=1000),
-        Control("muse_interval_ticks", "int", 30,
+        Control("muse_interval_ticks", "int", 15,
                 "Average ticks between muse creative drafts (stochastic)", "daemon", min_val=5, max_val=500),
         Control("muse_temperature", "float", 0.95,
                 "Temperature for muse creative generation", "daemon", min_val=0.0, max_val=2.0),
@@ -502,6 +528,7 @@ def build_default_registry(model_registry, blacklist_str: str = "") -> ControlRe
         "strategist_model_weights", "seeker_model_weights",
         "synthesizer_model_weights", "dreamer_model_weights",
         "muse_model_weights", "verification_model_weights",
+        "accountant_model_weights", "budget_exhausted_model_weights",
     }
     blacklist = _DEFAULT_LOCKED | {k.strip() for k in blacklist_str.split(",") if k.strip()}
 
