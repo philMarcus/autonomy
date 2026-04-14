@@ -112,6 +112,26 @@ def build_budget_plan_prompt(
         f"daily_budget_usd: {ctrl.get('daily_budget_usd')}",
     ]
 
+    # Precomputed coherence status — local models are unreliable at the arithmetic,
+    # so we hand them the answer. They just have to apply the fix (or not touch it).
+    _tw = int(ctrl.get("target_wake_minutes") or 60)
+    _si = int(ctrl.get("sentry_interval_seconds") or 300)
+    _tw_sec = _tw * 60
+    _rule1_ok = _tw_sec >= _si
+    prompt_parts.append("")
+    prompt_parts.append("--- COHERENCE STATUS (precomputed — use these numbers, don't recompute) ---")
+    prompt_parts.append(f"  target_wake_minutes × 60 = {_tw_sec}")
+    prompt_parts.append(f"  sentry_interval_seconds  = {_si}")
+    if _rule1_ok:
+        prompt_parts.append(f"  RULE 1 status: ✓ SATISFIED ({_tw_sec} >= {_si}). Do NOT change target_wake_minutes or sentry_interval_seconds to 'fix' this — there is nothing to fix.")
+    else:
+        _min_tw = (_si + 59) // 60  # ceiling division
+        _max_si = _tw_sec
+        prompt_parts.append(f"  RULE 1 status: ✗ VIOLATED ({_tw_sec} < {_si}). Fix by either:")
+        prompt_parts.append(f"    (a) raising target_wake_minutes to at least {_min_tw}, OR")
+        prompt_parts.append(f"    (b) lowering sentry_interval_seconds to at most {_max_si}.")
+        prompt_parts.append(f"  Prefer whichever better matches the apparent intent of recent changes.")
+
     # Available model alternatives
     if COST_TABLE:
         prompt_parts.append("\n--- AVAILABLE MODELS (cost per 1K tokens) ---")
@@ -275,5 +295,22 @@ def apply_budget_plan(plan: Dict[str, Any], ctrl) -> Dict[str, str]:
             changes[key] = f"{old_val} -> {new_val}"
         except (ValueError, KeyError):
             pass  # Locked or invalid
+
+    # Programmatic Rule 1 guardrail: after applying whatever the model proposed,
+    # if target_wake_minutes * 60 is still less than sentry_interval_seconds,
+    # snap target_wake_minutes up to the minimum coherent value. Local models
+    # occasionally flip the inequality in their reasoning and propose changes
+    # that make coherence WORSE — this catches that.
+    try:
+        tw = int(ctrl.get("target_wake_minutes") or 60)
+        si = int(ctrl.get("sentry_interval_seconds") or 300)
+        if tw * 60 < si:
+            min_tw = (si + 59) // 60  # ceiling division
+            ctrl.set("target_wake_minutes", min_tw, source="accountant")
+            changes["target_wake_minutes"] = (
+                f"{tw} -> {min_tw} (auto-snap: rule 1 enforcement — tw*60 must be >= sentry_interval)"
+            )
+    except (ValueError, KeyError, TypeError):
+        pass
 
     return changes
