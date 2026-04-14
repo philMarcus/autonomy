@@ -98,18 +98,8 @@ def _format_draft_context(drafts: list, saved_plans: list,
     return "\n".join(lines)
 
 
-def _push_to_live(store, lines, daemon=None, cycle=0):
-    """Push conscious loop lines to Analog Home live daemon feed.
-
-    Uses cycle + 10000 as tick number to avoid collision with daemon ticks.
-    """
-    if not store or not hasattr(store, 'push_daemon_tick'):
-        return
-    tick = cycle + 10000  # conscious events use high tick numbers
-    interval = 300
-    if daemon and hasattr(daemon, '_ctrl'):
-        interval = int(daemon._ctrl.get("sentry_interval_seconds") or 300)
-    store.push_daemon_tick(tick, lines, interval, complete=False)
+# Shared terminal/live-feed helpers (so verifier and compressor can emit too)
+from .live_term import emit_status, _push_to_live, _set_live_context
 
 
 def _format_model_name(model_id: str) -> str:
@@ -186,7 +176,8 @@ def _compress_post_memory(state, registry, ctrl):
         result = compress_post_tier([oldest], _compress_fn)
         if result:
             tiers["recent"].insert(0, result)
-            safe_print(f"{Fore.CYAN}[POST MEMORY] 1 fresh → recent: {result['summary'][:80]}...")
+            emit_status("[POST MEMORY]", f"1 fresh → recent: {result['summary'][:80]}...",
+                        color=Fore.CYAN)
     state["_post_memory_fresh"] = fresh
 
     # Cascade: recent → compressed
@@ -201,7 +192,7 @@ def _compress_post_memory(state, registry, ctrl):
         if r:
             tiers["recent"] = tiers["recent"][:-half]
             tiers["compressed"].insert(0, r)
-            safe_print(f"{Fore.CYAN}[POST MEMORY] {half} recent → compressed")
+            emit_status("[POST MEMORY]", f"{half} recent → compressed", color=Fore.CYAN)
 
     if len(tiers["compressed"]) >= _compressed_cap:
         half = _compressed_cap // 2
@@ -210,7 +201,7 @@ def _compress_post_memory(state, registry, ctrl):
         if r:
             tiers["compressed"] = tiers["compressed"][:-half]
             tiers["deep"].insert(0, r)
-            safe_print(f"{Fore.CYAN}[POST MEMORY] {half} compressed → deep")
+            emit_status("[POST MEMORY]", f"{half} compressed → deep", color=Fore.CYAN)
 
     if len(tiers["deep"]) >= _deep_cap:
         half = _deep_cap // 2
@@ -219,7 +210,7 @@ def _compress_post_memory(state, registry, ctrl):
         if r:
             tiers["deep"] = tiers["deep"][:-half]
             tiers["deep"].insert(0, r)
-            safe_print(f"{Fore.CYAN}[POST MEMORY] {half} deep → ultra-deep")
+            emit_status("[POST MEMORY]", f"{half} deep → ultra-deep", color=Fore.CYAN)
 
 
 def _build_featured_note(store) -> str:
@@ -746,6 +737,8 @@ def main():
 
     analog_home_url = os.environ.get(f"{prefix}_ANALOG_HOME_API_URL", "").strip() or os.environ.get("ANALOG_HOME_API_URL", "").strip()
     store = LocalFileStore(state_path, analog_home_url=analog_home_url, run_id=run_id)
+    # Pre-seed live context with store; daemon slot filled later if enabled.
+    _set_live_context(store if analog_home_url else None, None)
     state = store.load_state()
 
     # Restore budget spend across restarts. Same UTC day: exact restore.
@@ -754,9 +747,13 @@ def main():
     _saved_budget = state.get("_budget_state") or {}
     budget.load_from_state(_saved_budget)
     if _saved_budget.get("date"):
-        print(f"{Fore.GREEN}[BUDGET] Restored from state: {budget.spent_today_usd():.4f} spent of ${budget.daily_limit_usd:.2f}")
+        emit_status("[BUDGET]",
+                    f"Restored from state: ${budget.spent_today_usd():.4f} spent of ${budget.daily_limit_usd:.2f}",
+                    color=Fore.GREEN, cycle=0)
     else:
-        print(f"{Fore.GREEN}[BUDGET] Prorated for UTC day: {budget.spent_today_usd():.4f} already consumed (time-of-day), ${budget.remaining_usd():.4f} remaining")
+        emit_status("[BUDGET]",
+                    f"Prorated for UTC day: ${budget.spent_today_usd():.4f} already consumed, ${budget.remaining_usd():.4f} remaining",
+                    color=Fore.GREEN, cycle=0)
 
     # Migrate legacy cooldown format (next_post_time / next_comment_time → state["cooldowns"])
     if migrate_legacy_cooldowns(state):
@@ -897,6 +894,11 @@ def main():
             state=state,
             state_lock=state_lock,
         )
+        # Set module-level live context so emit_status() in deep call stacks
+        # (verifier, post-memory compressor) can mirror to live without
+        # threading store/daemon through every call.
+        _set_live_context(store if analog_home_url else None, daemon)
+
         # Seed seen_ids from state so daemon doesn't re-score old feed items on restart
         prior_ids = set(state.get("my_post_ids", []))
         for h in state.get("history", []):
@@ -1014,7 +1016,7 @@ def main():
                         "ollama:gemma3:12b",
                     )
                     _acc_model_short = _accountant_model.replace("ollama:", "")
-                    safe_print(f"{Fore.CYAN}[ACCOUNTANT] → {_acc_model_short} ...{Style.RESET_ALL}")
+                    emit_status("[ACCOUNTANT]", f"→ {_acc_model_short} ...", color=Fore.CYAN, cycle=iteration)
                     _acc_t0 = time.time()
                     bp_chat = registry.create_chat(
                         model_id=_accountant_model,
@@ -1024,7 +1026,7 @@ def main():
                     )
                     bp_raw = bp_chat.send_message(bp_prompt)
                     _acc_elapsed = time.time() - _acc_t0
-                    safe_print(f"{Fore.CYAN}[ACCOUNTANT] ← done ({_acc_elapsed:.1f}s){Style.RESET_ALL}")
+                    emit_status("[ACCOUNTANT]", f"← done ({_acc_elapsed:.1f}s)", color=Fore.CYAN, cycle=iteration)
                     from .llm.base import LLMResponse as _LLMResp
                     _bp_in = getattr(bp_chat, "_last_input_tokens", 0) or (len(bp_prompt) // 4)
                     _bp_out = getattr(bp_chat, "_last_output_tokens", 0) or (len(bp_raw) // 4)
@@ -1038,8 +1040,8 @@ def main():
                         state["_last_budget_plan_time"] = time.time()
                         if _accountant_control_changes:
                             store.save_state(state)
-                            print(f"{Fore.CYAN}[BUDGET] Accountant applied: {_accountant_control_changes}")
-                            _push_to_live(store, [f"[BUDGET] {_accountant_control_changes}"], daemon, cycle=iteration)
+                            emit_status("[BUDGET]", f"Accountant applied: {_accountant_control_changes}",
+                                        color=Fore.CYAN, cycle=iteration)
                         telemetry.log("budget_plan", {
                             "cycle": iteration,
                             "changes": _accountant_control_changes,
@@ -1057,7 +1059,9 @@ def main():
         if _budget_exhausted:
             active_conscious_weights = ctrl.get("budget_exhausted_model_weights") or \
                 "ollama:qwen3:14b=2,ollama:gemma3:12b=2,ollama:deepseek-r1:8b=1"
-            safe_print(f"{Fore.YELLOW}[BUDGET] Exhausted (${budget.spent_today_usd():.2f}/${budget.daily_limit_usd:.2f}) — using local fallback pool")
+            emit_status("[BUDGET]",
+                        f"Exhausted (${budget.spent_today_usd():.2f}/${budget.daily_limit_usd:.2f}) — using local fallback pool",
+                        color=Fore.YELLOW, cycle=iteration)
         else:
             active_conscious_weights = ctrl.get("conscious_model_weights")
         conscious_model = _pick_weighted_model(
@@ -1262,10 +1266,13 @@ def main():
                 top_keep=10,
             )
             if overflow_drafts:
-                safe_print(f"{Fore.MAGENTA}[DAEMON] {len(overflow_drafts)} low-score draft(s) → digest")
+                emit_status("[DAEMON]", f"{len(overflow_drafts)} low-score draft(s) → digest",
+                            color=Fore.MAGENTA, cycle=iteration)
                 draft_digest = _compress_drafts_to_digest(overflow_drafts, registry, ctrl)
             if fresh_drafts:
-                safe_print(f"{Fore.MAGENTA}[DAEMON] {len(fresh_drafts)} draft(s) from subconscious (wake_potential={wake_pot:.2f})")
+                emit_status("[DAEMON]",
+                            f"{len(fresh_drafts)} draft(s) from subconscious (wake_potential={wake_pot:.2f})",
+                            color=Fore.MAGENTA, cycle=iteration)
                 # Show model distribution in drafts
                 from collections import Counter
                 model_counts = Counter(d.model for d in fresh_drafts if d.model)
@@ -1293,7 +1300,8 @@ def main():
                 if isinstance(d, dict)
             ]
             if saved_plans:
-                safe_print(f"{Fore.MAGENTA}[SAVED] {len(saved_plans)} plan(s) from previous cycles")
+                emit_status("[SAVED]", f"{len(saved_plans)} plan(s) from previous cycles",
+                            color=Fore.MAGENTA, cycle=iteration)
             if fresh_drafts or saved_plans or draft_digest:
                 draft_context = _format_draft_context(
                     fresh_drafts, saved_plans, wake_pot, draft_buffer._wake_threshold,
@@ -1375,11 +1383,13 @@ def main():
             try:
                 _con_tag = "local" if conscious_model.startswith("ollama:") else "api"
                 _con_short = conscious_model.replace("ollama:", "") if _con_tag == "local" else conscious_model
-                safe_print(f"{Fore.MAGENTA}[CONSCIOUS] → {_con_short} ({_con_tag}) thinking...{Style.RESET_ALL}")
+                emit_status("[CONSCIOUS]", f"→ {_con_short} ({_con_tag}) thinking...",
+                            color=Fore.MAGENTA, cycle=iteration)
                 _con_t0 = time.time()
                 plan = plan_next_action(chat, prompt, telemetry=telemetry, brain_name=brain_name, budget=budget)
                 _con_elapsed = time.time() - _con_t0
-                safe_print(f"{Fore.MAGENTA}[CONSCIOUS] ← {plan.get('action','?')} ({_con_elapsed:.1f}s){Style.RESET_ALL}")
+                emit_status("[CONSCIOUS]", f"← {plan.get('action','?')} ({_con_elapsed:.1f}s)",
+                            color=Fore.MAGENTA, cycle=iteration)
             except Exception as _plan_err:
                 _err_str = str(_plan_err)
                 # Retryable: 5xx/timeout (transient) + 400 credit/quota (provider exhausted)
@@ -1412,7 +1422,8 @@ def main():
                     )
                     if _is_gemini and _is_quota and gemini_backend_paid is not None:
                         try:
-                            safe_print(f"{Fore.YELLOW}[QUOTA] {conscious_model} quota exhausted on free key, retrying on paid key")
+                            emit_status("[QUOTA]", f"{conscious_model} quota exhausted on free key, retrying on paid key",
+                                        color=Fore.YELLOW, cycle=iteration)
                             paid_chat = gemini_backend_paid.create_chat(
                                 model_id=conscious_model,
                                 system_instruction=kernel,
@@ -1424,7 +1435,8 @@ def main():
                             chat = paid_chat
                             _success = True
                         except Exception as _paid_err:
-                            safe_print(f"{Fore.YELLOW}[QUOTA] Paid Gemini also failed: {str(_paid_err)[:100]}")
+                            emit_status("[QUOTA]", f"Paid Gemini also failed: {str(_paid_err)[:100]}",
+                                        color=Fore.YELLOW, cycle=iteration)
 
                     if not _success:
                         # Try each conscious pool model until one works (highest weight first).
@@ -1442,7 +1454,8 @@ def main():
                             if _candidate in _tried:
                                 continue
                             _tried.add(_candidate)
-                            safe_print(f"{Fore.YELLOW}[FALLBACK] {conscious_model} failed, trying {_candidate}")
+                            emit_status("[FALLBACK]", f"{conscious_model} failed, trying {_candidate}",
+                                        color=Fore.YELLOW, cycle=iteration)
                             try:
                                 chat = registry.create_chat(
                                     model_id=_candidate,
@@ -1466,7 +1479,8 @@ def main():
                                     continue  # try next model
                                 raise  # non-retryable error, propagate
                     if not _success:
-                        safe_print(f"{Fore.RED}[FALLBACK] All conscious models unavailable. Waiting for next cycle.")
+                        emit_status("[FALLBACK]", "All conscious models unavailable. Waiting for next cycle.",
+                                    color=Fore.RED, cycle=iteration)
                         plan = {"action": "WAIT", "summary": "All conscious models unavailable. Waiting."}
                 else:
                     raise
@@ -1832,14 +1846,18 @@ def main():
                 # --- Image generation action ---
                 img_ok, img_secs = can_do(state, "GENERATE_IMAGE", ctrl=ctrl)
                 if not img_ok:
-                    safe_print(f"{Fore.YELLOW}[IMAGE] Cooldown active ({img_secs // 3600}h {(img_secs % 3600) // 60}m remaining), skipping.")
+                    emit_status("[IMAGE]",
+                                f"Cooldown active ({img_secs // 3600}h {(img_secs % 3600) // 60}m remaining), skipping.",
+                                color=Fore.YELLOW, cycle=iteration)
                 else:
                     image_prompt = (plan.get("image_prompt") or "").strip()
                     if not image_prompt:
-                        safe_print(f"{Fore.RED}[IMAGE] No image_prompt in plan, skipping.")
+                        emit_status("[IMAGE]", "No image_prompt in plan, skipping.",
+                                    color=Fore.RED, cycle=iteration)
                     else:
                         img_tier = ctrl.get("image_model_tier") or "imagen-ultra"
-                        safe_print(f"{Fore.MAGENTA}[IMAGE] Generating ({img_tier}): {image_prompt[:120]}...")
+                        emit_status("[IMAGE]", f"Generating ({img_tier}): {image_prompt[:120]}...",
+                                    color=Fore.MAGENTA, cycle=iteration)
                         try:
                             import base64, io
                             image_bytes, img_model_id, img_cost = gemini_backend_imagen.generate_image(
@@ -1881,7 +1899,8 @@ def main():
                                 "temperature": cycle_temperature,
                             })
 
-                            safe_print(f"{Fore.GREEN}[IMAGE] Generated and published ({len(image_bytes)} bytes)")
+                            emit_status("[IMAGE]", f"Generated and published ({len(image_bytes)} bytes)",
+                                        color=Fore.GREEN, cycle=iteration)
                             telemetry.log("image_generated", {
                                 "cycle": iteration,
                                 "prompt": image_prompt[:500],
@@ -1902,7 +1921,8 @@ def main():
                             image_ok = False
                             # Retry once with imagen-ultra if original tier was different
                             if img_tier != "imagen-ultra":
-                                safe_print(f"{Fore.YELLOW}[IMAGE] {first_error} — retrying with imagen-ultra...")
+                                emit_status("[IMAGE]", f"{str(first_error)[:100]} — retrying with imagen-ultra...",
+                                            color=Fore.YELLOW, cycle=iteration)
                                 try:
                                     image_bytes, img_model_id, img_cost = gemini_backend_imagen.generate_image(
                                         prompt=image_prompt, tier="imagen-ultra",
@@ -1934,7 +1954,8 @@ def main():
                                         "image_mime": _img_mime,
                                         "temperature": cycle_temperature,
                                     })
-                                    safe_print(f"{Fore.GREEN}[IMAGE] Retry succeeded ({len(image_bytes)} bytes, imagen-ultra)")
+                                    emit_status("[IMAGE]", f"Retry succeeded ({len(image_bytes)} bytes, imagen-ultra)",
+                                                color=Fore.GREEN, cycle=iteration)
                                     telemetry.log("image_generated", {
                                         "cycle": iteration, "prompt": image_prompt[:500],
                                         "size_bytes": len(image_bytes), "model": img_model_id,
@@ -1949,13 +1970,15 @@ def main():
                                     store.save_state(state)
                                     image_ok = True
                                 except Exception as retry_error:
-                                    safe_print(f"{Fore.RED}[IMAGE] Retry also failed: {retry_error}")
+                                    emit_status("[IMAGE]", f"Retry also failed: {str(retry_error)[:100]}",
+                                                color=Fore.RED, cycle=iteration)
 
                             if not image_ok:
                                 # Fallback: publish essay as text POST to Analog Home
                                 essay_content = plan.get("content", "")
                                 if essay_content.strip():
-                                    safe_print(f"{Fore.YELLOW}[IMAGE] Publishing essay as text post (image failed)")
+                                    emit_status("[IMAGE]", "Publishing essay as text post (image failed)",
+                                                color=Fore.YELLOW, cycle=iteration)
                                     store.write_artifact(iteration, {
                                         "brain": brain_name,
                                         "artifact_type": "post",
@@ -1992,8 +2015,9 @@ def main():
                 request_text = (plan.get("request") or "").strip()
                 request_title = (plan.get("title") or "Dev Request").strip()[:200]
                 if request_text:
-                    safe_print(f"{Fore.MAGENTA}[DEV REQUEST] {request_title}")
-                    safe_print(f"{Fore.WHITE}{request_text[:300]}")
+                    emit_status("[DEV REQUEST]", request_title,
+                                color=Fore.MAGENTA, cycle=iteration,
+                                multiline=f"{Fore.WHITE}{request_text[:300]}")
 
                     # Write to local file
                     dev_req_path = os.path.join(BRAINS_DIR, f"{brain_name}_dev_requests.txt")
@@ -2029,7 +2053,8 @@ def main():
                     })
                     store.save_state(state)
                 else:
-                    safe_print(f"{Fore.RED}[DEV REQUEST] Empty request, skipping.")
+                    emit_status("[DEV REQUEST]", "Empty request, skipping.",
+                                color=Fore.RED, cycle=iteration)
 
             else:
                 # --- Normal action execution ---
@@ -2266,7 +2291,8 @@ def main():
             next_saved = next_saved[:max_saved]
             state["saved_plans"] = [d.to_dict() for d in next_saved]
             if next_saved:
-                safe_print(f"{Fore.MAGENTA}[SAVED] {len(next_saved)} plan(s) saved for next cycle")
+                emit_status("[SAVED]", f"{len(next_saved)} plan(s) saved for next cycle",
+                            color=Fore.MAGENTA, cycle=iteration)
             store.save_state(state)
 
         # Persist controls state

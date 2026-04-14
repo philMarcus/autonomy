@@ -7,6 +7,7 @@ from colorama import Fore, Style
 from .base import ChallengeSolver
 from ..llm.base import LLMClient
 from ..telemetry import TelemetryLogger
+from ..live_term import emit_status
 
 
 class MathVerificationSolver(ChallengeSolver):
@@ -51,10 +52,7 @@ class MathVerificationSolver(ChallengeSolver):
         instructions = v["instructions"]
 
         if not challenge_text or not verification_code:
-            try:
-                print(f"{Fore.RED}[VERIFICATION] Missing challenge text or verification code{Style.RESET_ALL}")
-            except:
-                pass
+            emit_status("[VERIFICATION]", "Missing challenge text or verification code", color=Fore.RED)
             return None
 
         if self.telemetry:
@@ -64,12 +62,10 @@ class MathVerificationSolver(ChallengeSolver):
                 "instructions": instructions,
             })
 
-        try:
-            _model = getattr(self.llm_client, '_default_model_id', '?')
-            print(f"{Fore.CYAN}[VERIFICATION] ({_model}) Challenge:{Style.RESET_ALL}")
-            print(f"{Fore.CYAN}  {challenge_text}{Style.RESET_ALL}")
-        except:
-            pass
+        _model = getattr(self.llm_client, '_default_model_id', '?')
+        emit_status("[VERIFICATION]", f"({_model}) Challenge: {challenge_text[:80]}...",
+                    color=Fore.CYAN,
+                    multiline=f"  {challenge_text}")
 
         # Simple prompt that works well with small/local models.
         # Key insight: asking the model to write plain English first, then solve, works
@@ -100,16 +96,10 @@ What does the text say in plain English? Then solve the math and give ONLY the n
                     answer = answer[len(prefix):].strip().strip(":").strip()
 
             if not answer:
-                try:
-                    print(f"{Fore.RED}[VERIFICATION] LLM returned empty answer{Style.RESET_ALL}")
-                except:
-                    pass
+                emit_status("[VERIFICATION]", "LLM returned empty answer", color=Fore.RED)
                 return None
 
-            try:
-                print(f"{Fore.GREEN}[VERIFICATION] Answer: {answer}{Style.RESET_ALL}")
-            except:
-                pass
+            emit_status("[VERIFICATION]", f"Answer: {answer}", color=Fore.GREEN)
 
             if self.telemetry:
                 self.telemetry.log("verification_challenge_solved", {
@@ -127,17 +117,14 @@ What does the text say in plain English? Then solve the math and give ONLY the n
         except Exception as e:
             err_str = str(e)
             is_503 = "503" in err_str or "UNAVAILABLE" in err_str
-            try:
-                print(f"{Fore.RED}[VERIFICATION] Failed to solve challenge. {e}{Style.RESET_ALL}")
-            except:
-                pass
+            emit_status("[VERIFICATION]", f"Failed to solve challenge. {str(e)[:100]}", color=Fore.RED)
             if self.telemetry:
                 self.telemetry.log("verification_challenge_error", {"error": err_str[:300]})
             # Retry with backup LLM on 503
             if is_503 and hasattr(self, 'backup_llm') and self.backup_llm:
                 try:
                     _backup_model = getattr(self.backup_llm, '_default_model_id', '?')
-                    print(f"{Fore.YELLOW}[VERIFICATION] 503 — retrying with {_backup_model}{Style.RESET_ALL}")
+                    emit_status("[VERIFICATION]", f"503 — retrying with {_backup_model}", color=Fore.YELLOW)
                     raw_response = self.backup_llm.generate(prompt, temperature=0.0, max_output_tokens=8192).strip()
                     lines = [l.strip() for l in raw_response.splitlines() if l.strip()]
                     answer = lines[-1] if lines else ""
@@ -146,7 +133,7 @@ What does the text say in plain English? Then solve the math and give ONLY the n
                         if answer.startswith(prefix):
                             answer = answer[len(prefix):].strip().strip(":").strip()
                     if answer:
-                        print(f"{Fore.GREEN}[VERIFICATION] Backup answer: {answer}{Style.RESET_ALL}")
+                        emit_status("[VERIFICATION]", f"Backup answer: {answer}", color=Fore.GREEN)
                         return {"verification_code": verification_code, "answer": answer}
                 except Exception:
                     pass
@@ -154,7 +141,7 @@ What does the text say in plain English? Then solve the math and give ONLY the n
             if is_503 and hasattr(self, 'backup_llm_2') and self.backup_llm_2:
                 try:
                     _backup2_model = getattr(self.backup_llm_2, '_default_model_id', '?')
-                    print(f"{Fore.YELLOW}[VERIFICATION] Retrying with {_backup2_model}{Style.RESET_ALL}")
+                    emit_status("[VERIFICATION]", f"Retrying with {_backup2_model}", color=Fore.YELLOW)
                     raw_response = self.backup_llm_2.generate(prompt, temperature=0.0, max_output_tokens=1024).strip()
                     lines = [l.strip() for l in raw_response.splitlines() if l.strip()]
                     answer = lines[-1] if lines else ""
@@ -163,7 +150,7 @@ What does the text say in plain English? Then solve the math and give ONLY the n
                         if answer.startswith(prefix):
                             answer = answer[len(prefix):].strip().strip(":").strip()
                     if answer:
-                        print(f"{Fore.GREEN}[VERIFICATION] Ollama answer: {answer}{Style.RESET_ALL}")
+                        emit_status("[VERIFICATION]", f"Ollama answer: {answer}", color=Fore.GREEN)
                         return {"verification_code": verification_code, "answer": answer}
                 except Exception:
                     pass

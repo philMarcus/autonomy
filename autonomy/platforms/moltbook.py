@@ -11,6 +11,7 @@ from .base import PlatformClient
 from ..config import MOLTBOOK_API_BASE, REQUESTS_PER_MINUTE_SOFT
 from ..telemetry import TelemetryLogger
 from ..challenges.base import ChallengeSolver
+from ..live_term import emit_status
 
 
 class MoltbookClient(PlatformClient):
@@ -168,16 +169,10 @@ class MoltbookClient(PlatformClient):
                 if not verification.get("code") and verification.get("verification_code"):
                     verification["code"] = verification["verification_code"]
                 if verification.get("challenge") and verification.get("code"):
-                    try:
-                        print(f"{Fore.YELLOW}[VERIFICATION] Math verification challenge detected{Style.RESET_ALL}")
-                    except:
-                        pass  # Ignore print errors
+                    emit_status("[VERIFICATION]", "Math verification challenge detected", color=Fore.YELLOW)
 
                     if self.challenge_solver.can_solve(data):
-                        try:
-                            print(f"{Fore.CYAN}[VERIFICATION] Attempting to solve...{Style.RESET_ALL}")
-                        except:
-                            pass
+                        emit_status("[VERIFICATION]", "Attempting to solve...", color=Fore.CYAN)
                         solution = self.challenge_solver.solve(data)
 
                         if solution and isinstance(solution, dict):
@@ -185,11 +180,7 @@ class MoltbookClient(PlatformClient):
                             answer = solution.get("answer")
 
                             if verification_code and answer:
-                                try:
-                                    print(f"{Fore.GREEN}[VERIFICATION] Submitting answer to /api/v1/verify...{Style.RESET_ALL}")
-                                except:
-                                    pass
-                                # Submit verification
+                                emit_status("[VERIFICATION]", "Submitting answer to /api/v1/verify...", color=Fore.GREEN)
                                 verify_result = self._req(
                                     "POST", "/verify",
                                     json_body={
@@ -199,11 +190,7 @@ class MoltbookClient(PlatformClient):
                                 )
 
                                 if verify_result.get("success"):
-                                    try:
-                                        print(f"{Fore.GREEN}[VERIFICATION] Verification successful! Content published.{Style.RESET_ALL}")
-                                    except:
-                                        pass
-                                    # Update the original response to reflect success
+                                    emit_status("[VERIFICATION]", "Verification successful! Content published.", color=Fore.GREEN)
                                     data["verification_status"] = "verified"
                                     if "message" in data:
                                         data["message"] = "Published successfully after verification"
@@ -214,45 +201,32 @@ class MoltbookClient(PlatformClient):
                                         or verify_result.get("hint")
                                         or "Unknown"
                                     )
-                                    try:
-                                        print(f"{Fore.RED}[VERIFICATION] Wrong answer ({answer}): {fail_msg}{Style.RESET_ALL}")
-                                    except:
-                                        pass
-                                    # One retry with backup model (if available)
+                                    emit_status("[VERIFICATION]", f"Wrong answer ({answer}): {str(fail_msg)[:100]}", color=Fore.RED)
                                     for _battr in ("backup_llm", "backup_llm_2"):
                                         _bllm = getattr(self.challenge_solver, _battr, None)
                                         if not _bllm:
                                             continue
                                         try:
-                                            print(f"{Fore.YELLOW}[VERIFICATION] Retrying with backup model...{Style.RESET_ALL}")
+                                            emit_status("[VERIFICATION]", "Retrying with backup model...", color=Fore.YELLOW)
                                             _bs = self.challenge_solver.__class__(
                                                 llm_client=_bllm, telemetry=self.challenge_solver.telemetry).solve(data)
                                             if _bs and _bs.get("answer") and _bs["answer"] != answer:
                                                 _retry_result = self._req("POST", "/verify",
                                                     json_body={"verification_code": verification_code, "answer": _bs["answer"]})
                                                 if _retry_result.get("success"):
-                                                    print(f"{Fore.GREEN}[VERIFICATION] Backup answer {_bs['answer']} succeeded!{Style.RESET_ALL}")
+                                                    emit_status("[VERIFICATION]", f"Backup answer {_bs['answer']} succeeded!", color=Fore.GREEN)
                                                     data["verification_status"] = "verified"
                                                     break
                                                 else:
-                                                    print(f"{Fore.RED}[VERIFICATION] Backup answer {_bs['answer']} also wrong{Style.RESET_ALL}")
+                                                    emit_status("[VERIFICATION]", f"Backup answer {_bs['answer']} also wrong", color=Fore.RED)
                                         except Exception:
                                             pass
                             else:
-                                try:
-                                    print(f"{Fore.RED}[VERIFICATION] Solver returned invalid solution format{Style.RESET_ALL}")
-                                except:
-                                    pass
+                                emit_status("[VERIFICATION]", "Solver returned invalid solution format", color=Fore.RED)
                         else:
-                            try:
-                                print(f"{Fore.RED}[VERIFICATION] Failed to solve verification challenge{Style.RESET_ALL}")
-                            except:
-                                pass
+                            emit_status("[VERIFICATION]", "Failed to solve verification challenge", color=Fore.RED)
                     else:
-                        try:
-                            print(f"{Fore.RED}[VERIFICATION] Challenge solver cannot handle this format{Style.RESET_ALL}")
-                        except:
-                            pass
+                        emit_status("[VERIFICATION]", "Challenge solver cannot handle this format", color=Fore.RED)
 
             # Error handling
             if not bool(data.get("success", True)):
