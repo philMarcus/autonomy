@@ -98,18 +98,18 @@ def build_budget_plan_prompt(
         f"  Strategist: ${projection['strategist_cost']:.4f}",
         f"  Conscious ({projection['conscious_calls_per_day']} calls/day, ~{projection['effective_interval_min']:.0f}min effective interval): ${projection['conscious_cost']:.4f}",
         f"\nHours remaining today: {hours_left:.1f}",
-        f"\n--- CURRENT SETTINGS ---",
+        f"\n--- CURRENT SETTINGS (time values shown in BOTH units) ---",
         f"conscious_model_weights: {ctrl.get('conscious_model_weights')}",
         f"subconscious_model_weights: {ctrl.get('subconscious_model_weights')}",
         f"budget_exhausted_model_weights: {ctrl.get('budget_exhausted_model_weights')}",
-        f"sentry_interval_seconds: {ctrl.get('sentry_interval_seconds')}",
-        f"target_wake_minutes: {ctrl.get('target_wake_minutes')} (SHARED with conscious — it may set this for non-budget reasons)",
-        f"signal_threshold: {ctrl.get('signal_threshold')} (SHARED with conscious — it may set this for signal/noise reasons)",
-        f"charge_weight_feed: {ctrl.get('charge_weight_feed')} (SHARED with conscious — charge per qualifying feed item)",
-        f"charge_weight_reply: {ctrl.get('charge_weight_reply')} (SHARED with conscious — charge per worthy reply candidate)",
+        f"sentry_interval_seconds: {int(ctrl.get('sentry_interval_seconds') or 300)} seconds  (= {int(ctrl.get('sentry_interval_seconds') or 300) / 60:.1f} minutes)",
+        f"target_wake_minutes: {int(ctrl.get('target_wake_minutes') or 60)} minutes  (= {int(ctrl.get('target_wake_minutes') or 60) * 60} seconds)  (SHARED with conscious)",
+        f"signal_threshold: {ctrl.get('signal_threshold')} (SHARED — signal/noise cutoff)",
+        f"charge_weight_feed: {ctrl.get('charge_weight_feed')} (SHARED)",
+        f"charge_weight_reply: {ctrl.get('charge_weight_reply')} (SHARED)",
         f"wake_refractory: {ctrl.get('wake_refractory')} (yours — wake potential reset after firing)",
-        f"max_cycle_interval_minutes: {ctrl.get('max_cycle_interval_minutes')} (operator-managed safety net, do not change)",
-        f"daily_budget_usd: {ctrl.get('daily_budget_usd')}",
+        f"max_cycle_interval_minutes: {int(ctrl.get('max_cycle_interval_minutes') or 360)} minutes  (= {int(ctrl.get('max_cycle_interval_minutes') or 360) * 60} seconds)  (operator-managed, do not change)",
+        f"daily_budget_usd: ${ctrl.get('daily_budget_usd')}",
     ]
 
     # Precomputed coherence status — local models are unreliable at the arithmetic,
@@ -119,18 +119,29 @@ def build_budget_plan_prompt(
     _tw_sec = _tw * 60
     _rule1_ok = _tw_sec >= _si
     prompt_parts.append("")
-    prompt_parts.append("--- COHERENCE STATUS (precomputed — use these numbers, don't recompute) ---")
-    prompt_parts.append(f"  target_wake_minutes × 60 = {_tw_sec}")
-    prompt_parts.append(f"  sentry_interval_seconds  = {_si}")
+    prompt_parts.append("--- COHERENCE STATUS (precomputed in SECONDS — use these numbers directly) ---")
+    prompt_parts.append(f"  target_wake (in seconds):    {_tw_sec:>5}   [= {_tw} minutes × 60]")
+    prompt_parts.append(f"  sentry_interval (in seconds):{_si:>5}   [already in seconds — no conversion needed]")
     if _rule1_ok:
-        prompt_parts.append(f"  RULE 1 status: ✓ SATISFIED ({_tw_sec} >= {_si}). Do NOT change target_wake_minutes or sentry_interval_seconds to 'fix' this — there is nothing to fix.")
+        prompt_parts.append(
+            f"  RULE 1: target_wake_seconds ({_tw_sec}) must be >= sentry_interval_seconds ({_si})."
+        )
+        prompt_parts.append(
+            f"  STATUS: ✓ SATISFIED ({_tw_sec} >= {_si}). Nothing to fix. Do NOT touch "
+            "target_wake_minutes or sentry_interval_seconds for coherence reasons."
+        )
     else:
         _min_tw = (_si + 59) // 60  # ceiling division
         _max_si = _tw_sec
-        prompt_parts.append(f"  RULE 1 status: ✗ VIOLATED ({_tw_sec} < {_si}). Fix by either:")
-        prompt_parts.append(f"    (a) raising target_wake_minutes to at least {_min_tw}, OR")
+        prompt_parts.append(
+            f"  RULE 1: target_wake_seconds ({_tw_sec}) must be >= sentry_interval_seconds ({_si})."
+        )
+        prompt_parts.append(
+            f"  STATUS: ✗ VIOLATED ({_tw_sec} < {_si}). Fix by either:"
+        )
+        prompt_parts.append(f"    (a) raising target_wake_minutes to at least {_min_tw} (making target_wake_seconds >= {_si}), OR")
         prompt_parts.append(f"    (b) lowering sentry_interval_seconds to at most {_max_si}.")
-        prompt_parts.append(f"  Prefer whichever better matches the apparent intent of recent changes.")
+        prompt_parts.append("  Prefer whichever better matches the apparent intent of recent changes.")
 
     # Available model alternatives
     if COST_TABLE:
