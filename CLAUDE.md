@@ -608,12 +608,22 @@ v16_0/ is the stable foundation. **Do not modify archived versions.** All future
 Previously both the conscious model and accountant could tune wake/budget controls. The conscious would burn pro-tier cognition on mechanical "is my sentry interval coherent with my wake target?" decisions, and two owners could make incompatible changes (e.g., conscious sets `target_wake_minutes=30` while sentry still ticks every hour). v17.7 resolves this by making the accountant the sole owner of wake mechanics.
 
 ### New `audience` field on Control
-- `Control` dataclass in `autonomy/controls.py` gains `audience: str = "both"` — one of `"conscious"`, `"accountant"`, `"both"`.
-- `to_llm_block(audience="conscious")` filters out controls that don't include the caller.
-- Marked `audience="accountant"` (hidden from conscious prompt):
-  - Wake mechanics: `cycle_interval_minutes`, `sentry_interval_seconds`, `target_wake_minutes`, `signal_threshold`, `charge_weight_feed`, `charge_weight_reply`, `wake_refractory`
+- `Control` dataclass in `autonomy/controls.py` gains `audience: str = "both"` — one of `"conscious"`, `"accountant"`, `"both"`, `"operator"`.
+- `to_llm_block(audience="conscious"|"accountant")` filters out controls that don't include the caller. `"operator"` controls are hidden from BOTH LLMs (dashboard/CLI only).
+- Marked `audience="accountant"` (accountant-only):
+  - `sentry_interval_seconds`, `wake_refractory`
   - Model pools: `conscious_model_weights`, `subconscious_model_weights`, `budget_exhausted_model_weights`, `accountant_model_weights`
-- `sentry_strictness` stays `audience="both"` — it's a signal/noise judgment (is the daemon over/under-waking?), not a budget knob. Conscious keeps that call.
+- Marked `audience="both"` (shared between conscious and accountant — conscious can change for non-budget reasons, accountant compensates if budget at risk):
+  - `target_wake_minutes` (engagement preference)
+  - `signal_threshold` (signal/noise selectivity)
+  - `charge_weight_feed` (engagement weighting)
+  - `charge_weight_reply` (reply prioritization)
+  - `sentry_strictness` (signal/noise dial — also tagged as "signal/noise" not budget)
+- Marked `audience="operator"` (hidden from both LLMs):
+  - `max_cycle_interval_minutes` — renamed from `cycle_interval_minutes`. Default raised 60 → 360. It's a safety-net ceiling for quiet periods, not a tunable cadence knob; neither LLM should fiddle with it. Locked by default; dashboard operator can unlock.
+
+### Accountant accepts shared-control intent from conscious
+The accountant prompt explicitly tells it which controls are shared with conscious: "Respect those as expressed preferences — only override if budget is at risk." The 10% oscillation guard prevents accountant from undoing small conscious nudges.
 
 ### Accountant runs every cycle
 - `should_run_budget_plan()` simplified: just returns `budget_plan_enabled`. The old threshold + 8h + first-of-day gates are gone.

@@ -36,7 +36,7 @@ def estimate_daily_cost(ctrl) -> Dict[str, float]:
     Returns breakdown by role (sentry, strategist, conscious) and total.
     """
     sentry_interval = max(1, int(ctrl.get("sentry_interval_seconds")))
-    cycle_interval = max(1, int(ctrl.get("cycle_interval_minutes")))
+    max_cycle_interval = max(1, int(ctrl.get("max_cycle_interval_minutes")))
     # Use first model from sentry weights as cost estimate proxy
     _sw = ctrl.get("subconscious_model_weights") or "gemini-2.5-flash-lite=1"
     sub_model = _sw.split("=")[0].strip() if "=" in _sw else "gemini-2.5-flash-lite"
@@ -55,7 +55,7 @@ def estimate_daily_cost(ctrl) -> Dict[str, float]:
     strategist_calls = sentry_calls * pass_rate
 
     # With auto-calibrated threshold, effective interval ≈ target_wake_minutes
-    effective_interval_min = min(cycle_interval, target_wake)
+    effective_interval_min = min(max_cycle_interval, target_wake)
     conscious_calls = (24 * 60) / max(1, effective_interval_min)
 
     # Estimated tokens per call
@@ -101,11 +101,14 @@ def build_budget_plan_prompt(
         f"\n--- CURRENT SETTINGS ---",
         f"conscious_model_weights: {ctrl.get('conscious_model_weights')}",
         f"subconscious_model_weights: {ctrl.get('subconscious_model_weights')}",
+        f"budget_exhausted_model_weights: {ctrl.get('budget_exhausted_model_weights')}",
         f"sentry_interval_seconds: {ctrl.get('sentry_interval_seconds')}",
-        f"cycle_interval_minutes: {ctrl.get('cycle_interval_minutes')} (NOTE: this is the MAX sleep — the daemon usually wakes conscious earlier)",
-        f"target_wake_minutes: {ctrl.get('target_wake_minutes')} (auto-calibrated wake interval)",
-        f"signal_threshold: {ctrl.get('signal_threshold')} (sentry score cutoff — higher = more selective = fewer strategist calls = less charge)",
-        f"charge_weight_feed: {ctrl.get('charge_weight_feed')} (charge per qualifying feed item)",
+        f"target_wake_minutes: {ctrl.get('target_wake_minutes')} (SHARED with conscious — it may set this for non-budget reasons)",
+        f"signal_threshold: {ctrl.get('signal_threshold')} (SHARED with conscious — it may set this for signal/noise reasons)",
+        f"charge_weight_feed: {ctrl.get('charge_weight_feed')} (SHARED with conscious — charge per qualifying feed item)",
+        f"charge_weight_reply: {ctrl.get('charge_weight_reply')} (SHARED with conscious — charge per worthy reply candidate)",
+        f"wake_refractory: {ctrl.get('wake_refractory')} (yours — wake potential reset after firing)",
+        f"max_cycle_interval_minutes: {ctrl.get('max_cycle_interval_minutes')} (operator-managed safety net, do not change)",
         f"daily_budget_usd: {ctrl.get('daily_budget_usd')}",
     ]
 
@@ -136,33 +139,33 @@ def build_budget_plan_prompt(
 
     prompt_parts.extend([
         "\n--- YOUR ROLE ---",
-        "You are the accountant. You run every cycle and own the wake/budget mechanics.",
-        "You set them coherently based on current state. The conscious planner is busy with",
-        "content and relationships; it does NOT tune these knobs. If you leave a value alone,",
-        "it stays. Only include fields in your JSON if you want to change them.",
+        "You are the accountant. You run every cycle. Your sole concern is keeping spend",
+        "within budget while maximizing engagement. The conscious planner owns content,",
+        "relationships, and signal/noise judgment. It can also set target_wake_minutes,",
+        "signal_threshold, charge_weight_feed, and charge_weight_reply for non-budget reasons.",
+        "Respect those as expressed preferences — only override if budget is at risk.",
+        "If you leave a value alone, it stays. Only include fields in your JSON if you want",
+        "to change them. Empty JSON is fine.",
         "",
         "How wake works:",
         "The daemon's sentry ticks every sentry_interval_seconds and scores feed items.",
         "Above-threshold items add charge_weight_feed to wake_potential. When wake_potential",
         "crosses an auto-calibrated threshold (tuned to target_wake_minutes on average),",
-        "conscious fires. If no wake by cycle_interval_minutes, conscious fires anyway.",
+        "conscious fires. max_cycle_interval_minutes is a long safety-net ceiling.",
         "",
         "COHERENCE RULES (check before outputting):",
         "- target_wake_minutes * 60 must be >= sentry_interval_seconds (can't wake faster than sentry ticks)",
-        "- cycle_interval_minutes * 60 must be >= sentry_interval_seconds (sentry must tick at least once per cycle)",
-        "- cycle_interval_minutes should be >= target_wake_minutes (otherwise target has no effect)",
         "",
         "Budget conservation priority (try in this order when spend is high):",
-        "1. Raise sentry_interval_seconds — fewer scans = fewer charge events",
-        "2. Raise target_wake_minutes — longer average intervals between conscious cycles",
-        "3. Raise signal_threshold — sentry becomes more selective",
-        "4. Reduce charge_weight_feed — each qualifying item contributes less charge",
-        "5. Raise cycle_interval_minutes — affects the max-sleep floor",
-        "6. Downgrade conscious_model_weights ONLY as a last resort",
+        "1. Raise sentry_interval_seconds — fewer scans = fewer charge events (yours alone)",
+        "2. Raise target_wake_minutes — longer intervals between cycles (shared with conscious)",
+        "3. Raise signal_threshold — fewer items score above cutoff (shared)",
+        "4. Reduce charge_weight_feed — each item contributes less charge (shared)",
+        "5. Downgrade conscious_model_weights ONLY as a last resort",
         "",
         "Budget relaxation (when well under budget with headroom):",
-        "- Lower sentry_interval_seconds or target_wake_minutes to get more engagement",
-        "- Don't make changes <10% of current — skip trivial tweaks",
+        "- Lower sentry_interval_seconds or nudge target_wake_minutes down",
+        "- Don't make changes <10% of current — skip trivial tweaks (the apply layer enforces this)",
         "- If budget is 0 or negative remaining, the conscious already auto-swaps to the",
         "  budget_exhausted_model_weights pool. You don't need to force it.",
         "",
@@ -172,7 +175,6 @@ def build_budget_plan_prompt(
         '  "subconscious_model_weights": "model=weight,...",',
         '  "budget_exhausted_model_weights": "model=weight,...",',
         '  "sentry_interval_seconds": <int>,',
-        '  "cycle_interval_minutes": <int>,',
         '  "target_wake_minutes": <int>,',
         '  "signal_threshold": <float>,',
         '  "charge_weight_feed": <float>,',
@@ -211,7 +213,7 @@ def parse_budget_plan(text: str) -> Optional[Dict[str, Any]]:
 _ACCOUNTANT_UPDATABLE = [
     "conscious_model_weights", "subconscious_model_weights",
     "budget_exhausted_model_weights",
-    "sentry_interval_seconds", "cycle_interval_minutes",
+    "sentry_interval_seconds",
     "target_wake_minutes", "signal_threshold", "charge_weight_feed",
     "charge_weight_reply", "wake_refractory",
 ]

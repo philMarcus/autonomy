@@ -164,6 +164,9 @@ class ControlRegistry:
 
         for key in sorted(self._defs.keys()):
             defn = self._defs[key]
+            # "operator" controls are hidden from all LLM prompts (dashboard/CLI only).
+            if defn.audience == "operator":
+                continue
             if defn.audience != "both" and defn.audience != audience:
                 continue
             cat = defn.category if defn.category in by_cat else "context"
@@ -353,24 +356,27 @@ def build_default_registry(model_registry, blacklist_str: str = "") -> ControlRe
         # High-score items add charge_weight_feed to wake_potential. When wake_potential
         # crosses an auto-calibrated threshold (tuned to hit target_wake_minutes on average),
         # conscious fires. If no wake event by cycle_interval_minutes, conscious fires anyway.
-        Control("cycle_interval_minutes", "int", 60,
-                "Max minutes between cycles (hard floor — daemon usually wakes sooner)", "wake",
-                min_val=1, max_val=240, audience="accountant"),
+        Control("max_cycle_interval_minutes", "int", 360,
+                "Safety-net max sleep between cycles. The daemon normally wakes conscious "
+                "much sooner via target_wake_minutes; this is a fallback for quiet periods.",
+                "wake", min_val=30, max_val=1440, audience="operator"),
         Control("sentry_interval_seconds", "int", 300,
                 "Seconds between sentry scans. Lower = more responsive + more compute. "
                 "Must be ≤ target_wake_minutes*60 for wake target to be achievable.",
                 "wake", min_val=10, audience="accountant"),
         Control("target_wake_minutes", "int", 60,
                 "Target avg minutes between conscious wakes (auto-calibrates threshold). "
-                "Cannot be faster than sentry_interval_seconds/60.",
-                "wake", min_val=10, max_val=360, audience="accountant"),
+                "Cannot be faster than sentry_interval_seconds/60. "
+                "Shared with accountant — accountant may nudge for budget.",
+                "wake", min_val=10, max_val=360),
         Control("signal_threshold", "float", 0.67,
                 "Sentry score cutoff (0-1) to trigger strategist. Items scoring below this "
-                "add no charge. Raise for selectivity.",
-                "wake", min_val=0.0, max_val=1.0, audience="accountant"),
+                "add no charge. Raise for selectivity. Pairs with sentry_strictness.",
+                "wake", min_val=0.0, max_val=1.0),
         Control("charge_weight_feed", "float", 0.05,
-                "Charge added per above-threshold feed item. Low by design — needs accumulation.",
-                "wake", min_val=0.0, max_val=5.0, audience="accountant"),
+                "Charge added per above-threshold feed item. Low by design — needs accumulation. "
+                "Raise to wake more on feed activity.",
+                "wake", min_val=0.0, max_val=5.0),
         Control("wake_refractory", "float", -2.0,
                 "Wake potential after firing (negative = cooldown period)", "wake",
                 min_val=-10.0, max_val=0.0, audience="accountant"),
@@ -409,8 +415,8 @@ def build_default_registry(model_registry, blacklist_str: str = "") -> ControlRe
                 "(seed sentry charge itself uses wake_threshold * score; -P architect seeds get 999)",
                 "daemon", min_val=0.0, max_val=1000.0),
         Control("charge_weight_reply", "float", 1.5,
-                "Charge per worthy reply candidate", "daemon", min_val=0.0, max_val=5.0,
-                audience="accountant"),
+                "Charge per worthy reply candidate. Raise to prioritize replies over feed engagement.",
+                "daemon", min_val=0.0, max_val=5.0),
         Control("max_replies_per_post", "int", 3,
                 "Max replies to any single post", "social", min_val=1, max_val=10),
         Control("reply_scan_interval_ticks", "int", 2,
@@ -529,6 +535,7 @@ def build_default_registry(model_registry, blacklist_str: str = "") -> ControlRe
         "synthesizer_model_weights", "dreamer_model_weights",
         "muse_model_weights", "verification_model_weights",
         "accountant_model_weights", "budget_exhausted_model_weights",
+        "max_cycle_interval_minutes",
     }
     blacklist = _DEFAULT_LOCKED | {k.strip() for k in blacklist_str.split(",") if k.strip()}
 

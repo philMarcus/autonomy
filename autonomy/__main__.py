@@ -587,7 +587,7 @@ def main():
         "--gemini-model":       ("conscious_model",          lambda a: a.gemini_model),  # deprecated alias
         "--temperature":        ("temperature",              lambda a: a.temperature),
         "--daily-budget":       ("daily_budget_usd",         lambda a: a.daily_budget),
-        "--interval":           ("cycle_interval_minutes",   lambda a: a.interval),
+        "--interval":           ("max_cycle_interval_minutes", lambda a: a.interval),
         "--post-interval":      ("post_interval_minutes",    lambda a: a.post_interval),
         "--sentry-interval":    ("sentry_interval_seconds",  lambda a: a.sentry_interval),
         "--mode":               ("mode",                     lambda a: a.mode),
@@ -2278,7 +2278,7 @@ def main():
                 pass
 
         # --- Sleep / Wake mechanism ---
-        sleep_minutes = ctrl.get("cycle_interval_minutes")
+        sleep_minutes = ctrl.get("max_cycle_interval_minutes")
         if daemon:
             # Start the daemon AFTER the first conscious cycle completes
             # (defers to avoid simultaneous startup race)

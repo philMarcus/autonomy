@@ -1243,7 +1243,7 @@ CONTROLS_META = [
     ("budget_plan_enabled",      "bool",  True,   "Enable daily budget planning pass (accountant)", "cost",     None, None,  None),
     ("budget_conserve_threshold","float", 0.2,    "Switch to cheaper models below this remaining fraction", "cost", 0.0, 1.0, None),
     # --- Timing ---
-    ("cycle_interval_minutes",   "int",   60,     "Max minutes between cycles (daemon may wake sooner)", "timing", 1, 120,   None),
+    ("max_cycle_interval_minutes", "int", 360,    "Safety-net max sleep between cycles (target_wake drives normal cadence)", "wake", 30, 1440, None),
     ("sentry_interval_seconds",  "int",   300,    "Seconds between sentry scans",                   "timing",   10,   None,  None),
     ("seeker_every_n_ticks",     "int",   3,      "Seeker runs every N sentry ticks",               "timing",   1,    20,    None),
     ("target_wake_minutes",      "int",   60,     "Target avg minutes between conscious wakes (auto-calibrates threshold)", "timing", 5, 360, None),
@@ -1320,7 +1320,7 @@ CONTROLS_META = [
 CLI_FLAGS = {
     "temperature":              "--temperature",
     "daily_budget_usd":         "--daily-budget",
-    "cycle_interval_minutes":   "--interval",
+    "max_cycle_interval_minutes": "--interval",
     "post_interval_minutes":    "--post-interval",
     "mode":                     "--mode",
     "priority":                 "--priority",

@@ -352,9 +352,9 @@ def _format_controls_block(controls_block: str, budget_summary: str) -> str:
         parts.append(budget_summary)
         parts.append("")
         parts.append(
-            "You can switch to cheaper models via controls_update to conserve budget "
-            "(e.g. \"conscious_model\": \"gemini-2.5-flash\" or \"subconscious_model\": \"local:qwen2.5-7b\"). "
-            "You can also increase sentry_interval_seconds or cycle_interval_minutes to reduce call frequency."
+            "The accountant runs every cycle and tunes wake/budget mechanics for you. "
+            "You can still nudge target_wake_minutes, signal_threshold, charge_weight_feed/reply "
+            "for non-budget reasons (engagement preference, signal/noise) — accountant will compensate."
         )
     parts.append("")
     parts.append(
