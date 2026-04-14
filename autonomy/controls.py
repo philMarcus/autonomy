@@ -306,7 +306,7 @@ def build_default_registry(model_registry, blacklist_str: str = "") -> ControlRe
                 "Weighted pool used for conscious when daily budget is exhausted", "llm",
                 choices=subconscious_choices, audience="accountant"),
         Control("accountant_model_weights", "weights",
-                "ollama:qwen3:14b=2,ollama:gemma3:12b=1",
+                "ollama:gemma3:12b=2,ollama:deepseek-r1:8b=1",
                 "Weighted pool for the budget accountant (analytical task, local-friendly)", "llm",
                 choices=subconscious_choices, audience="accountant"),
         Control("subconscious_model_weights", "weights",

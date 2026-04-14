@@ -1086,6 +1086,9 @@ def main():
                             "cycle": iteration,
                             "changes": _accountant_control_changes,
                             "reasoning": _accountant_reasoning,
+                            "raw_response": bp_raw[:2000],  # keep raw so we can diagnose
+                                                             # cases where reasoning mentions a change
+                                                             # but no control field was emitted.
                         })
                 except Exception as bp_err:
                     telemetry.log("budget_plan_error", {
