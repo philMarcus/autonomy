@@ -118,7 +118,10 @@ def parse_json_with_one_repair(
         # of trying the next model.
         if (
             "503" in msg
+            or "504" in msg
             or "UNAVAILABLE" in msg
+            or "gateway timeout" in msg_lower
+            or "deadline exceeded" in msg_lower
             or "credit balance" in msg_lower
             or "insufficient credit" in msg_lower
             or "quota" in msg_lower

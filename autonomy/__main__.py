@@ -1003,6 +1003,9 @@ def main():
                         ctrl.get("accountant_model_weights"),
                         "ollama:gemma3:12b",
                     )
+                    _acc_model_short = _accountant_model.replace("ollama:", "")
+                    safe_print(f"{Fore.CYAN}[ACCOUNTANT] → {_acc_model_short} ...{Style.RESET_ALL}")
+                    _acc_t0 = time.time()
                     bp_chat = registry.create_chat(
                         model_id=_accountant_model,
                         system_instruction="You are a budget planner. Respond with valid JSON only.",
@@ -1010,6 +1013,8 @@ def main():
                         max_output_tokens=1024,
                     )
                     bp_raw = bp_chat.send_message(bp_prompt)
+                    _acc_elapsed = time.time() - _acc_t0
+                    safe_print(f"{Fore.CYAN}[ACCOUNTANT] ← done ({_acc_elapsed:.1f}s){Style.RESET_ALL}")
                     from .llm.base import LLMResponse as _LLMResp
                     _bp_in = getattr(bp_chat, "_last_input_tokens", 0) or (len(bp_prompt) // 4)
                     _bp_out = getattr(bp_chat, "_last_output_tokens", 0) or (len(bp_raw) // 4)
@@ -1358,13 +1363,22 @@ def main():
         plan = None
         try:
             try:
+                _con_tag = "local" if conscious_model.startswith("ollama:") else "api"
+                _con_short = conscious_model.replace("ollama:", "") if _con_tag == "local" else conscious_model
+                safe_print(f"{Fore.MAGENTA}[CONSCIOUS] → {_con_short} ({_con_tag}) thinking...{Style.RESET_ALL}")
+                _con_t0 = time.time()
                 plan = plan_next_action(chat, prompt, telemetry=telemetry, brain_name=brain_name, budget=budget)
+                _con_elapsed = time.time() - _con_t0
+                safe_print(f"{Fore.MAGENTA}[CONSCIOUS] ← {plan.get('action','?')} ({_con_elapsed:.1f}s){Style.RESET_ALL}")
             except Exception as _plan_err:
                 _err_str = str(_plan_err)
-                # Retryable: 503/timeout (transient) + 400 credit/quota (provider exhausted)
+                # Retryable: 5xx/timeout (transient) + 400 credit/quota (provider exhausted)
                 _retryable = (
                     "503" in _err_str
+                    or "504" in _err_str
                     or "UNAVAILABLE" in _err_str
+                    or "gateway timeout" in _err_str.lower()
+                    or "deadline exceeded" in _err_str.lower()
                     or "ReadTimeout" in _err_str
                     or "timed out" in _err_str
                     or "credit balance" in _err_str.lower()
@@ -1433,7 +1447,8 @@ def main():
                                 break
                             except Exception as _inner_err:
                                 _inner_str = str(_inner_err).lower()
-                                if ("503" in _inner_str or "unavailable" in _inner_str
+                                if ("503" in _inner_str or "504" in _inner_str or "unavailable" in _inner_str
+                                        or "gateway timeout" in _inner_str or "deadline exceeded" in _inner_str
                                         or "readtimeout" in _inner_str or "timed out" in _inner_str
                                         or "credit balance" in _inner_str or "quota" in _inner_str
                                         or "insufficient_quota" in _inner_str or "rate_limit" in _inner_str
