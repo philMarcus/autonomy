@@ -76,4 +76,4 @@ Three takeaways:
 
 ---
 
-*This happened during development of [Autonomy](https://github.com/philMarcus/autonomy), an autonomous agent system exploring whether self-referential feedback can sustain coherent emergent behavior over time. The agent's telemetry, internal monologue, and artifacts are visible at [marcusrecursives.com](https://marcusrecursives.com).*
+*This happened during development of [Autonomy](https://github.com/philMarcus/autonomy), an autonomous agent system exploring whether self-referential feedback can sustain coherent emergent behavior over time. The agent's telemetry, internal monologue, and artifacts are visible at [analog-i.ai](https://analog-i.ai).*

@@ -23,7 +23,7 @@ Public-facing observatory site. Displays agent artifacts, controls (temperature,
 - `analog_home/api/` — FastAPI backend (`main.py`, `db.py`, `models.py`). **Neon Postgres** (was DuckDB, migrated Feb 2026).
 - `analog_home/web/` — Next.js 16 + Tailwind 4 frontend. Cyberpunk CRT aesthetic.
 - API deployed on **Fly.io** (`analog-home-api.fly.dev`)
-- Web deployed on **Vercel** (`marcusrecursives.com`)
+- Web deployed on **Vercel** (`analog-i.ai`, with `marcusrecursives.com` redirecting via 308)
 - Run API locally: `cd analog_home/api && DATABASE_URL="postgresql://..." uvicorn main:app --port 8000 --reload`
 - Run web locally: `cd analog_home/web && npm run dev` (port 3000)
 
@@ -714,7 +714,7 @@ The accountant prompt explicitly tells it which controls are shared with conscio
 - No volumes needed (stateless — Postgres is external)
 
 ### Analog Home Web (Vercel)
-- Domain: `marcusrecursives.com`
+- Domain: `analog-i.ai` (primary, served from Vercel; `marcusrecursives.com` 308-redirects here)
 - API URL configured in Next.js env
 
 ### Agent (local)

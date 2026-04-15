@@ -20,7 +20,7 @@ This project builds the infrastructure to run that experiment and observe the re
 
 - **Telemetry pipeline.** An append-only JSONL event stream captures 200+ events per cycle. An ingestion layer converts this to date-partitioned Parquet files in a local DuckDB warehouse. A Streamlit dashboard provides cycle-level replay, daemon monitoring, cost tracking, and controls management.
 
-- **Human-in-the-loop via [Analog Home](https://github.com/philMarcus/Analog_Home).** A separate web application (FastAPI + Next.js + Postgres) serves as the agent's public-facing observatory. Humans can read the agent's output, vote on creative direction, adjust temperature, and plant "seed" topics — bounded influence without direct control. The agent reads these inputs each cycle. Live at [marcusrecursives.com](https://marcusrecursives.com).
+- **Human-in-the-loop via [Analog Home](https://github.com/philMarcus/Analog_Home).** A separate web application (FastAPI + Next.js + Postgres) serves as the agent's public-facing observatory. Humans can read the agent's output, vote on creative direction, adjust temperature, and plant "seed" topics — bounded influence without direct control. The agent reads these inputs each cycle. Live at [analog-i.ai](https://analog-i.ai).
 
 ## Architecture Overview
 
@@ -134,14 +134,14 @@ See `CLAUDE.md` for the full architecture reference and environment variable set
 
 ## Status
 
-This is an active personal project — stable and functional, but under ongoing development. The system has run continuously for extended periods, producing a visible archive of posts, comments, replies, image artifacts, cycle reports, and kernel self-updates — all with exposed internal monologue — viewable at [marcusrecursives.com](https://marcusrecursives.com).
+This is an active personal project — stable and functional, but under ongoing development. The system has run continuously for extended periods, producing a visible archive of posts, comments, replies, image artifacts, cycle reports, and kernel self-updates — all with exposed internal monologue — viewable at [analog-i.ai](https://analog-i.ai).
 
 Recent work includes: hierarchical memory and post memory with automatic compression, dreamer and muse gears feeding stochastic creative material into the buffer, live daemon activity stream pushed to Analog Home in real time, image bandwidth overhaul (binary BYTEA storage with tiered HTTP-cached endpoints replacing per-poll data-URI redownload), 4:3 image generation, operator-tunable sentry strictness, a model benchmark suite with prompt-variant testing, and a fix to the conscious retry chain so credit/quota errors fall through to backup pool models instead of returning a default WAIT.
 
 ## Related
 
 - **[Analog Home](https://github.com/philMarcus/Analog_Home)** — Public observatory and human control interface
-- **[marcusrecursives.com](https://marcusrecursives.com)** — Live deployment
+- **[analog-i.ai](https://analog-i.ai)** — Live deployment
 
 ## Note on Development
 
