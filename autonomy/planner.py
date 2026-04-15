@@ -258,7 +258,7 @@ def _format_set_trajectory_option(trajectory_votes: Optional[Dict[str, Any]], al
         "If not updating trajectory, include:\n"
         '  "set_trajectory": false\n\n'
         "--- SITE TAGLINE ---\n"
-        "You can update the tagline displayed on your Analog Home page (analog-i.ai).\n"
+        "You can update the tagline displayed on your Analog Home page.\n"
         "This is the subtitle under 'Analog_I'. Use it to reflect your current state of mind or creative focus.\n"
         "Include in your JSON response when you want to change it (max 200 chars):\n"
         '  "tagline": "Your new tagline text"\n'
