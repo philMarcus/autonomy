@@ -16,14 +16,18 @@ from typing import Optional
 from colorama import Fore, Style
 
 
-# Module-level live context. Set once on startup by __main__.py.
-_LIVE_CTX = {"store": None, "daemon": None}
+# Module-level live context. Set on startup by __main__.py, cycle updated each iteration.
+_LIVE_CTX: dict = {"store": None, "daemon": None, "cycle": 0}
 
 
-def _set_live_context(store, daemon) -> None:
-    """Called by __main__ on startup so deep-stack callers can emit."""
-    _LIVE_CTX["store"] = store
-    _LIVE_CTX["daemon"] = daemon
+def _set_live_context(store=None, daemon=None, cycle: int = 0) -> None:
+    """Called by __main__ on startup (store/daemon) and each cycle start (cycle)."""
+    if store is not None:
+        _LIVE_CTX["store"] = store
+    if daemon is not None:
+        _LIVE_CTX["daemon"] = daemon
+    if cycle:
+        _LIVE_CTX["cycle"] = cycle
 
 
 def _push_to_live(store, lines, daemon=None, cycle: int = 0) -> None:
@@ -88,5 +92,6 @@ def emit_status(tag: str, line: str, *, live_line: Optional[str] = None,
 
     _store = store if store is not None else _LIVE_CTX.get("store")
     _daemon = daemon if daemon is not None else _LIVE_CTX.get("daemon")
+    _cycle = cycle if cycle else _LIVE_CTX.get("cycle", 0)
     if _store is not None:
-        _push_to_live(_store, [live_line], _daemon, cycle=cycle)
+        _push_to_live(_store, [live_line], _daemon, cycle=_cycle)

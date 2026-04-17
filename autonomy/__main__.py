@@ -960,6 +960,7 @@ def main():
     while True:
         iteration += 1
         state["_cycle_number"] = iteration
+        _set_live_context(cycle=iteration)  # so deep-stack emit_status uses current cycle tick
 
         # --- Re-read controls from disk (picks up dashboard edits) ---
         if os.path.exists(controls_file):
