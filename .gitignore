@@ -26,3 +26,6 @@ brains/*
 brains/**/*
 !brains/kernel_prompt.txt
 !brains/knowledge.txt
+# Virtual environment
+.venv/
+
