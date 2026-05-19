@@ -217,9 +217,26 @@ def _write_json_file(path: str, data: Any) -> None:
 # Todo list tools
 # ============================================================
 
+def _push_state_to_analog_home(store, key: str, data: list) -> None:
+    """Best-effort push of agent state to Analog Home API for frontend display."""
+    if not store or not getattr(store, '_analog_home_url', None):
+        return
+    try:
+        import requests
+        from urllib.parse import urljoin
+        url = urljoin(store._analog_home_url.rstrip("/") + "/", f"agent-state/{key}")
+        requests.post(url, json={
+            "brain": getattr(store, '_brain_name', 'ANALOG_I'),
+            "data": data,
+        }, timeout=5)
+    except Exception:
+        pass  # non-fatal, best-effort
+
+
 def _build_todo_tools(
     registry: ToolRegistry,
     cycle_getter: Callable[[], int],
+    store: Any = None,
 ) -> None:
     """Register todo list tools on the registry.
 
@@ -232,6 +249,7 @@ def _build_todo_tools(
 
     def _save_todos(todos: List[Dict[str, Any]]) -> None:
         _write_json_file(path, todos)
+        _push_state_to_analog_home(store, "todos", todos)
 
     def _next_id(todos: List[Dict[str, Any]]) -> int:
         if not todos:
@@ -363,6 +381,7 @@ def _build_todo_tools(
 def _build_experiment_tools(
     registry: ToolRegistry,
     cycle_getter: Callable[[], int],
+    store: Any = None,
 ) -> None:
     """Register lab notebook (experiment tracking) tools on the registry.
 
@@ -375,6 +394,7 @@ def _build_experiment_tools(
 
     def _save_experiments(experiments: List[Dict[str, Any]]) -> None:
         _write_json_file(path, experiments)
+        _push_state_to_analog_home(store, "experiments", experiments)
 
     def _find_experiment(
         experiments: List[Dict[str, Any]], name: str
@@ -888,8 +908,8 @@ def build_tool_registry(
     """
     registry = ToolRegistry(brain_name=brain_name, brains_dir=brains_dir)
 
-    _build_todo_tools(registry, cycle_getter)
-    _build_experiment_tools(registry, cycle_getter)
+    _build_todo_tools(registry, cycle_getter, store=store)
+    _build_experiment_tools(registry, cycle_getter, store=store)
     _build_tagline_tool(registry, store)
     _build_temp_control_tools(registry, state, ctrl, cycle_getter)
     _build_web_search_tool(registry)
