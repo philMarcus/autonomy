@@ -939,7 +939,11 @@ def _build_web_search_tool(registry: ToolRegistry) -> None:
 
             # Use flash-lite for the search — cheap and fast, we only need
             # the grounding results, not deep reasoning.
-            client = genai.Client()
+            # Resolve API key from environment (same vars the main backend uses).
+            _api_key = (os.environ.get("ANALOG_I_GEMINI_API_KEY")
+                        or os.environ.get("GEMINI_API_KEY")
+                        or os.environ.get("GOOGLE_API_KEY") or "")
+            client = genai.Client(api_key=_api_key) if _api_key else genai.Client()
             response = client.models.generate_content(
                 model="gemini-2.5-flash-lite",
                 contents=query,
