@@ -195,6 +195,17 @@ def execute_action(
     }
     if flags.get("read_only") and action in WRITE_ACTIONS:
         print(f"{Fore.YELLOW}[SAFE] Skipping write action {action} due to --read-only{Style.RESET_ALL}")
+        _title = plan.get("title", "")
+        _content = plan.get("content", "")
+        if _title or _content:
+            print(f"{Fore.CYAN}[READ-ONLY] Would have written:{Style.RESET_ALL}")
+            if _title:
+                print(f"{Fore.CYAN}  Title: {_title}{Style.RESET_ALL}")
+            if _content:
+                _preview = _content[:800]
+                if len(_content) > 800:
+                    _preview += f"... ({len(_content)} chars total)"
+                print(f"{Fore.CYAN}{_preview}{Style.RESET_ALL}")
         return False
     if flags.get("moltbook_disabled") and action in MOLTBOOK_ACTIONS:
         print(f"{Fore.YELLOW}[SAFE] Skipping {action} — Moltbook disabled (use POST for Analog Home){Style.RESET_ALL}")
