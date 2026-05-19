@@ -431,6 +431,9 @@ class SubconsciousDaemon:
         if random.random() < 1.0 / max(1, muse_interval):
             self._muse()
 
+        # --- Gear 8: Librarian (every tick — lightweight, no LLM) ---
+        self._librarian()
+
         # ── Tick footer ──
         _wp = self._buffer.wake_potential
         _dc = self._buffer.draft_count
@@ -1674,6 +1677,67 @@ class SubconsciousDaemon:
 
 # ======================================================================
 # Helpers
+    # Gear 8: Librarian — pre-load structured state into draft context
+    # ---------------------------------------------------------------
+
+    def _librarian(self) -> None:
+        """Pre-load active experiments + upcoming todos into the emit stream.
+
+        Runs every tick. No LLM call — just reads JSON files and emits
+        context lines that will appear in the conscious prompt's draft section.
+        The conscious model can then reference this info without calling tools.
+        This is the "daemon pre-loads, conscious fine-tunes" principle.
+        """
+        import os
+        from .config import BRAINS_DIR
+        brains_dir = BRAINS_DIR
+        brain = self._brain_name
+        if not brain:
+            return
+
+        lines = []
+
+        # Active experiments
+        exp_path = os.path.join(brains_dir, f"{brain}_experiments.json")
+        try:
+            if os.path.exists(exp_path):
+                with open(exp_path, "r") as f:
+                    exps = json.load(f)
+                active = [e for e in exps if e.get("status") == "active"]
+                if active:
+                    for e in active[:3]:
+                        dp_count = len(e.get("data_points", []))
+                        latest = ""
+                        if e.get("data_points"):
+                            latest_dp = e["data_points"][-1]
+                            latest = f" | latest: {latest_dp.get('observation', '')[:60]}"
+                        lines.append(
+                            f"  [LIBRARIAN] Experiment '{e['name']}': "
+                            f"{dp_count} data points{latest}"
+                        )
+        except Exception:
+            pass
+
+        # Open todos
+        todo_path = os.path.join(brains_dir, f"{brain}_todos.json")
+        try:
+            if os.path.exists(todo_path):
+                with open(todo_path, "r") as f:
+                    todos = json.load(f)
+                open_todos = [t for t in todos if t.get("status") == "open"]
+                if open_todos:
+                    lines.append(f"  [LIBRARIAN] {len(open_todos)} open todo(s)")
+                    for t in open_todos[:3]:
+                        due = f" (due cycle {t['due_cycle']})" if t.get("due_cycle") else ""
+                        lines.append(f"    • {t['text'][:60]}{due}")
+        except Exception:
+            pass
+
+        if lines:
+            for line in lines:
+                self._emit(line, Fore.CYAN)
+
+
 # ======================================================================
 
 def _make_response(text: str, est_in: int, est_out: int, model_id: str) -> LLMResponse:
