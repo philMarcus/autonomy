@@ -219,6 +219,8 @@ class GeminiChatSession(ChatSession):
             parts = resp.candidates[0].content.parts
         except (IndexError, AttributeError):
             return calls
+        if not parts:
+            return calls
         for idx, part in enumerate(parts):
             fc = getattr(part, "function_call", None)
             if fc is not None:
