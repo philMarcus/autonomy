@@ -105,8 +105,10 @@ class ToolRegistry:
             return ""
         lines = [
             "--- AVAILABLE TOOLS ---",
-            "You may call these tools during your reasoning. Call as many as needed;",
-            "results are returned before you produce your final JSON action.",
+            "You can call tools DURING this cycle, before your final JSON action.",
+            "Tool use does NOT replace your action — you call tools first, THEN choose",
+            "your action (POST, COMMENT, etc.) as normal. Example: call create_experiment",
+            "and add_todo, then POST about your findings. Use tools every cycle as needed.",
         ]
         for t in sorted(self._tools.values(), key=lambda x: x.name):
             params = list(t.parameters.get("properties", {}).keys())
