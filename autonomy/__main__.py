@@ -966,6 +966,9 @@ def main():
         ctrl=ctrl,
         store=store,
         cycle_getter=lambda: _cycle_ref[0],
+        platform=platform,
+        telemetry_dir=telemetry_dir,
+        knowledge_path=os.path.join(BRAINS_DIR, f"{brain_name}_knowledge.txt"),
     )
 
     # Push session-start marker to live daemon feed

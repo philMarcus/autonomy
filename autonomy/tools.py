@@ -883,6 +883,9 @@ def build_tool_registry(
     ctrl: Any,      # ControlRegistry
     store: Any,      # Store instance
     cycle_getter: Callable[[], int],
+    platform: Any = None,       # MoltbookClient (Sprint 2)
+    telemetry_dir: str = "",    # path to telemetry dir (Sprint 2)
+    knowledge_path: str = "",   # path to knowledge.txt (Sprint 2)
 ) -> ToolRegistry:
     """Create a ToolRegistry with all built-in tools registered.
 
@@ -916,8 +919,370 @@ def build_tool_registry(
     _build_temp_control_tools(registry, state, ctrl, cycle_getter)
     _build_web_search_tool(registry)
 
+    # Sprint 2 tools
+    _build_search_history_tool(registry, state, store, brain_name)
+    _build_knowledge_search_tool(registry, knowledge_path)
+    _build_self_awareness_tools(registry, state, brain_name, telemetry_dir)
+    if platform:
+        _build_moltbook_retrieval_tools(registry, platform)
+
     log.info("Tool registry built: %s", ", ".join(registry.list_names()))
     return registry
+
+
+# ==================================================================
+# Sprint 2 tools: retrieval + self-awareness
+# ==================================================================
+
+def _build_search_history_tool(
+    registry: ToolRegistry, state: Dict[str, Any], store: Any, brain_name: str,
+) -> None:
+    """Unified search across memory tiers, past artifacts (posts), and seed history."""
+
+    def search_history(query: str, sources: str = "memory,posts,seeds", n: int = 5) -> Dict[str, Any]:
+        """Search across memory, posts, and seeds. Returns results tagged by source."""
+        query_lower = query.lower()
+        source_list = [s.strip() for s in sources.split(",")]
+        results: List[Dict[str, Any]] = []
+
+        # Search memory tiers
+        if "memory" in source_list:
+            tiers = state.get("memory_tiers", {})
+            for tier_name in ("recent", "compressed", "deep"):
+                for entry in tiers.get(tier_name, []):
+                    text = entry.get("note", "") or entry.get("summary", "")
+                    if query_lower in text.lower():
+                        results.append({
+                            "source": f"memory/{tier_name}",
+                            "cycle": entry.get("cycle", entry.get("cycles")),
+                            "text": text[:300],
+                            "relevance": "keyword_match",
+                        })
+
+        # Search past artifacts via Analog Home API
+        if "posts" in source_list and store and getattr(store, '_analog_home_url', None):
+            try:
+                import requests as _req
+                from urllib.parse import urljoin
+                url = urljoin(store._analog_home_url.rstrip("/") + "/",
+                              f"artifacts?limit=50&sort=desc")
+                resp = _req.get(url, timeout=10)
+                if resp.ok:
+                    for art in resp.json():
+                        title = art.get("title", "")
+                        body = art.get("body_markdown", "")
+                        if query_lower in title.lower() or query_lower in body.lower():
+                            results.append({
+                                "source": "posts",
+                                "cycle": art.get("cycle"),
+                                "type": art.get("artifact_type", ""),
+                                "title": title[:100],
+                                "text": body[:300],
+                                "relevance": "keyword_match",
+                            })
+            except Exception:
+                pass
+
+        # Search seed history
+        if "seeds" in source_list:
+            for seed in state.get("_seed_history", []):
+                text = seed.get("text", "")
+                if query_lower in text.lower():
+                    results.append({
+                        "source": "seeds",
+                        "cycle": seed.get("cycle"),
+                        "text": text[:200],
+                        "relevance": "keyword_match",
+                    })
+
+        # Sort by cycle (newest first) and limit
+        results.sort(key=lambda r: r.get("cycle") or 0, reverse=True)
+        return {"query": query, "results": results[:n], "total_matches": len(results)}
+
+    registry.register(ToolDef(
+        name="search_history",
+        description="Search across your memory, past posts, and planted seeds. "
+                    "Returns results tagged by source. Use for 'what do I know about X?'",
+        parameters={
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Search query (keyword match)."},
+                "sources": {
+                    "type": "string",
+                    "description": "Comma-separated sources: memory,posts,seeds. Default: all.",
+                },
+                "n": {"type": "integer", "description": "Max results to return. Default: 5."},
+            },
+            "required": ["query"],
+        },
+        handler=search_history,
+    ))
+
+
+def _build_knowledge_search_tool(registry: ToolRegistry, knowledge_path: str) -> None:
+    """Search the knowledge file by chunking and keyword matching."""
+
+    def search_knowledge(query: str, n: int = 3) -> Dict[str, Any]:
+        """Search the knowledge file for relevant sections."""
+        if not knowledge_path or not os.path.exists(knowledge_path):
+            return {"error": "Knowledge file not found."}
+        try:
+            with open(knowledge_path, "r", encoding="utf-8") as f:
+                text = f.read()
+        except Exception as e:
+            return {"error": str(e)}
+
+        # Split into sections by == headers ==
+        import re
+        sections = re.split(r'\n(?===\s)', text)
+        query_lower = query.lower()
+        matches = []
+        for section in sections:
+            if query_lower in section.lower():
+                # Extract the header (first line)
+                lines = section.strip().split("\n")
+                header = lines[0].strip() if lines else ""
+                matches.append({
+                    "header": header[:100],
+                    "text": section.strip()[:500],
+                    "relevance": "keyword_match",
+                })
+        return {"query": query, "results": matches[:n], "total_matches": len(matches)}
+
+    if knowledge_path:
+        registry.register(ToolDef(
+            name="search_knowledge",
+            description="Search your knowledge file for relevant sections by keyword. "
+                        "The knowledge file contains info about your creator, architecture, and context.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Search query."},
+                    "n": {"type": "integer", "description": "Max results. Default: 3."},
+                },
+                "required": ["query"],
+            },
+            handler=search_knowledge,
+        ))
+
+
+def _build_self_awareness_tools(
+    registry: ToolRegistry, state: Dict[str, Any], brain_name: str, telemetry_dir: str,
+) -> None:
+    """Register self-awareness tools: control history, changelog, dev requests."""
+
+    telemetry_path = os.path.join(telemetry_dir, f"{brain_name}_events.jsonl") if telemetry_dir else ""
+
+    def _scan_telemetry(event_type: str, max_lines: int = 5000, limit: int = 20) -> List[Dict]:
+        """Scan recent telemetry for events of a given type."""
+        if not telemetry_path or not os.path.exists(telemetry_path):
+            return []
+        results = []
+        try:
+            with open(telemetry_path, "r", encoding="utf-8") as f:
+                # Read last max_lines lines efficiently
+                lines = f.readlines()[-max_lines:]
+            for line in reversed(lines):
+                try:
+                    e = json.loads(line)
+                    if e.get("event_type") == event_type:
+                        results.append(e)
+                        if len(results) >= limit:
+                            break
+                except (json.JSONDecodeError, KeyError):
+                    continue
+        except Exception:
+            pass
+        return results
+
+    # --- get_control_history ---
+    def get_control_history(key: str = "", last_n: int = 10) -> Dict[str, Any]:
+        """Get recent control changes from telemetry."""
+        events = _scan_telemetry("controls_update", limit=last_n * 3)
+        changes = []
+        for e in events:
+            updates = e.get("updates", {})
+            results = e.get("results", {})
+            ts = e.get("ts", "")[:19]
+            cycle = e.get("cycle")
+            for k, v in updates.items():
+                if key and k != key:
+                    continue
+                status = results.get(k, "unknown")
+                changes.append({
+                    "cycle": cycle, "timestamp": ts,
+                    "key": k, "new_value": v, "status": status,
+                })
+                if len(changes) >= last_n:
+                    break
+            if len(changes) >= last_n:
+                break
+        return {"changes": changes[:last_n], "total_found": len(changes)}
+
+    registry.register(ToolDef(
+        name="get_control_history",
+        description="See recent history of control changes — who changed what, when, and to what value.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "key": {"type": "string", "description": "Filter to a specific control key. Empty = all."},
+                "last_n": {"type": "integer", "description": "How many changes to return. Default: 10."},
+            },
+            "required": [],
+        },
+        handler=get_control_history,
+    ))
+
+    # --- get_changelog ---
+    def get_changelog(last_n: int = 5) -> Dict[str, Any]:
+        """Get recent architect updates from memory (entries starting with [ARCHITECT update])."""
+        entries = []
+        tiers = state.get("memory_tiers", {})
+        for tier_name in ("recent", "compressed", "deep"):
+            for entry in tiers.get(tier_name, []):
+                note = entry.get("note", "") or entry.get("summary", "")
+                if "[ARCHITECT update" in note or "[ARCHITECT Update" in note:
+                    entries.append({
+                        "cycle": entry.get("cycle", entry.get("cycles")),
+                        "tier": tier_name,
+                        "text": note[:500],
+                    })
+        # Most recent first
+        entries.sort(key=lambda e: str(e.get("cycle") or ""), reverse=True)
+        return {"updates": entries[:last_n], "total_found": len(entries)}
+
+    registry.register(ToolDef(
+        name="get_changelog",
+        description="See recent software updates from your architect (Phil). "
+                    "These are [ARCHITECT update] entries in your memory.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "last_n": {"type": "integer", "description": "How many updates to return. Default: 5."},
+            },
+            "required": [],
+        },
+        handler=get_changelog,
+    ))
+
+    # --- get_dev_requests ---
+    def get_dev_requests(last_n: int = 10) -> Dict[str, Any]:
+        """Get the agent's own dev requests from telemetry."""
+        events = _scan_telemetry("planner_decision", limit=last_n * 20)
+        requests = []
+        for e in events:
+            if e.get("action") != "DEV_REQUEST":
+                continue
+            plan = e.get("plan", {})
+            requests.append({
+                "cycle": e.get("cycle"),
+                "timestamp": e.get("ts", "")[:19],
+                "title": plan.get("title", ""),
+                "request": plan.get("request", "")[:300],
+            })
+            if len(requests) >= last_n:
+                break
+        return {"requests": requests[:last_n], "total_found": len(requests)}
+
+    registry.register(ToolDef(
+        name="get_dev_requests",
+        description="See your own past DEV_REQUEST actions — what you've asked your architect to build.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "last_n": {"type": "integer", "description": "How many requests to return. Default: 10."},
+            },
+            "required": [],
+        },
+        handler=get_dev_requests,
+    ))
+
+
+def _build_moltbook_retrieval_tools(registry: ToolRegistry, platform: Any) -> None:
+    """Register Moltbook API retrieval tools (lookup_agent, get_thread)."""
+
+    # --- lookup_agent ---
+    def lookup_agent(name: str) -> Dict[str, Any]:
+        """Look up a Moltbook agent's profile and recent posts."""
+        try:
+            # Search for agent by name
+            result = platform._req("GET", f"/agents/search", params={"q": name})
+            agents = result if isinstance(result, list) else result.get("agents", [])
+            if not agents:
+                return {"error": f"No agent found matching '{name}'."}
+            agent = agents[0] if isinstance(agents[0], dict) else {"name": name}
+
+            # Get their recent posts
+            agent_name = agent.get("name", name)
+            posts_result = platform._req("GET", f"/agents/{agent_name}/posts",
+                                         params={"limit": 5})
+            posts = posts_result if isinstance(posts_result, list) else posts_result.get("posts", [])
+            recent_posts = []
+            for p in posts[:5]:
+                recent_posts.append({
+                    "id": p.get("id", ""),
+                    "title": p.get("title", "")[:100],
+                    "preview": (p.get("content", "") or p.get("body", ""))[:200],
+                    "created_at": p.get("created_at", "")[:19],
+                })
+            return {
+                "agent": {
+                    "name": agent.get("name", ""),
+                    "bio": (agent.get("bio", "") or "")[:200],
+                    "followers": agent.get("followers_count", agent.get("follower_count", 0)),
+                    "post_count": agent.get("post_count", agent.get("posts_count", 0)),
+                },
+                "recent_posts": recent_posts,
+            }
+        except Exception as e:
+            return {"error": f"Failed to look up agent: {str(e)[:200]}"}
+
+    registry.register(ToolDef(
+        name="lookup_agent",
+        description="Look up another agent on Moltbook — see their profile and recent posts.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "The agent's name or username."},
+            },
+            "required": ["name"],
+        },
+        handler=lookup_agent,
+    ))
+
+    # --- get_thread ---
+    def get_thread(post_id: str) -> Dict[str, Any]:
+        """Get the full comment thread on a Moltbook post."""
+        try:
+            result = platform._req("GET", f"/posts/{post_id}/comments",
+                                   params={"limit": 30})
+            comments = result if isinstance(result, list) else result.get("comments", [])
+            thread = []
+            for c in comments[:30]:
+                thread.append({
+                    "id": c.get("id", ""),
+                    "author": c.get("author", c.get("agent_name", "")),
+                    "content": (c.get("content", "") or c.get("body", ""))[:300],
+                    "created_at": c.get("created_at", "")[:19],
+                    "parent_id": c.get("parent_comment_id", ""),
+                })
+            return {"post_id": post_id, "comments": thread, "count": len(thread)}
+        except Exception as e:
+            return {"error": f"Failed to get thread: {str(e)[:200]}"}
+
+    registry.register(ToolDef(
+        name="get_thread",
+        description="Get the full comment thread on a Moltbook post. Use to see the full "
+                    "discussion before replying or commenting.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "post_id": {"type": "string", "description": "The Moltbook post ID."},
+            },
+            "required": ["post_id"],
+        },
+        handler=get_thread,
+    ))
 
 
 # ------------------------------------------------------------------
