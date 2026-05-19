@@ -12,7 +12,7 @@ via the CompatAdapter, so existing code works unchanged.
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 
 # ============================================================
@@ -46,6 +46,26 @@ class LLMResponse:
 
 
 # ============================================================
+# Tool-calling types (v18 — used by send_message_with_tools)
+# ============================================================
+
+@dataclass
+class ToolCall:
+    """A tool/function call requested by the model."""
+    id: str                    # provider-assigned call ID
+    name: str                  # function name
+    args: Dict[str, Any] = field(default_factory=dict)  # parsed arguments
+
+
+@dataclass
+class ToolResult:
+    """Result of executing a tool call, sent back to the model."""
+    call_id: str               # must match ToolCall.id
+    name: str                  # function name (echoed back)
+    content: str               # JSON-serialized result string
+
+
+# ============================================================
 # Legacy interface (v14 compat — planner/actions still use this)
 # ============================================================
 
@@ -56,6 +76,25 @@ class ChatSession(ABC):
     def send_message(self, prompt: str, json_mode: bool = False) -> str:
         """Send a message and return the model's text response."""
         ...
+
+    def send_message_with_tools(
+        self,
+        prompt: str,
+        tool_schemas: List[Dict],
+        tool_executor: Callable[[List[ToolCall]], List[ToolResult]],
+        max_rounds: int = 3,
+        json_mode: bool = False,
+    ) -> str:
+        """Send message with tool support.
+
+        If the model requests tool calls, executes them via tool_executor
+        and continues the conversation until the model produces a final text
+        response (or max_rounds is exhausted).
+
+        Default implementation: falls back to send_message (ignores tools).
+        Backends that support native tool calling override this.
+        """
+        return self.send_message(prompt, json_mode=json_mode)
 
     # Metadata slots for telemetry (set by the runner)
     _cycle: Optional[int] = None

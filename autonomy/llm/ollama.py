@@ -7,12 +7,13 @@ Requires: Ollama running at http://localhost:11434 (default)
 Install: https://ollama.ai
 """
 
+import logging
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 import requests
 
-from .base import ChatSession, LLMResponse, ModelBackend, ModelInfo
+from .base import ChatSession, LLMResponse, ModelBackend, ModelInfo, ToolCall, ToolResult
 
 
 class OllamaChatSession(ChatSession):
@@ -86,6 +87,23 @@ class OllamaChatSession(ChatSession):
         self._history.append({"role": "assistant", "content": text})
 
         return text
+
+    def send_message_with_tools(
+        self,
+        prompt: str,
+        tool_schemas: List[Dict],
+        tool_executor: Callable[[List[ToolCall]], List[ToolResult]],
+        max_rounds: int = 3,
+        json_mode: bool = False,
+    ) -> str:
+        """Tool calling stub — falls back to text-only send_message.
+
+        TODO: implement native Ollama tool calling.
+        """
+        log = logging.getLogger("autonomy.llm.ollama")
+        log.debug("send_message_with_tools: native tool calling not yet "
+                   "implemented for Ollama — falling back to send_message")
+        return self.send_message(prompt, json_mode=json_mode)
 
 
 class OllamaBackend(ModelBackend):

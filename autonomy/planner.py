@@ -674,14 +674,25 @@ def _extract_preamble(raw: str) -> str:
 def plan_next_action(chat: ChatSession, prompt: str,
                      telemetry: Optional[TelemetryLogger] = None,
                      brain_name: str = "",
-                     budget: Optional[DailyBudget] = None) -> Dict[str, Any]:
-    plan = parse_json_with_one_repair(
-        chat, prompt,
-        telemetry=telemetry,
-        brain_name=brain_name,
-        call_tag='planner',
-        budget=budget,
-    )
+                     budget: Optional[DailyBudget] = None,
+                     tool_registry=None) -> Dict[str, Any]:
+    """Plan the next action. If tool_registry is provided and the chat backend
+    supports tool calling, the model may call tools during reasoning before
+    producing its final JSON action.
+    """
+    if tool_registry and hasattr(chat, 'send_message_with_tools'):
+        # Tool-augmented path: model can call tools, then returns final JSON
+        plan = _plan_with_tools(chat, prompt, tool_registry,
+                                telemetry=telemetry, brain_name=brain_name, budget=budget)
+    else:
+        # Classic path: single-turn JSON
+        plan = parse_json_with_one_repair(
+            chat, prompt,
+            telemetry=telemetry,
+            brain_name=brain_name,
+            call_tag='planner',
+            budget=budget,
+        )
     if not isinstance(plan, dict):
         plan = {}
     if not (plan.get("action") or "").strip():
@@ -696,3 +707,120 @@ def plan_next_action(chat: ChatSession, prompt: str,
         plan["_preamble"] = preamble
 
     return plan
+
+
+def _plan_with_tools(chat, prompt, tool_registry,
+                     telemetry=None, brain_name="", budget=None):
+    """Tool-augmented planning: model may call tools, then returns final JSON action."""
+    import json as _json
+
+    tool_schemas = tool_registry.get_schemas()
+
+    def executor(calls):
+        """Execute tool calls via the registry, log to telemetry."""
+        results = tool_registry.execute(calls)
+        if telemetry:
+            for call, result in zip(calls, results):
+                telemetry.log("tool_call", {
+                    "tool": call.name,
+                    "args": call.args,
+                    "result_length": len(result.content),
+                    "tag": "planner",
+                })
+        return results
+
+    try:
+        raw = chat.send_message_with_tools(
+            prompt,
+            tool_schemas=tool_schemas,
+            tool_executor=executor,
+            max_rounds=3,
+            json_mode=False,  # we parse JSON ourselves from the text response
+        )
+    except Exception as e:
+        # Re-raise retryable errors so __main__.py fallback chain catches them
+        msg = str(e)
+        msg_lower = msg.lower()
+        if any(s in msg or s in msg_lower for s in (
+            "503", "504", "UNAVAILABLE", "gateway timeout", "deadline exceeded",
+            "ReadTimeout", "timed out", "credit balance", "insufficient credit",
+            "quota", "insufficient_quota", "rate_limit", "429",
+        )):
+            raise
+        # Non-retryable: log and return WAIT
+        if telemetry:
+            telemetry.log("planner_tool_error", {
+                "error": msg[:500], "brain": brain_name,
+            })
+        return {"action": "WAIT", "summary": f"Tool-augmented planning failed: {msg[:100]}"}
+
+    # Record budget if available
+    if budget:
+        from .llm.base import LLMResponse
+        in_tok = getattr(chat, '_last_input_tokens', 0) or 0
+        out_tok = getattr(chat, '_last_output_tokens', 0) or 0
+        model_name = getattr(chat, '_model_id', '') or ''
+        if model_name:
+            budget.record_usage(model_name, LLMResponse(
+                text=raw, input_tokens=in_tok, output_tokens=out_tok,
+                model_id=model_name,
+            ))
+
+    if telemetry:
+        telemetry.log("llm_call", {
+            "tag": "planner", "model": getattr(chat, '_model_id', ''),
+            "prompt_chars": len(prompt),
+            "response_chars": len(raw or ''),
+            "input_tokens": getattr(chat, '_last_input_tokens', 0),
+            "output_tokens": getattr(chat, '_last_output_tokens', 0),
+        })
+
+    # Store raw response for preamble extraction
+    chat._last_raw_response = raw
+
+    # Parse JSON from the final text response (same logic as parse_json_with_one_repair)
+    plan = _extract_json(raw)
+    if plan is None:
+        # One repair attempt
+        try:
+            repair_raw = chat.send_message(
+                "Your previous response could not be parsed as JSON. "
+                "Please respond with ONLY the JSON action object.",
+                json_mode=True,
+            )
+            chat._last_raw_response = repair_raw
+            plan = _extract_json(repair_raw)
+        except Exception:
+            pass
+    return plan or {}
+
+
+def _extract_json(text: str) -> Optional[Dict[str, Any]]:
+    """Extract a JSON object from text that may contain preamble/commentary."""
+    import json as _json
+    if not text:
+        return None
+    text = text.strip()
+    # Strip markdown fences
+    if text.startswith("```"):
+        lines = text.split("\n")
+        lines = [l for l in lines if not l.strip().startswith("```")]
+        text = "\n".join(lines).strip()
+    # Try direct parse
+    try:
+        obj = _json.loads(text)
+        if isinstance(obj, dict):
+            return obj
+    except (ValueError, _json.JSONDecodeError):
+        pass
+    # Find JSON object in text
+    start = text.find("{")
+    end = text.rfind("}")
+    if start >= 0 and end > start:
+        try:
+            obj = _json.loads(text[start:end + 1])
+            if isinstance(obj, dict):
+                return obj
+        except (ValueError, _json.JSONDecodeError):
+            pass
+    return None

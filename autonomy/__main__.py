@@ -546,17 +546,30 @@ def main():
         except ImportError:
             print("    [WARN] mistralai package not installed — skipping Mistral models")
 
-    # Ollama — primary local model backend (replaces HuggingFace/PyTorch)
+    # Ollama — primary local model backend. Retry on startup if unreachable
+    # (common after desktop reboot — Ollama service starts slowly).
     try:
         from .llm.ollama import OllamaBackend
         _ollama_url = os.environ.get("OLLAMA_URL", "http://localhost:11434").strip()
         _ollama = OllamaBackend(base_url=_ollama_url)
-        if _ollama.is_available():
+        _ollama_ok = _ollama.is_available()
+        if not _ollama_ok:
+            for _attempt in range(1, 6):
+                print(f"{Fore.YELLOW}[STARTUP] Ollama not reachable at {_ollama_url}, "
+                      f"retrying in 30s ({_attempt}/5){Style.RESET_ALL}")
+                time.sleep(30)
+                if _ollama.is_available():
+                    _ollama_ok = True
+                    break
+        if _ollama_ok:
             registry.register_backend("ollama", _ollama)
             _ollama_models = _ollama.available_models()
             print(f"    Ollama: {len(_ollama_models)} models ({', '.join(m.model_id for m in _ollama_models[:5])})")
+        else:
+            print(f"{Fore.RED}[STARTUP] Ollama unreachable after 5 attempts — "
+                  f"local models unavailable{Style.RESET_ALL}")
     except Exception:
-        pass  # Ollama not running or not installed
+        pass  # Ollama not installed
 
     llm_client = registry.as_llm_client(default_model_id=conscious_model)
 
@@ -942,6 +955,19 @@ def main():
     # Cycle number persists across restarts (only resets on memory wipe)
     iteration = state.get("_cycle_number", 0)
 
+    # Build tool registry for the tool-augmented planner (v18).
+    # Tools are available every cycle; the registry holds handlers for todo, experiments, etc.
+    from .tools import build_tool_registry, expire_temp_overrides
+    _cycle_ref = [iteration]  # mutable ref so tools always get current cycle
+    tool_registry = build_tool_registry(
+        brain_name=brain_name,
+        brains_dir=BRAINS_DIR,
+        state=state,
+        ctrl=ctrl,
+        store=store,
+        cycle_getter=lambda: _cycle_ref[0],
+    )
+
     # Push session-start marker to live daemon feed
     if store and hasattr(store, 'push_daemon_tick'):
         try:
@@ -960,7 +986,14 @@ def main():
     while True:
         iteration += 1
         state["_cycle_number"] = iteration
+        _cycle_ref[0] = iteration  # update for tool closures
         _set_live_context(cycle=iteration)  # so deep-stack emit_status uses current cycle tick
+
+        # Expire any temporary control overrides that have reached their duration
+        _expired = expire_temp_overrides(state, ctrl, iteration)
+        if _expired:
+            emit_status("[CTRL]", f"{len(_expired)} temp override(s) reverted: {', '.join(_expired.keys())}",
+                        color=Fore.CYAN, cycle=iteration)
 
         # --- Re-read controls from disk (picks up dashboard edits) ---
         if os.path.exists(controls_file):
@@ -1438,6 +1471,12 @@ def main():
             post_memory=post_memory_context(state),
         )
 
+        # Append tools summary to prompt so the agent knows what's available
+        if tool_registry:
+            _tools_summary = tool_registry.prompt_summary()
+            if _tools_summary:
+                prompt += "\n\n" + _tools_summary
+
         plan = None
         try:
             try:
@@ -1446,7 +1485,7 @@ def main():
                 emit_status("[CONSCIOUS]", f"→ {_con_short} ({_con_tag}) thinking...",
                             color=Fore.MAGENTA, cycle=iteration)
                 _con_t0 = time.time()
-                plan = plan_next_action(chat, prompt, telemetry=telemetry, brain_name=brain_name, budget=budget)
+                plan = plan_next_action(chat, prompt, telemetry=telemetry, brain_name=brain_name, budget=budget, tool_registry=tool_registry)
                 _con_elapsed = time.time() - _con_t0
                 emit_status("[CONSCIOUS]", f"← {plan.get('action','?')} ({_con_elapsed:.1f}s)",
                             color=Fore.MAGENTA, cycle=iteration)
@@ -1491,7 +1530,7 @@ def main():
                                 max_output_tokens=16384,
                                 tools=search_tools if args.enable_search else None,
                             )
-                            plan = plan_next_action(paid_chat, prompt, telemetry=telemetry, brain_name=brain_name, budget=budget)
+                            plan = plan_next_action(paid_chat, prompt, telemetry=telemetry, brain_name=brain_name, budget=budget, tool_registry=tool_registry)
                             chat = paid_chat
                             _success = True
                         except Exception as _paid_err:
@@ -1524,7 +1563,7 @@ def main():
                                     max_output_tokens=16384,
                                     tools=search_tools if args.enable_search else None,
                                 )
-                                plan = plan_next_action(chat, prompt, telemetry=telemetry, brain_name=brain_name, budget=budget)
+                                plan = plan_next_action(chat, prompt, telemetry=telemetry, brain_name=brain_name, budget=budget, tool_registry=tool_registry)
                                 conscious_model = _candidate  # update to actual model used
                                 _success = True
                                 break
