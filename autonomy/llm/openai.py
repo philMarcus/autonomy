@@ -4,10 +4,11 @@ Implements ModelBackend for GPT models via the OpenAI Python SDK.
 Requires: pip install openai
 """
 
+import logging
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
-from .base import ChatSession, LLMResponse, ModelBackend, ModelInfo
+from .base import ChatSession, LLMResponse, ModelBackend, ModelInfo, ToolCall, ToolResult
 
 
 # All OpenAI models this backend serves
@@ -86,6 +87,23 @@ class OpenAIChatSession(ChatSession):
 
         self._messages.append({"role": "assistant", "content": text})
         return text
+
+    def send_message_with_tools(
+        self,
+        prompt: str,
+        tool_schemas: List[Dict],
+        tool_executor: Callable[[List[ToolCall]], List[ToolResult]],
+        max_rounds: int = 3,
+        json_mode: bool = False,
+    ) -> str:
+        """Tool calling stub — falls back to text-only send_message.
+
+        TODO: implement native OpenAI function calling.
+        """
+        log = logging.getLogger("autonomy.llm.openai")
+        log.debug("send_message_with_tools: native tool calling not yet "
+                   "implemented for OpenAI — falling back to send_message")
+        return self.send_message(prompt, json_mode=json_mode)
 
 
 class OpenAIBackend(ModelBackend):

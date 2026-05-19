@@ -5,13 +5,15 @@ generate_content approach with manual history tracking (works around the
 Gemini 2.5 Flash first-message empty-response bug).
 """
 
+import json
+import logging
 import time
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from google import genai
 from google.genai import types
 
-from .base import ChatSession, LLMResponse, ModelBackend, ModelInfo
+from .base import ChatSession, LLMResponse, ModelBackend, ModelInfo, ToolCall, ToolResult
 from ..config import (
     LLM_TPM_SOFT_CAP, LLM_TPM_CHAR_TO_TOKEN, LLM_TPM_WINDOW_SECONDS,
     LLM_BACKOFF_INITIAL_SECONDS, LLM_BACKOFF_MAX_SECONDS,
@@ -183,6 +185,235 @@ class GeminiChatSession(ChatSession):
                 raw = "\n".join(p.text for p in parts if getattr(p, "text", None))
             except Exception:
                 raw = ""
+        return raw
+
+    # --------------------------------------------------------
+    # Tool-calling support (v18)
+    # --------------------------------------------------------
+
+    @staticmethod
+    def _schemas_to_declarations(
+        tool_schemas: List[Dict],
+    ) -> List[types.FunctionDeclaration]:
+        """Convert JSON-schema tool definitions to Gemini FunctionDeclaration objects.
+
+        Each schema dict must have at minimum:
+            {"name": str, "description": str, "parameters": {...}}
+        where ``parameters`` follows JSON Schema (type/properties/required).
+        """
+        decls: List[types.FunctionDeclaration] = []
+        for schema in tool_schemas:
+            params = schema.get("parameters")
+            decls.append(types.FunctionDeclaration(
+                name=schema["name"],
+                description=schema.get("description", ""),
+                parameters=params,
+            ))
+        return decls
+
+    @staticmethod
+    def _extract_function_calls(resp) -> List[ToolCall]:
+        """Pull ToolCall objects out of a Gemini response, if any."""
+        calls: List[ToolCall] = []
+        try:
+            parts = resp.candidates[0].content.parts
+        except (IndexError, AttributeError):
+            return calls
+        for idx, part in enumerate(parts):
+            fc = getattr(part, "function_call", None)
+            if fc is not None:
+                # Build a stable call ID from the function name + index
+                call_id = f"call_{fc.name}_{idx}"
+                # fc.args is a proto MapComposite — convert to plain dict
+                args = dict(fc.args) if fc.args else {}
+                calls.append(ToolCall(id=call_id, name=fc.name, args=args))
+        return calls
+
+    def send_message_with_tools(
+        self,
+        prompt: str,
+        tool_schemas: List[Dict],
+        tool_executor: Callable[[List[ToolCall]], List[ToolResult]],
+        max_rounds: int = 3,
+        json_mode: bool = False,
+    ) -> str:
+        """Send a message with Gemini-native function calling.
+
+        Flow:
+        1. Send the user prompt with function declarations attached.
+        2. If the model responds with function_call parts, execute them
+           via ``tool_executor`` and feed function_response parts back.
+        3. Repeat until the model returns a text response or max_rounds
+           is exhausted.
+
+        Budget tracking, 429 backoff, history management, and token
+        counting are all preserved — every generate_content call goes
+        through the same guardrails as send_message.
+        """
+        log = logging.getLogger("autonomy.llm.gemini")
+
+        # Convert tool schemas to Gemini FunctionDeclarations
+        declarations = self._schemas_to_declarations(tool_schemas)
+        fn_tools = [types.Tool(function_declarations=declarations)]
+
+        # Gemini does NOT allow mixing built-in tools (google_search) with
+        # custom function declarations in the same API call — returns 400
+        # INVALID_ARGUMENT. When custom tools are present, drop built-in
+        # tools. Search grounding is still available via the seeker daemon's
+        # pre-loaded findings in the prompt context.
+        combined_tools = fn_tools  # custom only, no built-in google_search
+
+        # --- Initial user turn ---------------------------------------------------
+        prompt_chars = len(prompt or "")
+        est_tokens = BUDGET.est_tokens(prompt_chars)
+
+        # Global cooldown after 429s
+        rem = BUDGET.blocked_remaining()
+        if rem > 0:
+            time.sleep(float(rem))
+
+        # TPM guardrail
+        should_throttle, used = BUDGET.should_throttle(est_tokens)
+        if should_throttle:
+            sleep_s = max(1.0, LLM_TPM_WINDOW_SECONDS - 1.0)
+            time.sleep(sleep_s)
+
+        # Build contents: history + new user message
+        contents = list(self._history) + [
+            types.Content(role="user", parts=[types.Part(text=prompt)])
+        ]
+
+        config_kwargs: Dict[str, Any] = {
+            "temperature": self._temperature,
+            "max_output_tokens": self._max_output_tokens,
+            "tools": combined_tools,
+        }
+        if self._system_instruction:
+            config_kwargs["system_instruction"] = self._system_instruction
+        if json_mode:
+            config_kwargs["response_mime_type"] = "application/json"
+
+        # --- Multi-round tool loop -----------------------------------------------
+        total_input_tokens = 0
+        total_output_tokens = 0
+
+        for round_idx in range(max_rounds + 1):  # +1 so we can do max_rounds tool exchanges
+            try:
+                resp = self._client.models.generate_content(
+                    model=self.model_name,
+                    contents=contents,
+                    config=types.GenerateContentConfig(**config_kwargs),
+                )
+            except TypeError:
+                # Some older SDK versions don't support response_mime_type — retry without
+                config_kwargs.pop("response_mime_type", None)
+                resp = self._client.models.generate_content(
+                    model=self.model_name,
+                    contents=contents,
+                    config=types.GenerateContentConfig(**config_kwargs),
+                )
+            except Exception as exc:
+                exc_str = str(exc)
+                if "429" in exc_str or "RESOURCE_EXHAUSTED" in exc_str:
+                    BUDGET.note_429()
+                raise
+
+            # Accumulate token usage across rounds
+            try:
+                usage = resp.usage_metadata
+                total_input_tokens += getattr(usage, "prompt_token_count", 0) or 0
+                visible_out = getattr(usage, "candidates_token_count", 0) or 0
+                thinking = getattr(usage, "thoughts_token_count", 0) or 0
+                total_output_tokens += visible_out + thinking
+            except (AttributeError, TypeError):
+                pass
+
+            BUDGET.record(est_tokens)
+            # After the first round, est_tokens for subsequent rounds is small
+            # (just the function response), so reset for TPM accounting.
+            est_tokens = 0
+
+            # Check for function calls in the response
+            tool_calls = self._extract_function_calls(resp)
+
+            if not tool_calls:
+                # No tool calls — model produced a final text response
+                break
+
+            # --- Execute tool calls and build response parts ----------------------
+            log.debug("Tool round %d: %d call(s) — %s",
+                      round_idx, len(tool_calls),
+                      ", ".join(tc.name for tc in tool_calls))
+
+            results = tool_executor(tool_calls)
+
+            # Build a map for quick lookup
+            result_map: Dict[str, ToolResult] = {r.call_id: r for r in results}
+
+            # Append model's function_call turn to contents
+            try:
+                model_content = resp.candidates[0].content
+                contents.append(model_content)
+            except (IndexError, AttributeError):
+                # Shouldn't happen if we got tool_calls, but guard anyway
+                break
+
+            # Build function_response parts (one per call, matched by name)
+            fn_response_parts: List[types.Part] = []
+            for tc in tool_calls:
+                tr = result_map.get(tc.id)
+                if tr is None:
+                    # Executor didn't return a result for this call — send empty
+                    result_payload = {"error": "no result returned"}
+                else:
+                    # Parse the content string back to dict for Gemini
+                    try:
+                        result_payload = json.loads(tr.content)
+                    except (json.JSONDecodeError, TypeError):
+                        result_payload = {"result": tr.content}
+
+                fn_response_parts.append(types.Part(
+                    function_response=types.FunctionResponse(
+                        name=tc.name,
+                        response=result_payload,
+                    )
+                ))
+
+            contents.append(
+                types.Content(role="user", parts=fn_response_parts)
+            )
+        else:
+            # Exhausted max_rounds — log a warning but return whatever we have
+            log.warning("send_message_with_tools: exhausted %d rounds", max_rounds)
+
+        # --- Post-loop: capture metadata and update history -----------------------
+
+        # Grounding metadata from final response
+        self._last_grounding_metadata = None
+        try:
+            self._last_grounding_metadata = resp.candidates[0].grounding_metadata
+        except (IndexError, AttributeError):
+            pass
+
+        # Store cumulative token counts for cost tracking
+        self._last_input_tokens = total_input_tokens
+        self._last_output_tokens = total_output_tokens
+
+        raw = self._extract_text(resp)
+
+        # Append the original user prompt and final model text to session
+        # history so subsequent send_message calls see the full conversation.
+        # (Intermediate tool-call/response turns are intentionally omitted
+        # from session history to keep it clean for follow-up turns.)
+        self._history.append(
+            types.Content(role="user", parts=[types.Part(text=prompt)])
+        )
+        if raw:
+            self._history.append(
+                types.Content(role="model", parts=[types.Part(text=raw)])
+            )
+
+        BUDGET.reset_backoff()
         return raw
 
 

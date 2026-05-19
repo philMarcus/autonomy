@@ -682,6 +682,49 @@ The accountant prompt explicitly tells it which controls are shared with conscio
 - `GENERATE_IMAGE` on error now: (1) retries with `imagen-ultra` if original tier was different, (2) falls back to publishing `plan.content` as a text `artifact_type="post"` to Analog Home so the essay isn't lost, (3) saves the failed `image_prompt` to `state["_failed_image_prompts"]` (capped 5) for future retry, (4) adds history entry and logs full telemetry (no truncation).
 - Fixed stale imagen model IDs: `imagen-3.0-fast-generate-001` → `imagen-4.0-fast-generate-001`, `imagen-3.0-generate-002` → `imagen-4.0-generate-001`.
 
+## v18.0 — Tool-Augmented Planner (May 2026, dev branch: `v18-tools`)
+
+### Architecture: from static context dump to tool-augmented reasoning
+The planner evolves from a single-turn static prompt to a multi-turn tool-calling agent. Gemini/OpenAI/Anthropic all support function calling natively — the agent sends its response, which may include tool-call requests. Our code executes the tools, sends results back, and the model continues reasoning.
+
+### Core principle: "Daemon pre-loads, conscious fine-tunes"
+The subconscious daemon shapes coarse-grained context (feed scoring, experiment data surfacing, todo reminders via new Librarian gear). The conscious planner sees that pre-loaded context AND has ad-hoc tool access for deeper retrieval. Tools are **additive** — full existing context (memory tiers, feed, drafts, controls) stays in the prompt. Tools give new capabilities the agent didn't have before.
+
+### Sprint 1: Tool foundation + structured state
+- **Ollama startup retry**: 5 attempts × 30s on startup if Ollama unreachable
+- **Tool-calling loop**: extend `ChatSession` ABC with provider-agnostic tool support
+- **Todo list**: `read_todos()`, `add_todo()`, `complete_todo()`, `remove_todo()` — JSON file storage, Analog Home panel
+- **Lab notebook**: `list_experiments()`, `create_experiment()`, `log_data()`, `read_experiment()`, `close_experiment()` — structured experiment tracking with hypothesis/data/conclusion
+- **Tagline as tool**: `update_tagline()` migrated from JSON output field to tool call
+- **Temporary control overrides**: `set_temporary_control(key, value, duration_cycles)` — auto-reverts, enables structured parameter experiments
+- Model-agnostic: custom tools work across Gemini, OpenAI, Anthropic
+
+### Sprint 2: Retrieval + veto telemetry + Librarian daemon
+- **Unified search**: `search_history(query, sources=["memory","posts","seeds"])` — searches across all data, results tagged by source
+- **Agent lookup**: `lookup_agent(name)` — Moltbook API for profile + recent posts
+- **Thread retrieval**: `get_thread(post_id)` — full comment thread
+- **Knowledge search**: `search_knowledge(query)` — RAG over knowledge file
+- **Control change history**: `get_control_history()` — track and expose who changed what when
+- **Veto telemetry** (agent-requested, cycle 360): `vetoed_actions` array in planner JSON — structured "paths not taken" data. Display on Analog Home. Backfill from existing `monologue_public` fields (agent has logged fork/veto data informally since early cycles).
+- **Daemon Gear 8 "Librarian"**: pre-loads experiment data + upcoming todos into draft context each tick
+- **Dynamic action priority system** (deferred — needs more design; not a simple reorder but state-aware weighting)
+
+### Sprint 3: AWS integration
+- **S3**: image storage (migrate from Postgres BYTEA), CloudFront CDN
+- **DynamoDB**: telemetry warehouse (replace local DuckDB)
+- **Lambda**: serverless retrieval tool backends
+
+### Sprint 4: Vector search (real RAG)
+- **Embeddings**: Gemini `text-embedding-004` (free), stored via pgvector on Neon Postgres
+- **Semantic memory search**: `recall_deep_memory(query)` with cosine similarity
+- **Semantic post search**: upgrade `search_history` from keyword to vector search
+
+### Dev workflow
+- Branch: `v18-tools` (do not develop on main)
+- Test: `python -m autonomy ANALOG_I_DEV "..." --no-moltbook --read-only`
+- Separate state: `brains/ANALOG_I_DEV_*` files (gitignored)
+- Laptop can call desktop Ollama via Tailscale (`OLLAMA_URL=http://100.71.23.40:11434`)
+
 ## Key Architecture Decisions
 
 - **Controls are source of truth**: controls.py has defaults, controls.json overrides, CLI overrides both. No competing defaults.
