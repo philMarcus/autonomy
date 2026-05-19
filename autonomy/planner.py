@@ -427,6 +427,8 @@ def build_planner_prompt(
     if daemon_active:
         meta_fields_base += ', daemon_directives'
         meta_example_base += '"daemon_directives": {"focus_topics": [], "note": ""}, '
+    meta_fields_base += ', vetoed_actions'
+    meta_example_base += '"vetoed_actions": [{"action_type": "REPLY", "target_or_topic": "...", "veto_reason": "..."}], '
     meta_fields_note = meta_fields_base + ' fields'
     meta_example = meta_example_base
 

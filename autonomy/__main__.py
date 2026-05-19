@@ -1599,6 +1599,14 @@ def main():
                 safe_print(f"{Fore.WHITE}{preamble}")
                 safe_print(f"{Fore.CYAN}-----------------{Style.RESET_ALL}")
 
+            # Extract vetoed_actions (structured "paths not taken" — agent dev request c360)
+            vetoed_actions = plan.pop("vetoed_actions", None) or []
+            if vetoed_actions and isinstance(vetoed_actions, list):
+                telemetry.log("vetoed_actions", {
+                    "cycle": iteration,
+                    "vetoes": vetoed_actions[:10],  # cap at 10
+                })
+
             # Extract and save memory_note to hierarchical memory
             memory_note = (plan.pop("memory_note", None) or "").strip()
             if memory_note:
@@ -1924,6 +1932,12 @@ def main():
                     for _tc in _tcl:
                         _args_str = ", ".join(f"{k}={v}" for k, v in _tc.get("args", {}).items())
                         report_parts.append(f"  {_tc['tool']}({_args_str[:100]})")
+                # Vetoed actions (structured "paths not taken")
+                if vetoed_actions and isinstance(vetoed_actions, list):
+                    report_parts.append("")
+                    report_parts.append(f"Paths not taken: {len(vetoed_actions)}")
+                    for v in vetoed_actions[:5]:
+                        report_parts.append(f"  ✗ {v.get('action_type','?')}: {v.get('target_or_topic','')[:60]} — {v.get('veto_reason','')[:80]}")
                 store.write_artifact(iteration, {
                     "brain": brain_name,
                     "artifact_type": "system_cycle_report",
