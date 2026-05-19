@@ -1913,6 +1913,14 @@ def main():
                         report_parts.append(f"[conscious] {_k} → {_v}")
                     if _accountant_reasoning:
                         report_parts.append(f"Accountant: {_accountant_reasoning}")
+                # Tool calls made during this cycle's planning
+                _tcl = getattr(chat, "_tool_call_log", [])
+                if _tcl:
+                    report_parts.append("")
+                    report_parts.append(f"Tools called: {len(_tcl)}")
+                    for _tc in _tcl:
+                        _args_str = ", ".join(f"{k}={v}" for k, v in _tc.get("args", {}).items())
+                        report_parts.append(f"  {_tc['tool']}({_args_str[:100]})")
                 store.write_artifact(iteration, {
                     "brain": brain_name,
                     "artifact_type": "system_cycle_report",

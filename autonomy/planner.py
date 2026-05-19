@@ -715,12 +715,16 @@ def _plan_with_tools(chat, prompt, tool_registry,
     import json as _json
 
     tool_schemas = tool_registry.get_schemas()
+    # Accumulate tool calls for the cycle report
+    _tool_call_log: list = []
+    chat._tool_call_log = _tool_call_log  # accessible by __main__.py after planning
 
     def executor(calls):
         """Execute tool calls via the registry, log to telemetry."""
         results = tool_registry.execute(calls)
-        if telemetry:
-            for call, result in zip(calls, results):
+        for call, result in zip(calls, results):
+            _tool_call_log.append({"tool": call.name, "args": call.args})
+            if telemetry:
                 telemetry.log("tool_call", {
                     "tool": call.name,
                     "args": call.args,
