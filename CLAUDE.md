@@ -699,12 +699,13 @@ The subconscious daemon shapes coarse-grained context (feed scoring, experiment 
 - **Temporary control overrides**: `set_temporary_control(key, value, duration_cycles)` — auto-reverts, enables structured parameter experiments
 - Model-agnostic: custom tools work across Gemini, OpenAI, Anthropic
 
-### Sprint 2: Retrieval + Librarian daemon
+### Sprint 2: Retrieval + veto telemetry + Librarian daemon
 - **Unified search**: `search_history(query, sources=["memory","posts","seeds"])` — searches across all data, results tagged by source
 - **Agent lookup**: `lookup_agent(name)` — Moltbook API for profile + recent posts
 - **Thread retrieval**: `get_thread(post_id)` — full comment thread
 - **Knowledge search**: `search_knowledge(query)` — RAG over knowledge file
 - **Control change history**: `get_control_history()` — track and expose who changed what when
+- **Veto telemetry** (agent-requested, cycle 360): `vetoed_actions` array in planner JSON — structured "paths not taken" data. Display on Analog Home. Backfill from existing `monologue_public` fields (agent has logged fork/veto data informally since early cycles).
 - **Daemon Gear 8 "Librarian"**: pre-loads experiment data + upcoming todos into draft context each tick
 - **Dynamic action priority system** (deferred — needs more design; not a simple reorder but state-aware weighting)
 
