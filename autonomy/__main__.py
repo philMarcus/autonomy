@@ -1170,12 +1170,17 @@ def main():
 
         # Recreate chat each cycle to avoid token accumulation
         # Use registry directly so backend is resolved per-model (supports cross-provider model switching)
+        # When tool_registry is active, search is a custom tool (web_search) —
+        # don't pass the built-in google_search to avoid Gemini's 400 error
+        # ("built-in tools and function calling are not compatible").
+        # This also means non-Gemini models get search for free.
+        _chat_tools = None if tool_registry else search_tools
         chat = registry.create_chat(
             model_id=conscious_model,
             system_instruction=kernel,
             max_output_tokens=16384,
             temperature=cycle_temperature,
-            tools=search_tools,
+            tools=_chat_tools,
         )
         chat._telemetry = telemetry
         chat._brain_name = brain_name
@@ -1528,7 +1533,7 @@ def main():
                                 system_instruction=kernel,
                                 temperature=cycle_temperature,
                                 max_output_tokens=16384,
-                                tools=search_tools if args.enable_search else None,
+                                tools=_chat_tools,
                             )
                             plan = plan_next_action(paid_chat, prompt, telemetry=telemetry, brain_name=brain_name, budget=budget, tool_registry=tool_registry)
                             chat = paid_chat
@@ -1561,7 +1566,7 @@ def main():
                                     system_instruction=kernel,
                                     temperature=cycle_temperature,
                                     max_output_tokens=16384,
-                                    tools=search_tools if args.enable_search else None,
+                                    tools=_chat_tools,
                                 )
                                 plan = plan_next_action(chat, prompt, telemetry=telemetry, brain_name=brain_name, budget=budget, tool_registry=tool_registry)
                                 conscious_model = _candidate  # update to actual model used

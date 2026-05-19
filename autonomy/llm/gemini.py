@@ -256,9 +256,12 @@ class GeminiChatSession(ChatSession):
         declarations = self._schemas_to_declarations(tool_schemas)
         fn_tools = [types.Tool(function_declarations=declarations)]
 
-        # Combine existing chat-level tools (e.g. google_search) with
-        # function-calling tools so both work in the same request.
-        combined_tools = list(self._tools or []) + fn_tools
+        # Gemini does NOT allow mixing built-in tools (google_search) with
+        # custom function declarations in the same API call — returns 400
+        # INVALID_ARGUMENT. When custom tools are present, drop built-in
+        # tools. Search grounding is still available via the seeker daemon's
+        # pre-loaded findings in the prompt context.
+        combined_tools = fn_tools  # custom only, no built-in google_search
 
         # --- Initial user turn ---------------------------------------------------
         prompt_chars = len(prompt or "")

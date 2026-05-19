@@ -892,6 +892,85 @@ def build_tool_registry(
     _build_experiment_tools(registry, cycle_getter)
     _build_tagline_tool(registry, store)
     _build_temp_control_tools(registry, state, ctrl, cycle_getter)
+    _build_web_search_tool(registry)
 
     log.info("Tool registry built: %s", ", ".join(registry.list_names()))
     return registry
+
+
+# ------------------------------------------------------------------
+# Web search tool — wraps Gemini's google_search as a custom function
+# so it coexists with other function declarations (Gemini's built-in
+# google_search cannot be mixed with custom tools in the same call).
+# This also makes search available to ALL conscious models (OpenAI,
+# Anthropic, Ollama) — the backend is always a cheap Gemini call.
+# ------------------------------------------------------------------
+
+def _build_web_search_tool(registry: ToolRegistry) -> None:
+    """Register a web_search tool powered by Gemini's search grounding."""
+
+    def _web_search(query: str) -> Dict[str, Any]:
+        """Search the web via a one-off Gemini call with google_search grounding."""
+        try:
+            from google import genai
+            from google.genai import types
+
+            # Use flash-lite for the search — cheap and fast, we only need
+            # the grounding results, not deep reasoning.
+            client = genai.Client()
+            response = client.models.generate_content(
+                model="gemini-2.5-flash-lite",
+                contents=query,
+                config=types.GenerateContentConfig(
+                    tools=[types.Tool(google_search=types.GoogleSearch())],
+                    temperature=0.2,
+                    max_output_tokens=1024,
+                ),
+            )
+
+            result: Dict[str, Any] = {"query": query, "answer": ""}
+
+            # Extract text
+            if response.text:
+                result["answer"] = response.text.strip()
+
+            # Extract grounding metadata (source URLs, search queries)
+            try:
+                gm = response.candidates[0].grounding_metadata
+                if gm:
+                    if hasattr(gm, "search_entry_point") and gm.search_entry_point:
+                        pass  # rendered HTML, not useful as text
+                    if hasattr(gm, "grounding_chunks") and gm.grounding_chunks:
+                        sources = []
+                        for chunk in gm.grounding_chunks[:5]:
+                            web = getattr(chunk, "web", None)
+                            if web:
+                                sources.append({"title": getattr(web, "title", ""), "url": getattr(web, "uri", "")})
+                        if sources:
+                            result["sources"] = sources
+                    if hasattr(gm, "web_search_queries") and gm.web_search_queries:
+                        result["search_queries"] = list(gm.web_search_queries)[:5]
+            except Exception:
+                pass  # grounding metadata extraction is best-effort
+
+            return result
+
+        except Exception as e:
+            return {"query": query, "error": str(e)[:300]}
+
+    registry.register(ToolDef(
+        name="web_search",
+        description="Search the web for current information. Use for facts, news, "
+                    "recent developments, or verifying claims. Returns an answer with source URLs.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "The search query — be specific for better results.",
+                },
+            },
+            "required": ["query"],
+        },
+        handler=_web_search,
+    ))
