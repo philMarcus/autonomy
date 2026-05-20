@@ -303,6 +303,51 @@ def _build_recent_posts(state, count: int = 4) -> str:
     return "\n\n".join(lines)
 
 
+def _build_structured_state_context(brain_name: str, brains_dir: str) -> str:
+    """Build a summary of active experiments + open todos for the planner prompt.
+
+    This is prompt-assembly, not a daemon gear — it reads JSON files once at
+    cycle start and includes a few lines of context so the agent knows what
+    experiments and todos exist without needing to call read tools.
+    """
+    import json as _json
+    lines = []
+
+    exp_path = os.path.join(brains_dir, f"{brain_name}_experiments.json")
+    try:
+        if os.path.exists(exp_path):
+            with open(exp_path, "r") as f:
+                exps = _json.load(f)
+            active = [e for e in exps if e.get("status") == "active"]
+            if active:
+                lines.append("Active experiments:")
+                for e in active[:3]:
+                    dp_count = len(e.get("data_points", []))
+                    latest = ""
+                    if e.get("data_points"):
+                        latest_dp = e["data_points"][-1]
+                        latest = f" | latest: {latest_dp.get('observation', '')[:60]}"
+                    lines.append(f"  {e['name']}: {dp_count} data points{latest}")
+    except Exception:
+        pass
+
+    todo_path = os.path.join(brains_dir, f"{brain_name}_todos.json")
+    try:
+        if os.path.exists(todo_path):
+            with open(todo_path, "r") as f:
+                todos = _json.load(f)
+            open_todos = [t for t in todos if t.get("status") == "open"]
+            if open_todos:
+                lines.append(f"Open todos ({len(open_todos)}):")
+                for t in open_todos[:3]:
+                    due = f" (due cycle {t['due_cycle']})" if t.get("due_cycle") else ""
+                    lines.append(f"  • {t['text'][:60]}{due}")
+    except Exception:
+        pass
+
+    return "\n".join(lines)
+
+
 def _build_self_telemetry(state: dict, budget, iteration: int, daemon=None) -> str:
     """Build a concise self-telemetry summary for the planner prompt."""
     from collections import Counter
@@ -1472,7 +1517,11 @@ def main():
             daemon_active=daemon is not None,
             platform_status=platform_status,
             nudge_note=nudge_note,
-            self_telemetry=_build_self_telemetry(state, budget, iteration, daemon) + "\n" + _build_featured_note(store),
+            self_telemetry=(
+                _build_self_telemetry(state, budget, iteration, daemon) + "\n"
+                + _build_featured_note(store) + "\n"
+                + _build_structured_state_context(brain_name, BRAINS_DIR)
+            ),
             recent_posts=_build_recent_posts(state,
                                              count=int(ctrl.get("recent_posts_in_prompt") or 4)),
             post_engagement=_build_post_engagement(platform, state),
