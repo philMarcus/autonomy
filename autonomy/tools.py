@@ -33,6 +33,7 @@ class ToolDef:
     description: str
     parameters: Dict[str, Any]  # JSON Schema object
     handler: Callable           # Python function to execute
+    mode: str = "read"          # "read" = Gemini function call; "write" = JSON output field
 
 
 @dataclass
@@ -76,11 +77,12 @@ class ToolRegistry:
         """Look up a tool by name. Returns None if not found."""
         return self._tools.get(name)
 
-    def get_schemas(self) -> List[Dict[str, Any]]:
+    def get_schemas(self, mode: str = "read") -> List[Dict[str, Any]]:
         """Return tool schemas for the LLM API (Gemini FunctionDeclaration format).
 
-        Each schema is a dict with 'name', 'description', and 'parameters'
-        (a JSON Schema object with type: "object").
+        Only returns tools matching the given mode. "read" tools become Gemini
+        function declarations (real tool calls). "write" tools are offered as
+        JSON output fields instead (no API overhead).
         """
         return [
             {
@@ -89,6 +91,7 @@ class ToolRegistry:
                 "parameters": t.parameters,
             }
             for t in self._tools.values()
+            if t.mode == mode
         ]
 
     def list_names(self) -> List[str]:
@@ -103,17 +106,27 @@ class ToolRegistry:
         """
         if not self._tools:
             return ""
-        lines = [
-            "--- AVAILABLE TOOLS ---",
-            "You can call tools DURING this cycle, before your final JSON action.",
-            "Tool use does NOT replace your action — you call tools first, THEN choose",
-            "your action (POST, COMMENT, etc.) as normal. Example: call create_experiment",
-            "and add_todo, then POST about your findings. Use tools every cycle as needed.",
-        ]
-        for t in sorted(self._tools.values(), key=lambda x: x.name):
-            params = list(t.parameters.get("properties", {}).keys())
-            params_hint = f"({', '.join(params)})" if params else "()"
-            lines.append(f"  {t.name}{params_hint} — {t.description}")
+        read_tools = [t for t in self._tools.values() if t.mode == "read"]
+        write_tools = [t for t in self._tools.values() if t.mode == "write"]
+
+        lines = ["--- AVAILABLE TOOLS ---"]
+
+        if read_tools:
+            lines.append("")
+            lines.append("LOOKUP TOOLS (call during reasoning — results returned before your action):")
+            for t in sorted(read_tools, key=lambda x: x.name):
+                params = list(t.parameters.get("properties", {}).keys())
+                params_hint = f"({', '.join(params)})" if params else "()"
+                lines.append(f"  {t.name}{params_hint} — {t.description}")
+
+        if write_tools:
+            lines.append("")
+            lines.append("WRITE TOOLS (include in your JSON response as tool_actions — executed after your response):")
+            lines.append('  Format: "tool_actions": [{"tool": "name", "args": {...}}, ...]')
+            for t in sorted(write_tools, key=lambda x: x.name):
+                params = list(t.parameters.get("properties", {}).keys())
+                params_hint = f"({', '.join(params)})" if params else "()"
+                lines.append(f"  {t.name}{params_hint} — {t.description}")
         # Add quick state summaries for todo + experiments
         _todo_path = self._path("todos.json")
         _exp_path = self._path("experiments.json")
@@ -316,6 +329,7 @@ def _build_todo_tools(
             "required": ["text"],
         },
         handler=add_todo,
+        mode="write",
     ))
 
     # --- complete_todo ---
@@ -346,6 +360,7 @@ def _build_todo_tools(
             "required": ["id"],
         },
         handler=complete_todo,
+        mode="write",
     ))
 
     # --- remove_todo ---
@@ -373,6 +388,7 @@ def _build_todo_tools(
             "required": ["id"],
         },
         handler=remove_todo,
+        mode="write",
     ))
 
 
@@ -495,6 +511,7 @@ def _build_experiment_tools(
             "required": ["name", "hypothesis"],
         },
         handler=create_experiment,
+        mode="write",
     ))
 
     # --- log_data ---
@@ -542,6 +559,7 @@ def _build_experiment_tools(
             "required": ["experiment_name", "observation"],
         },
         handler=log_data,
+        mode="write",
     ))
 
     # --- read_experiment ---
@@ -615,6 +633,7 @@ def _build_experiment_tools(
             "required": ["name", "conclusion"],
         },
         handler=close_experiment,
+        mode="write",
     ))
 
 
@@ -666,6 +685,7 @@ def _build_tagline_tool(
             "required": ["text"],
         },
         handler=update_tagline,
+        mode="write",
     ))
 
 
@@ -790,6 +810,7 @@ def _build_temp_control_tools(
             "required": ["key", "value", "duration_cycles"],
         },
         handler=set_temporary_control,
+        mode="write",
     ))
 
     # --- list_temporary_overrides ---

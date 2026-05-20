@@ -1178,7 +1178,7 @@ def main():
         chat = registry.create_chat(
             model_id=conscious_model,
             system_instruction=kernel,
-            max_output_tokens=16384,
+            max_output_tokens=32768,
             temperature=cycle_temperature,
             tools=_chat_tools,
         )
@@ -1532,7 +1532,7 @@ def main():
                                 model_id=conscious_model,
                                 system_instruction=kernel,
                                 temperature=cycle_temperature,
-                                max_output_tokens=16384,
+                                max_output_tokens=32768,
                                 tools=_chat_tools,
                             )
                             plan = plan_next_action(paid_chat, prompt, telemetry=telemetry, brain_name=brain_name, budget=budget, tool_registry=tool_registry)
@@ -1565,7 +1565,7 @@ def main():
                                     model_id=_candidate,
                                     system_instruction=kernel,
                                     temperature=cycle_temperature,
-                                    max_output_tokens=16384,
+                                    max_output_tokens=32768,
                                     tools=_chat_tools,
                                 )
                                 plan = plan_next_action(chat, prompt, telemetry=telemetry, brain_name=brain_name, budget=budget, tool_registry=tool_registry)
@@ -1595,6 +1595,32 @@ def main():
                 safe_print(f"{Fore.CYAN}--- REASONING ---")
                 safe_print(f"{Fore.WHITE}{preamble}")
                 safe_print(f"{Fore.CYAN}-----------------{Style.RESET_ALL}")
+
+            # Execute write tool_actions from the JSON response (add_todo, log_data, etc.)
+            # These are "write" tools that don't need to return data to the model —
+            # they ride along in the response like controls_update, zero API overhead.
+            _tool_actions = plan.pop("tool_actions", None) or []
+            if _tool_actions and isinstance(_tool_actions, list):
+                for _ta in _tool_actions:
+                    _ta_name = _ta.get("tool", "")
+                    _ta_args = _ta.get("args", {})
+                    _tool_def = tool_registry.get(_ta_name) if tool_registry else None
+                    if _tool_def and _tool_def.mode == "write":
+                        try:
+                            _ta_result = _tool_def.handler(**_ta_args)
+                            emit_status("[TOOL]", f"{_ta_name}({', '.join(f'{k}={v}' for k,v in list(_ta_args.items())[:2])}) → ok",
+                                        color=Fore.CYAN, cycle=iteration)
+                        except Exception as _ta_err:
+                            emit_status("[TOOL]", f"{_ta_name} failed: {_ta_err}",
+                                        color=Fore.RED, cycle=iteration)
+                    elif _ta_name:
+                        emit_status("[TOOL]", f"{_ta_name} skipped (not a write tool or not found)",
+                                    color=Fore.YELLOW, cycle=iteration)
+                # Log to telemetry
+                telemetry.log("tool_actions", {
+                    "cycle": iteration,
+                    "actions": [{"tool": a.get("tool"), "args": a.get("args", {})} for a in _tool_actions],
+                })
 
             # Extract and save memory_note to hierarchical memory
             memory_note = (plan.pop("memory_note", None) or "").strip()
