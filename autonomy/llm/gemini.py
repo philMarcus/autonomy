@@ -281,7 +281,7 @@ class GeminiChatSession(ChatSession):
             time.sleep(sleep_s)
 
         # Build contents: history + new user message
-        contents = list(self._history) + [
+        base_contents = list(self._history) + [
             types.Content(role="user", parts=[types.Part(text=prompt)])
         ]
 
@@ -294,6 +294,37 @@ class GeminiChatSession(ChatSession):
             config_kwargs["system_instruction"] = self._system_instruction
         if json_mode:
             config_kwargs["response_mime_type"] = "application/json"
+
+        # --- Context caching: cache the base prompt so tool rounds pay 90% less ---
+        # The base prompt (kernel + memory + feed + controls) is 20-30K tokens and
+        # identical across all rounds. Caching it means rounds 2+ only pay full
+        # price for the tool call/response delta (~2-5K tokens).
+        _cache_name = None
+        contents = base_contents  # default: no caching, send everything
+        try:
+            cache_config = types.CreateCachedContentConfig(
+                display_name=f"planner-{id(self)}",
+                system_instruction=self._system_instruction or "",
+                contents=base_contents,
+                tools=combined_tools,
+                ttl="120s",
+            )
+            _cache = self._client.caches.create(
+                model=self.model_name,
+                config=cache_config,
+            )
+            _cache_name = _cache.name
+            # With caching: first round sends empty contents (all in cache),
+            # subsequent rounds send only tool call/response turns.
+            config_kwargs.pop("system_instruction", None)
+            config_kwargs.pop("tools", None)
+            config_kwargs["cached_content"] = _cache_name
+            contents = []  # base is in cache
+            log.info("Context cache created: %s (%d chars prompt)", _cache_name, prompt_chars)
+        except Exception as _cache_err:
+            log.debug("Context caching unavailable (%s), using full prompt each round", _cache_err)
+            # Fall back to no caching — contents stays as base_contents
+            contents = base_contents
 
         # --- Multi-round tool loop -----------------------------------------------
         total_input_tokens = 0
@@ -416,6 +447,15 @@ class GeminiChatSession(ChatSession):
             )
 
         BUDGET.reset_backoff()
+
+        # Clean up the context cache (if created)
+        if _cache_name:
+            try:
+                self._client.caches.delete(name=_cache_name)
+                log.debug("Context cache deleted: %s", _cache_name)
+            except Exception:
+                pass  # best-effort cleanup; cache TTL will expire anyway
+
         return raw
 
 
