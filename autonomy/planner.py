@@ -427,8 +427,11 @@ def build_planner_prompt(
     if daemon_active:
         meta_fields_base += ', daemon_directives'
         meta_example_base += '"daemon_directives": {"focus_topics": [], "note": ""}, '
-    meta_fields_base += ', vetoed_actions'
-    meta_example_base += '"vetoed_actions": [{"action_type": "REPLY", "target_or_topic": "...", "veto_reason": "..."}], '
+    meta_fields_base += ', tool_actions, vetoed_actions'
+    meta_example_base += (
+        '"tool_actions": [{"tool": "log_data", "args": {"experiment_name": "...", "observation": "..."}}], '
+        '"vetoed_actions": [{"action_type": "REPLY", "target_or_topic": "...", "veto_reason": "..."}], '
+    )
     meta_fields_note = meta_fields_base + ' fields'
     meta_example = meta_example_base
 
@@ -601,7 +604,7 @@ DEV_REQUEST (request a change to your own software or Analog Home — your creat
 ALL responses must include {meta_fields_note}:
 {{{meta_example}"action":"...", ... other action fields ...}}
 
-BUDGET NOTE: Your total output budget (thinking + visible response) is 16384 tokens.
+BUDGET NOTE: Your total output budget (thinking + visible response) is 32768 tokens.
 Your visible JSON response must be complete and valid. Keep thinking concise so enough tokens remain for a full JSON response (especially for POST actions with long content).
 """.strip()
 
