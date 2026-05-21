@@ -1245,6 +1245,26 @@ def main():
             **({"analog_controls": analog_controls} if analog_controls else {}),
         })
 
+        # --- Retry queue: re-attempt actions that failed last cycle (API 500s, timeouts) ---
+        _retry_queue = state.get("_retry_queue", [])
+        if _retry_queue and platform:
+            _retry = _retry_queue.pop(0)
+            state["_retry_queue"] = _retry_queue
+            _rp = _retry.get("plan", {})
+            emit_status("[RETRY]", f"Retrying from cycle {_retry.get('cycle')}: {_rp.get('action')} '{_rp.get('title','')[:40]}'",
+                        color=Fore.YELLOW, cycle=iteration)
+            try:
+                _retry_ok = execute_action(platform, state, _rp, flags, username, telemetry, store=store)
+                if _retry_ok:
+                    emit_status("[RETRY]", "Retry succeeded!", color=Fore.GREEN, cycle=iteration)
+                else:
+                    emit_status("[RETRY]", "Retry returned False — action may have been skipped",
+                                color=Fore.YELLOW, cycle=iteration)
+            except Exception as _retry_err:
+                emit_status("[RETRY]", f"Retry failed again: {_retry_err}", color=Fore.RED, cycle=iteration)
+                # Don't re-queue — it's had two chances
+            store.save_state(state)
+
         # --- Feed context (reads decoupled from writes) ---
         feed_sources = []
         source_errors: Dict[str, str] = {}
@@ -1673,13 +1693,7 @@ def main():
                     "actions": [{"tool": a.get("tool"), "args": a.get("args", {})} for a in _tool_actions],
                 })
 
-            # Extract vetoed_actions (structured "paths not taken" — agent dev request c360)
-            vetoed_actions = plan.pop("vetoed_actions", None) or []
-            if vetoed_actions and isinstance(vetoed_actions, list):
-                telemetry.log("vetoed_actions", {
-                    "cycle": iteration,
-                    "vetoes": vetoed_actions[:10],
-                })
+
 
             # Extract and save memory_note to hierarchical memory
             memory_note = (plan.pop("memory_note", None) or "").strip()
@@ -1998,20 +2012,19 @@ def main():
                         report_parts.append(f"[conscious] {_k} → {_v}")
                     if _accountant_reasoning:
                         report_parts.append(f"Accountant: {_accountant_reasoning}")
-                # Tool calls made during this cycle's planning
+                # Tool usage this cycle: read tools (called during reasoning) + write tools (JSON output)
                 _tcl = getattr(chat, "_tool_call_log", [])
-                if _tcl:
+                _all_tools = []
+                for _tc in _tcl:
+                    _args_str = ", ".join(f"{k}={v}" for k, v in _tc.get("args", {}).items())
+                    _all_tools.append(f"  ↳ {_tc['tool']}({_args_str[:80]})")
+                for _ta in (_tool_actions if isinstance(_tool_actions, list) else []):
+                    _ta_args = ", ".join(f"{k}={v}" for k, v in list(_ta.get("args", {}).items())[:2])
+                    _all_tools.append(f"  → {_ta.get('tool','')}({_ta_args[:80]})")
+                if _all_tools:
                     report_parts.append("")
-                    report_parts.append(f"Tools called: {len(_tcl)}")
-                    for _tc in _tcl:
-                        _args_str = ", ".join(f"{k}={v}" for k, v in _tc.get("args", {}).items())
-                        report_parts.append(f"  {_tc['tool']}({_args_str[:100]})")
-                # Vetoed actions (structured "paths not taken")
-                if vetoed_actions and isinstance(vetoed_actions, list):
-                    report_parts.append("")
-                    report_parts.append(f"Paths not taken: {len(vetoed_actions)}")
-                    for v in vetoed_actions[:5]:
-                        report_parts.append(f"  ✗ {v.get('action_type','?')}: {v.get('target_or_topic','')[:60]} — {v.get('veto_reason','')[:80]}")
+                    report_parts.append(f"Tools used: {len(_all_tools)}")
+                    report_parts.extend(_all_tools)
                 store.write_artifact(iteration, {
                     "brain": brain_name,
                     "artifact_type": "system_cycle_report",
@@ -2265,6 +2278,24 @@ def main():
                 fallback_plan = None
                 try:
                     executed = execute_action(platform, state, plan, flags, username, telemetry, store=store)
+                except ValueError as api_err:
+                    # Moltbook API failure (500, timeout, etc.) — save plan for retry next cycle.
+                    # Content would otherwise be lost since the planner won't regenerate it.
+                    emit_status("[ERROR]", f"Action failed: {api_err}", color=Fore.RED, cycle=iteration)
+                    _retry_queue = state.setdefault("_retry_queue", [])
+                    _retry_entry = {
+                        "cycle": iteration,
+                        "plan": {k: v for k, v in plan.items()
+                                 if k in ("action", "post_id", "parent_comment_id",
+                                          "content", "title", "submolt", "summary")},
+                        "error": str(api_err)[:200],
+                    }
+                    _retry_queue.append(_retry_entry)
+                    # Keep only last 3 retries
+                    state["_retry_queue"] = _retry_queue[-3:]
+                    store.save_state(state)
+                    emit_status("[RETRY]", f"Saved for retry next cycle: {plan.get('action')} '{plan.get('title','')[:40]}'",
+                                color=Fore.YELLOW, cycle=iteration)
                 except ActionBlocked as ab:
                     telemetry.log("action_blocked", {"cycle": iteration, "action": ab.action, "reason": ab.reason})
                     safe_print(f"{Fore.RED}[ERROR] {ab.reason}")

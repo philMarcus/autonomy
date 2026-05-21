@@ -1218,39 +1218,6 @@ def _build_self_awareness_tools(
         handler=get_dev_requests,
     ))
 
-    # --- get_veto_history ---
-    def get_veto_history(last_n: int = 20) -> Dict[str, Any]:
-        """Get past vetoed_actions from telemetry — paths you chose not to take."""
-        events = _scan_telemetry("vetoed_actions", limit=last_n)
-        vetoes = []
-        for e in events:
-            cycle = e.get("cycle")
-            for v in e.get("vetoes", []):
-                vetoes.append({
-                    "cycle": cycle,
-                    "action_type": v.get("action_type", ""),
-                    "target_or_topic": v.get("target_or_topic", "")[:100],
-                    "veto_reason": v.get("veto_reason", "")[:150],
-                })
-                if len(vetoes) >= last_n:
-                    break
-            if len(vetoes) >= last_n:
-                break
-        return {"vetoes": vetoes[:last_n], "total_found": len(vetoes)}
-
-    registry.register(ToolDef(
-        name="get_veto_history",
-        description="Review your past vetoed actions — paths you explicitly considered and rejected. "
-                    "Useful for spotting patterns in your decision-making.",
-        parameters={
-            "type": "object",
-            "properties": {
-                "last_n": {"type": "integer", "description": "How many vetoes to return. Default: 20."},
-            },
-            "required": [],
-        },
-        handler=get_veto_history,
-    ))
 
 
 def _build_moltbook_retrieval_tools(registry: ToolRegistry, platform: Any) -> None:
