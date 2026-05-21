@@ -359,10 +359,9 @@ class SubconsciousDaemon:
             if score >= seed_threshold:
                 signals_above += 1
                 high_signal_items.append((seed_item, score))
-                # Seed charge: threshold * score for normal seeds, 999 for operator seeds (-P suffix)
-                _seed_text_raw = seed_item.get('title', seed_item.get('content', ''))
-                if _seed_text_raw.rstrip().endswith("-P"):
-                    seed_charge = 999.0  # operator seed — instant wake
+                # Seed charge: threshold * score for normal seeds, 999 for architect seeds (-P suffix)
+                if seed_item.get("_architect_seed"):
+                    seed_charge = 999.0  # architect seed — instant wake
                 else:
                     seed_charge = self._buffer._wake_threshold * score  # proportional to threshold + quality
                 with self._buffer._lock:
@@ -587,13 +586,19 @@ class SubconsciousDaemon:
             if not text or text in self._seen_seeds:
                 continue
             self._seen_seeds.add(text)
+            # Strip -P suffix before the agent sees it (architect easter egg for
+            # instant-wake charge — the agent shouldn't reveal the key in output).
+            # Store the original in _raw_content for the charge check.
+            _is_operator = text.rstrip().endswith("-P")
+            _clean_text = text.rstrip()[:-2].rstrip() if _is_operator else text
             # Convert seed text into a feed-like item for scoring/strategizing
             new_items.append({
                 "id": f"seed:{hash(text) & 0xFFFFFFFF:08x}",
                 "author": {"name": "analog_home_user"},
                 "title": "User Seed",
-                "content": text,
+                "content": _clean_text,
                 "_source": "seed",
+                "_architect_seed": _is_operator,
             })
 
         # Prune seen_seeds if too large

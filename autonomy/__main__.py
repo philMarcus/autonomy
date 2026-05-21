@@ -77,7 +77,8 @@ def _format_draft_context(drafts: list, saved_plans: list,
             lines.append(f"\n{i}. [sentry score: {d.signal_score:.2f}]{source_tag}{model_tag} {d.target_summary}")
             lines.append(f"   Suggested: {d.suggested_action} — {d.reasoning}")
             if d.draft_content:
-                lines.append(f"   Draft: {d.draft_content[:200]}")
+                _draft_label = "Rough draft (use as inspiration, rewrite in your voice)" if d.source == "muse" else "Draft"
+                lines.append(f"   {_draft_label}: {d.draft_content[:200]}")
         lines.append(f"\nWake potential: {wake_potential:.2f} (threshold: {threshold:.1f})")
     if saved_plans:
         lines.append(f"\nSAVED PLANS ({len(saved_plans)} from previous cycles — use or discard):")
@@ -88,7 +89,8 @@ def _format_draft_context(drafts: list, saved_plans: list,
             lines.append(f"\n  S{i}. [sentry score: {d.signal_score:.2f}]{source_tag}{model_tag} {d.target_summary} ({age})")
             lines.append(f"      Suggested: {d.suggested_action} — {d.reasoning}")
             if d.draft_content:
-                lines.append(f"      Draft: {d.draft_content[:200]}")
+                _draft_label = "Rough draft (use as inspiration, rewrite in your voice)" if d.source == "muse" else "Draft"
+                lines.append(f"      {_draft_label}: {d.draft_content[:200]}")
     if digest:
         lines.append("\nYour subconscious also noticed these less-prominent themes (lower-scoring drafts, summarized):")
         lines.append(digest)
