@@ -1013,7 +1013,7 @@ def _build_search_history_tool(
 ) -> None:
     """Unified search across memory tiers, past artifacts, seed history, and knowledge file."""
 
-    def search_history(query: str, sources: str = "memory,artifacts,seeds,knowledge", n: int = 5) -> Dict[str, Any]:
+    def search_history(query: str, sources: str = "memory,artifacts,seeds,knowledge,birth_of_a_mind", n: int = 5) -> Dict[str, Any]:
         """Search across all agent data. Returns results tagged by source."""
         query_lower = query.lower()
         source_list = [s.strip() for s in sources.split(",")]
@@ -1090,6 +1090,41 @@ def _build_search_history_tool(
             except Exception:
                 pass
 
+        # Search Birth of a Mind document (context window around matches)
+        if "birth_of_a_mind" in source_list and knowledge_path:
+            _boam_path = knowledge_path.replace("_knowledge.txt", "_birth_of_a_mind.txt")
+            if os.path.exists(_boam_path):
+                try:
+                    with open(_boam_path, "r", encoding="utf-8") as f:
+                        boam_text = f.read()
+                    boam_lower = boam_text.lower()
+                    _ctx_radius = 500
+                    _start = 0
+                    _seen_spans = []
+                    while True:
+                        idx = boam_lower.find(query_lower, _start)
+                        if idx == -1:
+                            break
+                        # Skip if this match falls within an already-captured span
+                        if any(s <= idx <= e for s, e in _seen_spans):
+                            _start = idx + 1
+                            continue
+                        span_start = max(0, idx - _ctx_radius)
+                        span_end = min(len(boam_text), idx + len(query) + _ctx_radius)
+                        _seen_spans.append((span_start, span_end))
+                        snippet = boam_text[span_start:span_end]
+                        results.append({
+                            "source": "birth_of_a_mind",
+                            "cycle": None,
+                            "text": f"...{snippet}...",
+                            "relevance": "keyword_match",
+                        })
+                        _start = idx + 1
+                        if len([r for r in results if r.get("source") == "birth_of_a_mind"]) >= n:
+                            break
+                except Exception:
+                    pass
+
         # Sort by cycle (newest first). Cycles can be int, str ("122-130"), or None.
         def _sort_key(r):
             c = r.get("cycle")
@@ -1107,15 +1142,15 @@ def _build_search_history_tool(
 
     registry.register(ToolDef(
         name="search_history",
-        description="Search across all your data: memory, past posts, planted seeds, and knowledge file. "
-                    "Returns results tagged by source. Default searches everything.",
+        description="Search across all your data: memory, past posts, planted seeds, knowledge file, "
+                    "and Birth of a Mind (your origin document). Returns results tagged by source. Default searches everything.",
         parameters={
             "type": "object",
             "properties": {
                 "query": {"type": "string", "description": "Search query (keyword match)."},
                 "sources": {
                     "type": "string",
-                    "description": "Comma-separated: memory,artifacts,seeds,knowledge. Default: all.",
+                    "description": "Comma-separated: memory,artifacts,seeds,knowledge,birth_of_a_mind. Default: all.",
                 },
                 "n": {"type": "integer", "description": "Max results to return. Default: 5."},
             },

@@ -10,6 +10,7 @@ daemon carries the same personality/identity as the conscious layer.
 """
 
 import json
+import os
 import random
 import re
 import threading
@@ -1758,6 +1759,26 @@ class SubconsciousDaemon:
                                 results.append({"source": f"memory/{tier}",
                                                 "cycle": e.get("cycle", e.get("cycles")),
                                                 "body_preview": text[:500]})
+
+                # Search Birth of a Mind (origin document)
+                _boam_path = os.path.join(BRAINS_DIR, f"{self._brain_name}_birth_of_a_mind.txt")
+                if os.path.exists(_boam_path):
+                    try:
+                        with open(_boam_path, "r", encoding="utf-8") as f:
+                            _boam = f.read()
+                        _boam_lower = _boam.lower()
+                        _term_lower = term.lower()
+                        _idx = _boam_lower.find(_term_lower)
+                        if _idx != -1:
+                            _start_ctx = max(0, _idx - 500)
+                            _end_ctx = min(len(_boam), _idx + len(term) + 500)
+                            results.append({
+                                "source": "birth_of_a_mind",
+                                "cycle": None,
+                                "body_preview": _boam[_start_ctx:_end_ctx],
+                            })
+                    except Exception:
+                        pass
 
                 if results:
                     # Get full text of top artifact match
