@@ -353,9 +353,10 @@ class GeminiChatSession(ChatSession):
                       round_idx, len(tool_calls),
                       ", ".join(tc.name for tc in tool_calls))
 
-            # Lazy context caching: create cache NOW (first time we need round 2+).
-            # Round 1 already ran with full contents. For round 2+, cache the base
-            # so we only pay 10% for the repeated 24K prompt.
+            # Lazy context caching: cache the base prompt so round 2+ pays 90% less.
+            # The cache holds the base (system instruction + initial prompt + tool decls).
+            # contents is reset to [] so round 2 only sends the tool call/response
+            # turns as delta — these get appended below.
             if not _cache_name and round_idx == 0:
                 try:
                     cache_config = types.CreateCachedContentConfig(
@@ -370,11 +371,10 @@ class GeminiChatSession(ChatSession):
                         config=cache_config,
                     )
                     _cache_name = _cache.name
-                    # Switch to cached mode for subsequent rounds
                     config_kwargs.pop("system_instruction", None)
                     config_kwargs.pop("tools", None)
                     config_kwargs["cached_content"] = _cache_name
-                    # Reset contents — base is now in cache, only send tool turns
+                    # Start fresh — tool call/response turns appended below
                     contents = []
                     log.info("Context cache created (lazy): %s", _cache_name)
                 except Exception as _cache_err:
