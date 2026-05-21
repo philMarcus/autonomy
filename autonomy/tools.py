@@ -636,6 +636,48 @@ def _build_experiment_tools(
         mode="write",
     ))
 
+    # --- edit_experiment ---
+    def edit_experiment(name: str, hypothesis: str = "", method: str = "",
+                        review_at_cycle: int = None) -> Dict[str, Any]:
+        """Edit an existing experiment's metadata (hypothesis, method, review_at_cycle)."""
+        experiments = _load_experiments()
+        exp = _find_experiment(experiments, name)
+        if not exp:
+            return {"error": f"Experiment '{name}' not found."}
+        if exp.get("status") != "active":
+            return {"error": f"Experiment '{name}' is {exp.get('status')}, not active."}
+        changed = []
+        if hypothesis:
+            exp["hypothesis"] = hypothesis
+            changed.append("hypothesis")
+        if method:
+            exp["method"] = method
+            changed.append("method")
+        if review_at_cycle is not None:
+            exp["review_at_cycle"] = review_at_cycle
+            changed.append(f"review_at_cycle={review_at_cycle}")
+        if not changed:
+            return {"error": "No fields to update. Provide hypothesis, method, or review_at_cycle."}
+        _save_experiments(experiments)
+        return {"name": name, "updated": changed}
+
+    registry.register(ToolDef(
+        name="edit_experiment",
+        description="Edit an active experiment's metadata: update hypothesis, method, or set an end cycle.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Experiment name."},
+                "hypothesis": {"type": "string", "description": "New hypothesis (leave empty to keep current)."},
+                "method": {"type": "string", "description": "New method (leave empty to keep current)."},
+                "review_at_cycle": {"type": "integer", "description": "Reminder: review/conclude the experiment around this cycle. Nothing automatic — just a note to self."},
+            },
+            "required": ["name"],
+        },
+        handler=edit_experiment,
+        mode="write",
+    ))
+
 
 # ============================================================
 # Tagline tool
@@ -1062,9 +1104,10 @@ def _build_search_history_tool(
 def _build_self_awareness_tools(
     registry: ToolRegistry, state: Dict[str, Any], brain_name: str, telemetry_dir: str,
 ) -> None:
-    """Register self-awareness tools: control history, changelog, dev requests."""
+    """Register self-awareness tools: control history, dev requests, kernel history."""
 
     telemetry_path = os.path.join(telemetry_dir, f"{brain_name}_events.jsonl") if telemetry_dir else ""
+    kernel_history_path = os.path.join(telemetry_dir, f"{brain_name}_kernel_history.jsonl") if telemetry_dir else ""
 
     def _scan_telemetry(event_type: str, max_lines: int = 5000, limit: int = 20) -> List[Dict]:
         """Scan recent telemetry for events of a given type."""
@@ -1158,6 +1201,46 @@ def _build_self_awareness_tools(
         handler=get_dev_requests,
     ))
 
+    # --- get_kernel_history ---
+    def get_kernel_history(last_n: int = 5) -> Dict[str, Any]:
+        """Get the history of kernel prompt versions (full text of each)."""
+        if not kernel_history_path or not os.path.exists(kernel_history_path):
+            return {"error": "Kernel history not found.", "versions": []}
+        versions = []
+        try:
+            with open(kernel_history_path, "r", encoding="utf-8") as f:
+                lines = f.readlines()
+            for line in reversed(lines):
+                try:
+                    e = json.loads(line)
+                    versions.append({
+                        "timestamp": e.get("ts", "")[:19],
+                        "reason": e.get("reason", ""),
+                        "source": e.get("source", ""),
+                        "char_count": e.get("char_count", 0),
+                        "text": e.get("kernel_text", "")[:1000],
+                    })
+                    if len(versions) >= last_n:
+                        break
+                except (json.JSONDecodeError, KeyError):
+                    continue
+        except Exception:
+            pass
+        return {"versions": versions, "total_found": len(versions)}
+
+    registry.register(ToolDef(
+        name="get_kernel_history",
+        description="See the history of your kernel prompt versions — when each was written, why, "
+                    "and the first 1000 chars of each version. Use to review how you've evolved.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "last_n": {"type": "integer", "description": "How many versions to return (newest first). Default: 5."},
+            },
+            "required": [],
+        },
+        handler=get_kernel_history,
+    ))
 
 
 def _build_moltbook_retrieval_tools(registry: ToolRegistry, platform: Any) -> None:
