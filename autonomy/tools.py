@@ -1022,31 +1022,28 @@ def _build_search_history_tool(
                             "relevance": "keyword_match",
                         })
 
-        # Search past artifacts via Analog Home API (current run only)
+        # Search ALL artifacts via server-side ILIKE (no client-side limit)
         _run_id = state.get("_session_id", "")
         if "artifacts" in source_list and store and getattr(store, '_analog_home_url', None):
             try:
                 import requests as _req
-                from urllib.parse import urljoin
-                _params = "limit=50&sort=desc"
+                from urllib.parse import urljoin, quote
+                _search_params = f"q={quote(query)}&limit={n}"
                 if _run_id:
-                    _params += f"&run_id={_run_id}"
+                    _search_params += f"&run_id={_run_id}"
                 url = urljoin(store._analog_home_url.rstrip("/") + "/",
-                              f"artifacts?{_params}")
-                resp = _req.get(url, timeout=10)
+                              f"artifacts/search?{_search_params}")
+                resp = _req.get(url, timeout=15)
                 if resp.ok:
                     for art in resp.json():
-                        title = art.get("title", "")
-                        body = art.get("body_markdown", "")
-                        if query_lower in title.lower() or query_lower in body.lower():
-                            results.append({
-                                "source": "artifacts",
-                                "cycle": art.get("cycle"),
-                                "type": art.get("artifact_type", ""),
-                                "id": art.get("id"),
-                                "title": title[:200],
-                                "text": body[:1000],
-                                "relevance": "keyword_match",
+                        results.append({
+                            "source": "artifacts",
+                            "cycle": art.get("cycle"),
+                            "type": art.get("artifact_type", ""),
+                            "id": art.get("id"),
+                            "title": art.get("title", "")[:200],
+                            "text": art.get("body_preview", "")[:1000],
+                            "relevance": "keyword_match",
                             })
             except Exception:
                 pass
