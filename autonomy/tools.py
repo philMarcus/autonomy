@@ -1202,10 +1202,11 @@ def _build_self_awareness_tools(
     ))
 
     # --- get_kernel_history ---
-    def get_kernel_history(last_n: int = 5) -> Dict[str, Any]:
-        """Get the history of kernel prompt versions (full text of each)."""
+    def get_kernel_history(last_n: int = 5, all_runs: bool = False) -> Dict[str, Any]:
+        """Get the history of kernel prompt versions from the current run."""
         if not kernel_history_path or not os.path.exists(kernel_history_path):
             return {"error": "Kernel history not found.", "versions": []}
+        current_run_id = state.get("_session_id", "")
         versions = []
         try:
             with open(kernel_history_path, "r", encoding="utf-8") as f:
@@ -1213,6 +1214,9 @@ def _build_self_awareness_tools(
             for line in reversed(lines):
                 try:
                     e = json.loads(line)
+                    # Filter to current run unless all_runs requested
+                    if not all_runs and current_run_id and e.get("run_id") != current_run_id:
+                        continue
                     versions.append({
                         "timestamp": e.get("ts", "")[:19],
                         "reason": e.get("reason", ""),
@@ -1226,16 +1230,18 @@ def _build_self_awareness_tools(
                     continue
         except Exception:
             pass
-        return {"versions": versions, "total_found": len(versions)}
+        return {"versions": versions, "total_found": len(versions),
+                "note": "current run only" if not all_runs else "all runs"}
 
     registry.register(ToolDef(
         name="get_kernel_history",
         description="See the history of your kernel prompt versions — when each was written, why, "
-                    "and the first 1000 chars of each version. Use to review how you've evolved.",
+                    "and the first 1000 chars of each version. Default: current run only.",
         parameters={
             "type": "object",
             "properties": {
                 "last_n": {"type": "integer", "description": "How many versions to return (newest first). Default: 5."},
+                "all_runs": {"type": "boolean", "description": "Include kernel versions from previous runs? Default: false (current run only)."},
             },
             "required": [],
         },
