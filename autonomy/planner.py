@@ -742,7 +742,7 @@ def _plan_with_tools(chat, prompt, tool_registry,
             prompt,
             tool_schemas=tool_schemas,
             tool_executor=executor,
-            max_rounds=3,
+            max_rounds=12,
             json_mode=False,  # we parse JSON ourselves from the text response
         )
     except Exception as e:
