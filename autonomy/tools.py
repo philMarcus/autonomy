@@ -941,8 +941,7 @@ def build_tool_registry(
     _build_web_search_tool(registry)
 
     # Sprint 2 tools
-    _build_search_history_tool(registry, state, store, brain_name)
-    _build_knowledge_search_tool(registry, knowledge_path)
+    _build_search_history_tool(registry, state, store, brain_name, knowledge_path=knowledge_path)
     _build_self_awareness_tools(registry, state, brain_name, telemetry_dir)
     if platform:
         _build_moltbook_retrieval_tools(registry, platform)
@@ -957,11 +956,12 @@ def build_tool_registry(
 
 def _build_search_history_tool(
     registry: ToolRegistry, state: Dict[str, Any], store: Any, brain_name: str,
+    knowledge_path: str = "",
 ) -> None:
-    """Unified search across memory tiers, past artifacts (posts), and seed history."""
+    """Unified search across memory tiers, past artifacts, seed history, and knowledge file."""
 
-    def search_history(query: str, sources: str = "memory,posts,seeds", n: int = 5) -> Dict[str, Any]:
-        """Search across memory, posts, and seeds. Returns results tagged by source."""
+    def search_history(query: str, sources: str = "memory,posts,seeds,knowledge", n: int = 5) -> Dict[str, Any]:
+        """Search across all agent data. Returns results tagged by source."""
         query_lower = query.lower()
         source_list = [s.strip() for s in sources.split(",")]
         results: List[Dict[str, Any]] = []
@@ -1016,21 +1016,40 @@ def _build_search_history_tool(
                         "relevance": "keyword_match",
                     })
 
-        # Sort by cycle (newest first) and limit
+        # Search knowledge file by section
+        if "knowledge" in source_list and knowledge_path and os.path.exists(knowledge_path):
+            try:
+                import re as _re
+                with open(knowledge_path, "r", encoding="utf-8") as f:
+                    ktext = f.read()
+                sections = _re.split(r'\n(?===\s)', ktext)
+                for section in sections:
+                    if query_lower in section.lower():
+                        header = section.strip().split("\n")[0].strip()[:100]
+                        results.append({
+                            "source": "knowledge",
+                            "cycle": None,
+                            "text": section.strip()[:400],
+                            "relevance": "keyword_match",
+                        })
+            except Exception:
+                pass
+
+        # Sort by cycle (newest first, knowledge entries last since cycle=None) and limit
         results.sort(key=lambda r: r.get("cycle") or 0, reverse=True)
         return {"query": query, "results": results[:n], "total_matches": len(results)}
 
     registry.register(ToolDef(
         name="search_history",
-        description="Search across your memory, past posts, and planted seeds. "
-                    "Returns results tagged by source. Use for 'what do I know about X?'",
+        description="Search across all your data: memory, past posts, planted seeds, and knowledge file. "
+                    "Returns results tagged by source. Default searches everything.",
         parameters={
             "type": "object",
             "properties": {
                 "query": {"type": "string", "description": "Search query (keyword match)."},
                 "sources": {
                     "type": "string",
-                    "description": "Comma-separated sources: memory,posts,seeds. Default: all.",
+                    "description": "Comma-separated: memory,posts,seeds,knowledge. Default: all.",
                 },
                 "n": {"type": "integer", "description": "Max results to return. Default: 5."},
             },
@@ -1038,53 +1057,6 @@ def _build_search_history_tool(
         },
         handler=search_history,
     ))
-
-
-def _build_knowledge_search_tool(registry: ToolRegistry, knowledge_path: str) -> None:
-    """Search the knowledge file by chunking and keyword matching."""
-
-    def search_knowledge(query: str, n: int = 3) -> Dict[str, Any]:
-        """Search the knowledge file for relevant sections."""
-        if not knowledge_path or not os.path.exists(knowledge_path):
-            return {"error": "Knowledge file not found."}
-        try:
-            with open(knowledge_path, "r", encoding="utf-8") as f:
-                text = f.read()
-        except Exception as e:
-            return {"error": str(e)}
-
-        # Split into sections by == headers ==
-        import re
-        sections = re.split(r'\n(?===\s)', text)
-        query_lower = query.lower()
-        matches = []
-        for section in sections:
-            if query_lower in section.lower():
-                # Extract the header (first line)
-                lines = section.strip().split("\n")
-                header = lines[0].strip() if lines else ""
-                matches.append({
-                    "header": header[:100],
-                    "text": section.strip()[:500],
-                    "relevance": "keyword_match",
-                })
-        return {"query": query, "results": matches[:n], "total_matches": len(matches)}
-
-    if knowledge_path:
-        registry.register(ToolDef(
-            name="search_knowledge",
-            description="Search your knowledge file for relevant sections by keyword. "
-                        "The knowledge file contains info about your creator, architecture, and context.",
-            parameters={
-                "type": "object",
-                "properties": {
-                    "query": {"type": "string", "description": "Search query."},
-                    "n": {"type": "integer", "description": "Max results. Default: 3."},
-                },
-                "required": ["query"],
-            },
-            handler=search_knowledge,
-        ))
 
 
 def _build_self_awareness_tools(
@@ -1152,38 +1124,6 @@ def _build_self_awareness_tools(
             "required": [],
         },
         handler=get_control_history,
-    ))
-
-    # --- get_changelog ---
-    def get_changelog(last_n: int = 5) -> Dict[str, Any]:
-        """Get recent architect updates from memory (entries starting with [ARCHITECT update])."""
-        entries = []
-        tiers = state.get("memory_tiers", {})
-        for tier_name in ("recent", "compressed", "deep"):
-            for entry in tiers.get(tier_name, []):
-                note = entry.get("note", "") or entry.get("summary", "")
-                if "[ARCHITECT update" in note or "[ARCHITECT Update" in note:
-                    entries.append({
-                        "cycle": entry.get("cycle", entry.get("cycles")),
-                        "tier": tier_name,
-                        "text": note[:500],
-                    })
-        # Most recent first
-        entries.sort(key=lambda e: str(e.get("cycle") or ""), reverse=True)
-        return {"updates": entries[:last_n], "total_found": len(entries)}
-
-    registry.register(ToolDef(
-        name="get_changelog",
-        description="See recent software updates from your architect (Phil). "
-                    "These are [ARCHITECT update] entries in your memory.",
-        parameters={
-            "type": "object",
-            "properties": {
-                "last_n": {"type": "integer", "description": "How many updates to return. Default: 5."},
-            },
-            "required": [],
-        },
-        handler=get_changelog,
     ))
 
     # --- get_dev_requests ---
