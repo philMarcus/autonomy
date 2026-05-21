@@ -1564,7 +1564,7 @@ def main():
                 emit_status("[CONSCIOUS]", f"→ {_con_short} ({_con_tag}) thinking...",
                             color=Fore.MAGENTA, cycle=iteration)
                 _con_t0 = time.time()
-                plan = plan_next_action(chat, prompt, telemetry=telemetry, brain_name=brain_name, budget=budget, tool_registry=tool_registry)
+                plan = plan_next_action(chat, prompt, telemetry=telemetry, brain_name=brain_name, budget=budget, tool_registry=tool_registry, max_rounds=int(ctrl.get("tool_max_rounds") or 12))
                 _con_elapsed = time.time() - _con_t0
                 emit_status("[CONSCIOUS]", f"← {plan.get('action','?')} ({_con_elapsed:.1f}s)",
                             color=Fore.MAGENTA, cycle=iteration)
@@ -1609,7 +1609,7 @@ def main():
                                 max_output_tokens=32768,
                                 tools=_chat_tools,
                             )
-                            plan = plan_next_action(paid_chat, prompt, telemetry=telemetry, brain_name=brain_name, budget=budget, tool_registry=tool_registry)
+                            plan = plan_next_action(paid_chat, prompt, telemetry=telemetry, brain_name=brain_name, budget=budget, tool_registry=tool_registry, max_rounds=int(ctrl.get("tool_max_rounds") or 12))
                             chat = paid_chat
                             _success = True
                         except Exception as _paid_err:
@@ -1642,7 +1642,7 @@ def main():
                                     max_output_tokens=32768,
                                     tools=_chat_tools,
                                 )
-                                plan = plan_next_action(chat, prompt, telemetry=telemetry, brain_name=brain_name, budget=budget, tool_registry=tool_registry)
+                                plan = plan_next_action(chat, prompt, telemetry=telemetry, brain_name=brain_name, budget=budget, tool_registry=tool_registry, max_rounds=int(ctrl.get("tool_max_rounds") or 12))
                                 conscious_model = _candidate  # update to actual model used
                                 _success = True
                                 break

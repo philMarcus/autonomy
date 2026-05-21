@@ -440,6 +440,10 @@ def build_default_registry(model_registry, blacklist_str: str = "") -> ControlRe
                 "Compressed post summaries before deep", "context", min_val=3, max_val=20),
         Control("post_memory_deep_cap", "int", 5,
                 "Deep post summaries before ultra-compression", "context", min_val=2, max_val=10),
+        Control("tool_max_rounds", "int", 12,
+                "Max tool-calling rounds per conscious cycle. Each round lets the model "
+                "call lookup tools and receive results before producing its final action.",
+                "llm", min_val=1, max_val=30),
         Control("max_drafts", "int", 40,
                 "Max non-muse drafts in buffer before compression", "daemon", min_val=10, max_val=200),
         Control("max_saved_plans", "int", 15,

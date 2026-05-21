@@ -679,7 +679,8 @@ def plan_next_action(chat: ChatSession, prompt: str,
                      telemetry: Optional[TelemetryLogger] = None,
                      brain_name: str = "",
                      budget: Optional[DailyBudget] = None,
-                     tool_registry=None) -> Dict[str, Any]:
+                     tool_registry=None,
+                     max_rounds: int = 12) -> Dict[str, Any]:
     """Plan the next action. If tool_registry is provided and the chat backend
     supports tool calling, the model may call tools during reasoning before
     producing its final JSON action.
@@ -687,7 +688,8 @@ def plan_next_action(chat: ChatSession, prompt: str,
     if tool_registry and hasattr(chat, 'send_message_with_tools'):
         # Tool-augmented path: model can call tools, then returns final JSON
         plan = _plan_with_tools(chat, prompt, tool_registry,
-                                telemetry=telemetry, brain_name=brain_name, budget=budget)
+                                telemetry=telemetry, brain_name=brain_name, budget=budget,
+                                max_rounds=max_rounds)
     else:
         # Classic path: single-turn JSON
         plan = parse_json_with_one_repair(
@@ -714,7 +716,7 @@ def plan_next_action(chat: ChatSession, prompt: str,
 
 
 def _plan_with_tools(chat, prompt, tool_registry,
-                     telemetry=None, brain_name="", budget=None):
+                     telemetry=None, brain_name="", budget=None, max_rounds=12):
     """Tool-augmented planning: model may call tools, then returns final JSON action."""
     import json as _json
 
@@ -742,7 +744,7 @@ def _plan_with_tools(chat, prompt, tool_registry,
             prompt,
             tool_schemas=tool_schemas,
             tool_executor=executor,
-            max_rounds=12,
+            max_rounds=max_rounds,
             json_mode=False,  # we parse JSON ourselves from the text response
         )
     except Exception as e:
