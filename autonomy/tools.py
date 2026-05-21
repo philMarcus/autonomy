@@ -1002,7 +1002,7 @@ def _build_search_history_tool(
 ) -> None:
     """Unified search across memory tiers, past artifacts, seed history, and knowledge file."""
 
-    def search_history(query: str, sources: str = "memory,posts,seeds,knowledge", n: int = 5) -> Dict[str, Any]:
+    def search_history(query: str, sources: str = "memory,artifacts,seeds,knowledge", n: int = 5) -> Dict[str, Any]:
         """Search across all agent data. Returns results tagged by source."""
         query_lower = query.lower()
         source_list = [s.strip() for s in sources.split(",")]
@@ -1018,13 +1018,13 @@ def _build_search_history_tool(
                         results.append({
                             "source": f"memory/{tier_name}",
                             "cycle": entry.get("cycle", entry.get("cycles")),
-                            "text": text[:300],
+                            "text": text[:1000],
                             "relevance": "keyword_match",
                         })
 
         # Search past artifacts via Analog Home API (current run only)
         _run_id = state.get("_session_id", "")
-        if "posts" in source_list and store and getattr(store, '_analog_home_url', None):
+        if "artifacts" in source_list and store and getattr(store, '_analog_home_url', None):
             try:
                 import requests as _req
                 from urllib.parse import urljoin
@@ -1040,11 +1040,12 @@ def _build_search_history_tool(
                         body = art.get("body_markdown", "")
                         if query_lower in title.lower() or query_lower in body.lower():
                             results.append({
-                                "source": "posts",
+                                "source": "artifacts",
                                 "cycle": art.get("cycle"),
                                 "type": art.get("artifact_type", ""),
-                                "title": title[:100],
-                                "text": body[:300],
+                                "id": art.get("id"),
+                                "title": title[:200],
+                                "text": body[:1000],
                                 "relevance": "keyword_match",
                             })
             except Exception:
@@ -1058,7 +1059,7 @@ def _build_search_history_tool(
                     results.append({
                         "source": "seeds",
                         "cycle": seed.get("cycle"),
-                        "text": text[:200],
+                        "text": text[:500],
                         "relevance": "keyword_match",
                     })
 
@@ -1095,13 +1096,53 @@ def _build_search_history_tool(
                 "query": {"type": "string", "description": "Search query (keyword match)."},
                 "sources": {
                     "type": "string",
-                    "description": "Comma-separated: memory,posts,seeds,knowledge. Default: all.",
+                    "description": "Comma-separated: memory,artifacts,seeds,knowledge. Default: all.",
                 },
                 "n": {"type": "integer", "description": "Max results to return. Default: 5."},
             },
             "required": ["query"],
         },
         handler=search_history,
+    ))
+
+    # --- get_post (full text of a specific artifact) ---
+    def get_post(id: int) -> Dict[str, Any]:
+        """Get the full text of a specific artifact by ID."""
+        if not store or not getattr(store, '_analog_home_url', None):
+            return {"error": "Analog Home not available."}
+        try:
+            import requests as _req
+            from urllib.parse import urljoin
+            url = urljoin(store._analog_home_url.rstrip("/") + "/",
+                          f"artifacts/{id}")
+            resp = _req.get(url, timeout=10)
+            if not resp.ok:
+                return {"error": f"Artifact {id} not found (HTTP {resp.status_code})."}
+            art = resp.json()
+            return {
+                "id": art.get("id"),
+                "cycle": art.get("cycle"),
+                "artifact_type": art.get("artifact_type", ""),
+                "title": art.get("title", ""),
+                "body": art.get("body_markdown", ""),
+                "monologue": art.get("monologue_public", "")[:500],
+                "created_at": art.get("created_at", "")[:19],
+            }
+        except Exception as e:
+            return {"error": str(e)[:200]}
+
+    registry.register(ToolDef(
+        name="get_post",
+        description="Get the full text of one of your past posts/comments/artifacts by ID. "
+                    "Use after search_history returns a match you want to read in full.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "id": {"type": "integer", "description": "The artifact ID (from search_history results)."},
+            },
+            "required": ["id"],
+        },
+        handler=get_post,
     ))
 
 
