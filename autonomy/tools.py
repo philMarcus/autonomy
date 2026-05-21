@@ -1113,10 +1113,13 @@ def _build_self_awareness_tools(
     telemetry_path = os.path.join(telemetry_dir, f"{brain_name}_events.jsonl") if telemetry_dir else ""
     kernel_history_path = os.path.join(telemetry_dir, f"{brain_name}_kernel_history.jsonl") if telemetry_dir else ""
 
-    _current_run_id = state.get("_session_id", "")
-
     def _scan_telemetry(event_type: str, max_lines: int = 5000, limit: int = 20) -> List[Dict]:
-        """Scan recent telemetry for events of a given type (current run only)."""
+        """Scan recent telemetry for events of a given type.
+
+        No run_id filtering: the telemetry file spans many restarts within
+        the same session (194 run_ids across 376 cycles). Scanning from
+        the tail + last_n limit gives the right scope naturally.
+        """
         if not telemetry_path or not os.path.exists(telemetry_path):
             return []
         results = []
@@ -1126,9 +1129,7 @@ def _build_self_awareness_tools(
             for line in reversed(lines):
                 try:
                     e = json.loads(line)
-                    if e.get("event_type") == event_type and (
-                        not _current_run_id or e.get("run_id") == _current_run_id
-                    ):
+                    if e.get("event_type") == event_type:
                         results.append(e)
                         if len(results) >= limit:
                             break
@@ -1209,11 +1210,10 @@ def _build_self_awareness_tools(
     ))
 
     # --- get_kernel_history ---
-    def get_kernel_history(last_n: int = 5, all_runs: bool = False) -> Dict[str, Any]:
-        """Get the history of kernel prompt versions from the current run."""
+    def get_kernel_history(last_n: int = 5, updates_only: bool = False) -> Dict[str, Any]:
+        """Get the history of kernel prompt versions (newest first)."""
         if not kernel_history_path or not os.path.exists(kernel_history_path):
             return {"error": "Kernel history not found.", "versions": []}
-        current_run_id = state.get("_session_id", "")
         versions = []
         try:
             with open(kernel_history_path, "r", encoding="utf-8") as f:
@@ -1221,13 +1221,13 @@ def _build_self_awareness_tools(
             for line in reversed(lines):
                 try:
                     e = json.loads(line)
-                    # Filter to current run unless all_runs requested
-                    if not all_runs and current_run_id and e.get("run_id") != current_run_id:
+                    source = e.get("source", "")
+                    if updates_only and source != "disk_write":
                         continue
                     versions.append({
                         "timestamp": e.get("ts", "")[:19],
                         "reason": e.get("reason", ""),
-                        "source": e.get("source", ""),
+                        "source": source,
                         "char_count": e.get("char_count", 0),
                         "text": e.get("kernel_text", "")[:1000],
                     })
@@ -1237,18 +1237,17 @@ def _build_self_awareness_tools(
                     continue
         except Exception:
             pass
-        return {"versions": versions, "total_found": len(versions),
-                "note": "current run only" if not all_runs else "all runs"}
+        return {"versions": versions, "total_found": len(versions)}
 
     registry.register(ToolDef(
         name="get_kernel_history",
         description="See the history of your kernel prompt versions — when each was written, why, "
-                    "and the first 1000 chars of each version. Default: current run only.",
+                    "and the first 1000 chars of each. Includes startups and self-updates.",
         parameters={
             "type": "object",
             "properties": {
                 "last_n": {"type": "integer", "description": "How many versions to return (newest first). Default: 5."},
-                "all_runs": {"type": "boolean", "description": "Include kernel versions from previous runs? Default: false (current run only)."},
+                "updates_only": {"type": "boolean", "description": "Only show self-updates (skip startup snapshots)? Default: false."},
             },
             "required": [],
         },
