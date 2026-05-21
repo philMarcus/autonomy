@@ -319,7 +319,11 @@ class GeminiChatSession(ChatSession):
             config_kwargs.pop("system_instruction", None)
             config_kwargs.pop("tools", None)
             config_kwargs["cached_content"] = _cache_name
-            contents = []  # base is in cache
+            # Gemini requires non-empty contents even with cached_content.
+            # Send a minimal prompt referencing the cached context.
+            contents = [types.Content(role="user", parts=[
+                types.Part(text="Proceed with the context provided. Choose your action.")
+            ])]
             log.info("Context cache created: %s (%d chars prompt)", _cache_name, prompt_chars)
         except Exception as _cache_err:
             log.debug("Context caching unavailable (%s), using full prompt each round", _cache_err)
