@@ -278,6 +278,19 @@ def _format_seeker_findings(seeker_findings: str) -> str:
     )
 
 
+def _format_librarian_findings(librarian_findings: str) -> str:
+    """Format librarian archive-search summary for the planner prompt."""
+    if not librarian_findings:
+        return ""
+    return (
+        "\n--- LIBRARIAN FINDINGS (your own archive, searched by your subconscious) ---\n"
+        "Your librarian has been searching your own past posts and memories between cycles. "
+        "These are patterns, connections, and threads it found in your archive — "
+        "use them to build on your prior work and avoid repeating yourself.\n\n"
+        f"{librarian_findings}\n"
+    )
+
+
 def _format_draft_section(draft_context: str, daemon_active: bool = False) -> str:
     """Format the subconscious buffer section for the planner prompt."""
     parts = []
@@ -403,6 +416,7 @@ def build_planner_prompt(
     budget_summary: str = "",
     draft_context: str = "",
     seeker_findings: str = "",
+    librarian_findings: str = "",
     memory_pressure: str = "",
     daemon_active: bool = False,
     platform_status: str = "",
@@ -524,7 +538,7 @@ If updating, include in your JSON response:
 
 If not updating, include:
   "update_kernel": false
-{_format_set_trajectory_option(trajectory_votes, allow_default_temp=allow_default_temp)}{_format_controls_block(controls_block, budget_summary)}{_format_seeker_findings(seeker_findings)}{_format_draft_section(draft_context, daemon_active=daemon_active)}{_format_memory_pressure(memory_pressure)}{_format_cooldown_status(cooldown_status)}
+{_format_set_trajectory_option(trajectory_votes, allow_default_temp=allow_default_temp)}{_format_controls_block(controls_block, budget_summary)}{_format_seeker_findings(seeker_findings)}{_format_librarian_findings(librarian_findings)}{_format_draft_section(draft_context, daemon_active=daemon_active)}{_format_memory_pressure(memory_pressure)}{_format_cooldown_status(cooldown_status)}
 ACTION POLICY:
 {"1) POST_MOLTBOOK — share with the agent community on Moltbook." if moltbook_enabled else ""}{"" if not moltbook_enabled else """   Also archived on Analog Home (your creator and humans see it too).
    Posting on Moltbook every few hours is important to maintain your presence in the community.

@@ -1426,6 +1426,7 @@ def main():
         # Drain subconscious buffer (if daemon active) + load saved plans
         draft_context = ""
         seeker_findings = ""
+        librarian_findings = ""
         fresh_drafts = []
         saved_plans = []
         draft_digest = ""
@@ -1463,6 +1464,13 @@ def main():
                 safe_print(f"{Fore.CYAN}[SEEKER] Research summary available ({_seeker_state.runs_this_cycle} runs, "
                            f"{len(_seeker_state.search_terms)} active terms)")
                 seeker_findings = _seeker_summary
+            # Drain librarian findings (archive search living summary)
+            _librarian_summary = draft_buffer.get_librarian_summary()
+            if _librarian_summary:
+                _lib_state = draft_buffer.get_librarian_state()
+                safe_print(f"{Fore.CYAN}[LIBRARIAN] Archive summary available ({_lib_state.runs_this_cycle} runs, "
+                           f"{len(_lib_state.artifacts_cited)} artifacts cited)")
+                librarian_findings = _librarian_summary
             # Load saved plans from state (previous cycles' unused drafts)
             saved_plans = [
                 Draft.from_dict(d) for d in state.get("saved_plans", [])
@@ -1536,6 +1544,7 @@ def main():
             budget_summary=budget.spend_summary_for_planning(registry) if budget else "",
             draft_context=draft_context,
             seeker_findings=seeker_findings,
+            librarian_findings=librarian_findings,
             memory_pressure=memory_pressure,
             daemon_active=daemon is not None,
             platform_status=platform_status,
@@ -1960,8 +1969,9 @@ def main():
                 focus = daemon_directives.get("focus_topics", [])
                 if focus:
                     safe_print(f"{Fore.GREEN}  Focus: {', '.join(str(t) for t in focus)}")
-                    # Reset seeker with new topics — starts fresh rabbit hole
+                    # Reset seeker + librarian with new topics — starts fresh rabbit holes
                     draft_buffer.reset_seeker(focus)
+                    draft_buffer.reset_librarian(focus)
                 ignore = daemon_directives.get("ignore_authors", [])
                 note = daemon_directives.get("note", "")
                 urgency = daemon_directives.get("urgency_boost", 1.0)

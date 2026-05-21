@@ -430,6 +430,12 @@ class SubconsciousDaemon:
         if random.random() < 1.0 / max(1, muse_interval):
             self._muse()
 
+        # --- Gear 8: Librarian (archive search — every N ticks) ---
+        librarian_n = int(self._ctrl.get("librarian_every_n_ticks") or 3)
+        if (self._tick_count % librarian_n == 0
+                and self._store is not None):
+            self._librarian_search()
+
         # ── Tick footer ──
         _wp = self._buffer.wake_potential
         _dc = self._buffer.draft_count
@@ -1679,6 +1685,191 @@ class SubconsciousDaemon:
 
 # ======================================================================
 # Helpers
+
+
+    # Gear 8: Librarian — archive search with living summary
+    # ---------------------------------------------------------------
+
+    def _librarian_search(self) -> None:
+        """Search the agent's own archives using focus_topics, synthesize findings
+        into a living summary. Mirrors the Seeker but looks inward (archives)
+        instead of outward (web).
+        """
+        from .config import BRAINS_DIR
+        from .tools import _read_json_file
+
+        # Get search terms — use focus_topics or librarian-specific terms
+        with self._directives_lock:
+            terms = list(self._directives.get("focus_topics", []))
+        # Also use librarian's evolved terms (rabbit hole)
+        lib_state = self._buffer.get_librarian_state()
+        if lib_state.search_terms:
+            terms = lib_state.search_terms[:3]
+        elif not terms:
+            return  # nothing to search for
+
+        # Budget check — librarian uses local models (free), but skip if no budget at all
+        if not self._budget.can_afford("ollama:gemma3:12b", est_input_tokens=500, est_output_tokens=500):
+            return
+
+        model_id = _pick_weighted_model(
+            self._ctrl.get("librarian_model_weights") or "ollama:gemma3:12b=2,ollama:deepseek-r1:8b=1",
+            "ollama:gemma3:12b",
+        )
+
+        # Search archives for each term using search_history tool logic
+        all_findings = []
+        new_artifact_ids = []
+        already_cited = set(lib_state.artifacts_cited)
+
+        for term in terms[:3]:
+            try:
+                # Search memory + artifacts + seeds + knowledge
+                from .tools import _read_json_file
+                import requests as _req
+                from urllib.parse import urljoin, quote
+
+                results = []
+
+                # Search artifacts via API
+                if self._store and getattr(self._store, '_analog_home_url', None):
+                    _api = self._store._analog_home_url.rstrip("/")
+                    _sid = getattr(self._store, '_run_id', '')
+                    _url = f"{_api}/artifacts/search?q={quote(term)}&limit=3"
+                    if _sid:
+                        _url += f"&run_id={_sid}"
+                    resp = _req.get(_url, timeout=10)
+                    if resp.ok:
+                        for art in resp.json():
+                            art_id = art.get("id")
+                            if art_id and art_id not in already_cited:
+                                results.append(art)
+                                new_artifact_ids.append(art_id)
+                                already_cited.add(art_id)
+
+                # Also search memory tiers
+                if self._state:
+                    with self._state_lock:
+                        tiers = self._state.get("memory_tiers", {})
+                    for tier in ("recent", "compressed", "deep"):
+                        for e in tiers.get(tier, []):
+                            text = e.get("note", "") or e.get("summary", "")
+                            if term.lower() in text.lower():
+                                results.append({"source": f"memory/{tier}",
+                                                "cycle": e.get("cycle", e.get("cycles")),
+                                                "body_preview": text[:500]})
+
+                if results:
+                    # Get full text of top artifact match
+                    for r in results[:1]:
+                        art_id = r.get("id")
+                        if art_id and self._store and getattr(self._store, '_analog_home_url', None):
+                            try:
+                                full_resp = _req.get(f"{_api}/artifacts/{art_id}", timeout=10)
+                                if full_resp.ok:
+                                    full = full_resp.json()
+                                    r["full_text"] = (full.get("body_markdown", "") or "")[:1500]
+                            except Exception:
+                                pass
+
+                    finding_parts = []
+                    for r in results[:3]:
+                        _src = r.get("source", "artifact")
+                        _cycle = r.get("cycle", "?")
+                        _title = r.get("title", "")[:60]
+                        _body = r.get("full_text") or r.get("body_preview", "")[:500]
+                        finding_parts.append(f"[{_src} c{_cycle}] {_title}\n{_body}")
+
+                    all_findings.append(f"Search: '{term}'\n" + "\n---\n".join(finding_parts))
+
+            except Exception as e:
+                self._telemetry.log("librarian_error", {
+                    "brain": self._brain_name, "tick": self._tick_count,
+                    "error": str(e)[:300], "term": term,
+                })
+
+        if not all_findings:
+            return
+
+        # Synthesize findings + generate follow-up terms (rabbit hole)
+        prev_summary = self._buffer.get_librarian_summary()
+        new_block = "\n\n".join(all_findings)
+
+        new_terms = []
+        try:
+            synth_prompt = (
+                "You are a librarian reviewing an agent's own archive. Given these search results "
+                "from the agent's past posts and memory, do two things:\n\n"
+                "1. Write a 3-5 sentence synthesis of the KEY connections and patterns found.\n"
+                "2. Suggest 3 follow-up search terms to dig deeper into the agent's archives. "
+                "Look for concept names, agent usernames, or specific ideas mentioned in the results.\n\n"
+                f"RESULTS:\n{new_block[:3000]}\n\n"
+                f"Format:\nSYNTHESIS: <your synthesis>\n"
+                f"NEXT_TERMS: <term1>, <term2>, <term3>"
+            )
+            synth_chat = self._registry.create_chat(
+                model_id=model_id,
+                system_instruction="Synthesize archive findings and suggest search terms.",
+                temperature=0.4,
+                max_output_tokens=1024,
+            )
+            synth_resp = synth_chat.send_message(synth_prompt).strip()
+
+            if "NEXT_TERMS:" in synth_resp:
+                synth_part, terms_part = synth_resp.split("NEXT_TERMS:", 1)
+                new_terms = [t.strip().strip("*\"'`- ") for t in terms_part.strip().split(",")
+                             if t.strip().strip("*\"'`- ")][:5]
+                if "SYNTHESIS:" in synth_part:
+                    synth_text = synth_part.split("SYNTHESIS:", 1)[1].strip()
+                    if synth_text and len(synth_text) > 20:
+                        new_block = synth_text
+        except Exception:
+            pass  # keep raw findings on failure
+
+        # Build combined summary
+        combined = f"{prev_summary}\n\n[Tick {self._tick_count}]\n{new_block}" if prev_summary else new_block
+
+        # Compress if over max
+        _max = int(self._ctrl.get("librarian_max_summary_chars") or 2000)
+        if len(combined) > _max:
+            try:
+                _compressor = self._ctrl.get("compressor_model") or "ollama:gemma3:12b"
+                comp_chat = self._registry.create_chat(
+                    model_id=_compressor,
+                    system_instruction="Compress archive findings.",
+                    temperature=0.3, max_output_tokens=1024,
+                )
+                comp_resp = comp_chat.send_message(
+                    f"Compress these archive findings into under {_max} characters. "
+                    f"Preserve: specific cycle numbers, concept names, key connections.\n\n"
+                    f"{combined}\n\nCompressed:"
+                ).strip()
+                if comp_resp and len(comp_resp) > 50:
+                    combined = comp_resp
+            except Exception:
+                combined = combined[:_max]
+
+        # Update buffer
+        self._buffer.update_librarian(
+            summary=combined,
+            new_terms=new_terms if new_terms else terms,
+            artifacts_cited=new_artifact_ids,
+            tick=self._tick_count,
+        )
+
+        # Emit to terminal + live
+        _next = self._buffer.get_librarian_state().search_terms[:3]
+        self._emit(f"  LIBRARIAN ({model_id.replace('ollama:', '')})", Fore.CYAN)
+        self._emit(f"    LIBRARIAN: {len(terms)} terms → {len(all_findings)} findings", Fore.CYAN)
+        if _next:
+            self._emit(f"    LIBRARIAN next: {', '.join(_next)}", Fore.CYAN)
+
+        self._telemetry.log("librarian_run", {
+            "brain": self._brain_name, "tick": self._tick_count,
+            "model": model_id, "terms": terms[:3],
+            "findings": len(all_findings), "artifacts_cited": new_artifact_ids,
+            "next_terms": new_terms[:3],
+        })
 
 
 # ======================================================================

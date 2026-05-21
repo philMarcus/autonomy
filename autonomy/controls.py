@@ -466,6 +466,14 @@ def build_default_registry(model_registry, blacklist_str: str = "") -> ControlRe
                 "Max chars for seeker living summary before compression", "daemon", min_val=500, max_val=10000),
         Control("seeker_max_topics", "int", 3,
                 "Max focus topics to search per sweep", "daemon", min_val=1, max_val=10),
+        Control("librarian_every_n_ticks", "int", 3,
+                "Librarian runs every N sentry ticks (archive search)", "daemon", min_val=1, max_val=20),
+        Control("librarian_model_weights", "weights",
+                "ollama:gemma3:12b=2,ollama:deepseek-r1:8b=1",
+                "Weighted pool for librarian archive synthesis (local, free)", "llm",
+                audience="accountant"),
+        Control("librarian_max_summary_chars", "int", 2000,
+                "Max chars for librarian living summary before compression", "context", min_val=500, max_val=10000),
         Control("dream_interval_ticks", "int", 60,
                 "Average ticks between dreams (stochastic)", "daemon", min_val=10, max_val=1000),
         Control("muse_interval_ticks", "int", 15,
@@ -540,6 +548,7 @@ def build_default_registry(model_registry, blacklist_str: str = "") -> ControlRe
         "synthesizer_model_weights", "dreamer_model_weights",
         "muse_model_weights", "verification_model_weights",
         "accountant_model_weights", "budget_exhausted_model_weights",
+        "librarian_model_weights",
         "max_cycle_interval_minutes",
     }
     blacklist = _DEFAULT_LOCKED | {k.strip() for k in blacklist_str.split(",") if k.strip()}

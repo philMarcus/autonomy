@@ -71,6 +71,16 @@ class SeekerState:
     last_run_tick: int = 0
 
 
+@dataclass
+class LibrarianState:
+    """Living state of the librarian archive-search agent between conscious cycles."""
+    summary: str = ""                              # living summary of archive findings
+    search_terms: List[str] = field(default_factory=list)  # evolve each run (rabbit hole into own archives)
+    artifacts_cited: List[int] = field(default_factory=list)  # artifact IDs already synthesized (avoid re-reading)
+    runs_this_cycle: int = 0
+    last_run_tick: int = 0
+
+
 # Maximum age (seconds) before a draft is pruned during decay.
 _DRAFT_MAX_AGE = 1800  # 30 minutes
 
@@ -89,6 +99,7 @@ class DraftBuffer:
         self._max_drafts: int = max_drafts
         self._wake_event = threading.Event()
         self._seeker = SeekerState()
+        self._librarian = LibrarianState()
 
     # ------------------------------------------------------------------
     # Writer side (daemon thread)
@@ -231,3 +242,37 @@ class DraftBuffer:
         """Reset seeker state — called when consciousness provides new focus_topics."""
         with self._lock:
             self._seeker = SeekerState(search_terms=initial_topics)
+
+    # --- Librarian state (archive search) ---
+
+    def update_librarian(self, summary: str, new_terms: List[str],
+                         artifacts_cited: List[int], tick: int) -> None:
+        """Update the librarian's living summary after an archive search run."""
+        with self._lock:
+            self._librarian.summary = summary
+            self._librarian.search_terms = new_terms[:5]
+            # Merge cited artifacts (don't re-read them)
+            existing = set(self._librarian.artifacts_cited)
+            existing.update(artifacts_cited)
+            self._librarian.artifacts_cited = list(existing)[-50:]  # cap
+            self._librarian.runs_this_cycle += 1
+            self._librarian.last_run_tick = tick
+
+    def get_librarian_summary(self) -> str:
+        with self._lock:
+            return self._librarian.summary
+
+    def get_librarian_state(self) -> LibrarianState:
+        with self._lock:
+            return LibrarianState(
+                summary=self._librarian.summary,
+                search_terms=list(self._librarian.search_terms),
+                artifacts_cited=list(self._librarian.artifacts_cited),
+                runs_this_cycle=self._librarian.runs_this_cycle,
+                last_run_tick=self._librarian.last_run_tick,
+            )
+
+    def reset_librarian(self, initial_topics: List[str]) -> None:
+        """Reset librarian state — called when consciousness provides new focus_topics."""
+        with self._lock:
+            self._librarian = LibrarianState(search_terms=initial_topics)
