@@ -1090,8 +1090,19 @@ def _build_search_history_tool(
             except Exception:
                 pass
 
-        # Sort by cycle (newest first, knowledge entries last since cycle=None) and limit
-        results.sort(key=lambda r: r.get("cycle") or 0, reverse=True)
+        # Sort by cycle (newest first). Cycles can be int, str ("122-130"), or None.
+        def _sort_key(r):
+            c = r.get("cycle")
+            if c is None:
+                return 0
+            if isinstance(c, int):
+                return c
+            # Compressed memory: "122-130" → use the end of the range
+            try:
+                return int(str(c).split("-")[-1])
+            except (ValueError, IndexError):
+                return 0
+        results.sort(key=_sort_key, reverse=True)
         return {"query": query, "results": results[:n], "total_matches": len(results)}
 
     registry.register(ToolDef(
