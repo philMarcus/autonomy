@@ -17,10 +17,10 @@ from colorama import Fore, Style
 
 
 # Module-level live context. Set on startup by __main__.py, cycle updated each iteration.
-_LIVE_CTX: dict = {"store": None, "daemon": None, "cycle": 0}
+_LIVE_CTX: dict = {"store": None, "daemon": None, "cycle": 0, "read_only": False}
 
 
-def _set_live_context(store=None, daemon=None, cycle: int = 0) -> None:
+def _set_live_context(store=None, daemon=None, cycle: int = 0, read_only: bool = None) -> None:
     """Called by __main__ on startup (store/daemon) and each cycle start (cycle)."""
     if store is not None:
         _LIVE_CTX["store"] = store
@@ -28,14 +28,18 @@ def _set_live_context(store=None, daemon=None, cycle: int = 0) -> None:
         _LIVE_CTX["daemon"] = daemon
     if cycle:
         _LIVE_CTX["cycle"] = cycle
+    if read_only is not None:
+        _LIVE_CTX["read_only"] = read_only
 
 
 def _push_to_live(store, lines, daemon=None, cycle: int = 0) -> None:
     """Forward a list of lines to the Analog Home live daemon feed.
 
     Uses cycle + 10000 as the tick number so conscious events don't collide
-    with daemon tick IDs.
+    with daemon tick IDs. Suppressed in read-only mode.
     """
+    if _LIVE_CTX.get("read_only"):
+        return
     if not store or not hasattr(store, 'push_daemon_tick'):
         return
     tick = cycle + 10000

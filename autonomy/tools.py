@@ -232,8 +232,15 @@ def _write_json_file(path: str, data: Any) -> None:
 # Todo list tools
 # ============================================================
 
+# Module-level read-only flag — set by build_tool_registry from flags.
+# Prevents dev environments from pushing state to prod Analog Home.
+_TOOLS_READ_ONLY = False
+
+
 def _push_state_to_analog_home(store, key: str, data: list) -> None:
     """Best-effort push of agent state to Analog Home API for frontend display."""
+    if _TOOLS_READ_ONLY:
+        return
     if not store or not getattr(store, '_analog_home_url', None):
         return
     try:
@@ -949,6 +956,7 @@ def build_tool_registry(
     platform: Any = None,       # MoltbookClient (Sprint 2)
     telemetry_dir: str = "",    # path to telemetry dir (Sprint 2)
     knowledge_path: str = "",   # path to knowledge.txt (Sprint 2)
+    read_only: bool = False,    # prevents writes to Analog Home API
 ) -> ToolRegistry:
     """Create a ToolRegistry with all built-in tools registered.
 
@@ -974,6 +982,9 @@ def build_tool_registry(
     ToolRegistry
         A registry with all built-in tools registered and wired up.
     """
+    global _TOOLS_READ_ONLY
+    _TOOLS_READ_ONLY = read_only
+
     registry = ToolRegistry(brain_name=brain_name, brains_dir=brains_dir)
 
     _build_todo_tools(registry, cycle_getter, store=store)

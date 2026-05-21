@@ -894,7 +894,7 @@ def main():
     # NOW set live context — all subsequent emit_status calls push with the
     # real session_id, and the backend-side insert-time DELETE WHERE run_id != X
     # takes care of cleaning up any cross-session leftovers.
-    _set_live_context(store if analog_home_url else None, None)
+    _set_live_context(store if analog_home_url else None, None, read_only=args.read_only)
 
     if analog_home_url:
         session_type = "New session" if fresh_session else "Agent restart"
@@ -1016,6 +1016,7 @@ def main():
         platform=platform,
         telemetry_dir=telemetry_dir,
         knowledge_path=os.path.join(BRAINS_DIR, f"{brain_name}_knowledge.txt"),
+        read_only=args.read_only,
     )
 
     # Push session-start marker to live daemon feed
