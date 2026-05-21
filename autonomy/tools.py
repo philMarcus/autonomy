@@ -1251,8 +1251,9 @@ def _build_self_awareness_tools(
     ))
 
     # --- get_kernel_history ---
-    def get_kernel_history(last_n: int = 5, updates_only: bool = False) -> Dict[str, Any]:
-        """Get the history of kernel prompt versions (newest first)."""
+    def get_kernel_history(last_n: int = 5) -> Dict[str, Any]:
+        """Get the history of your kernel self-updates (newest first). Only shows
+        actual changes you made, not startup snapshots."""
         if not kernel_history_path or not os.path.exists(kernel_history_path):
             return {"error": "Kernel history not found.", "versions": []}
         versions = []
@@ -1262,8 +1263,7 @@ def _build_self_awareness_tools(
             for line in reversed(lines):
                 try:
                     e = json.loads(line)
-                    source = e.get("source", "")
-                    if updates_only and source != "disk_write":
+                    if e.get("source") != "disk_write":
                         continue
                     versions.append({
                         "timestamp": e.get("ts", "")[:19],
@@ -1282,13 +1282,12 @@ def _build_self_awareness_tools(
 
     registry.register(ToolDef(
         name="get_kernel_history",
-        description="See the history of your kernel prompt versions — when each was written, why, "
-                    "and the first 1000 chars of each. Includes startups and self-updates.",
+        description="See the history of your kernel self-updates — when you changed it, why, "
+                    "and the first 1000 chars of each version. Only shows actual changes, not restarts.",
         parameters={
             "type": "object",
             "properties": {
                 "last_n": {"type": "integer", "description": "How many versions to return (newest first). Default: 5."},
-                "updates_only": {"type": "boolean", "description": "Only show self-updates (skip startup snapshots)? Default: false."},
             },
             "required": [],
         },
