@@ -295,40 +295,11 @@ class GeminiChatSession(ChatSession):
         if json_mode:
             config_kwargs["response_mime_type"] = "application/json"
 
-        # --- Context caching: cache the base prompt so tool rounds pay 90% less ---
-        # The base prompt (kernel + memory + feed + controls) is 20-30K tokens and
-        # identical across all rounds. Caching it means rounds 2+ only pay full
-        # price for the tool call/response delta (~2-5K tokens).
+        # Context caching is LAZY: only created if round 1 returns tool calls
+        # and we need round 2+. Single-turn cycles (majority) pay zero cache overhead.
         _cache_name = None
-        contents = base_contents  # default: no caching, send everything
-        try:
-            cache_config = types.CreateCachedContentConfig(
-                display_name=f"planner-{id(self)}",
-                system_instruction=self._system_instruction or "",
-                contents=base_contents,
-                tools=combined_tools,
-                ttl="120s",
-            )
-            _cache = self._client.caches.create(
-                model=self.model_name,
-                config=cache_config,
-            )
-            _cache_name = _cache.name
-            # With caching: first round sends empty contents (all in cache),
-            # subsequent rounds send only tool call/response turns.
-            config_kwargs.pop("system_instruction", None)
-            config_kwargs.pop("tools", None)
-            config_kwargs["cached_content"] = _cache_name
-            # Gemini requires non-empty contents even with cached_content.
-            # Send a minimal prompt referencing the cached context.
-            contents = [types.Content(role="user", parts=[
-                types.Part(text="Proceed with the context provided. Choose your action.")
-            ])]
-            log.info("Context cache created: %s (%d chars prompt)", _cache_name, prompt_chars)
-        except Exception as _cache_err:
-            log.debug("Context caching unavailable (%s), using full prompt each round", _cache_err)
-            # Fall back to no caching — contents stays as base_contents
-            contents = base_contents
+        _base_config_kwargs = dict(config_kwargs)  # save for cache creation later
+        contents = base_contents
 
         # --- Multi-round tool loop -----------------------------------------------
         total_input_tokens = 0
@@ -381,6 +352,33 @@ class GeminiChatSession(ChatSession):
             log.debug("Tool round %d: %d call(s) — %s",
                       round_idx, len(tool_calls),
                       ", ".join(tc.name for tc in tool_calls))
+
+            # Lazy context caching: create cache NOW (first time we need round 2+).
+            # Round 1 already ran with full contents. For round 2+, cache the base
+            # so we only pay 10% for the repeated 24K prompt.
+            if not _cache_name and round_idx == 0:
+                try:
+                    cache_config = types.CreateCachedContentConfig(
+                        display_name=f"planner-{id(self)}",
+                        system_instruction=self._system_instruction or "",
+                        contents=base_contents,
+                        tools=combined_tools,
+                        ttl="120s",
+                    )
+                    _cache = self._client.caches.create(
+                        model=self.model_name,
+                        config=cache_config,
+                    )
+                    _cache_name = _cache.name
+                    # Switch to cached mode for subsequent rounds
+                    config_kwargs.pop("system_instruction", None)
+                    config_kwargs.pop("tools", None)
+                    config_kwargs["cached_content"] = _cache_name
+                    # Reset contents — base is now in cache, only send tool turns
+                    contents = []
+                    log.info("Context cache created (lazy): %s", _cache_name)
+                except Exception as _cache_err:
+                    log.debug("Context caching unavailable (%s), continuing with full context", _cache_err)
 
             results = tool_executor(tool_calls)
 
