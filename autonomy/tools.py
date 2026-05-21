@@ -1271,12 +1271,13 @@ def _build_self_awareness_tools(
             for line in reversed(lines):
                 try:
                     e = json.loads(line)
-                    if e.get("source") != "disk_write":
+                    _src = e.get("source", "")
+                    if _src != "disk_write":
                         continue
                     versions.append({
                         "timestamp": e.get("ts", "")[:19],
                         "reason": e.get("reason", ""),
-                        "source": source,
+                        "source": _src,
                         "char_count": e.get("char_count", 0),
                         "text": e.get("kernel_text", "")[:1000],
                     })
