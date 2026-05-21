@@ -1022,13 +1022,17 @@ def _build_search_history_tool(
                             "relevance": "keyword_match",
                         })
 
-        # Search past artifacts via Analog Home API
+        # Search past artifacts via Analog Home API (current run only)
+        _run_id = state.get("_session_id", "")
         if "posts" in source_list and store and getattr(store, '_analog_home_url', None):
             try:
                 import requests as _req
                 from urllib.parse import urljoin
+                _params = "limit=50&sort=desc"
+                if _run_id:
+                    _params += f"&run_id={_run_id}"
                 url = urljoin(store._analog_home_url.rstrip("/") + "/",
-                              f"artifacts?limit=50&sort=desc")
+                              f"artifacts?{_params}")
                 resp = _req.get(url, timeout=10)
                 if resp.ok:
                     for art in resp.json():
@@ -1109,19 +1113,22 @@ def _build_self_awareness_tools(
     telemetry_path = os.path.join(telemetry_dir, f"{brain_name}_events.jsonl") if telemetry_dir else ""
     kernel_history_path = os.path.join(telemetry_dir, f"{brain_name}_kernel_history.jsonl") if telemetry_dir else ""
 
+    _current_run_id = state.get("_session_id", "")
+
     def _scan_telemetry(event_type: str, max_lines: int = 5000, limit: int = 20) -> List[Dict]:
-        """Scan recent telemetry for events of a given type."""
+        """Scan recent telemetry for events of a given type (current run only)."""
         if not telemetry_path or not os.path.exists(telemetry_path):
             return []
         results = []
         try:
             with open(telemetry_path, "r", encoding="utf-8") as f:
-                # Read last max_lines lines efficiently
                 lines = f.readlines()[-max_lines:]
             for line in reversed(lines):
                 try:
                     e = json.loads(line)
-                    if e.get("event_type") == event_type:
+                    if e.get("event_type") == event_type and (
+                        not _current_run_id or e.get("run_id") == _current_run_id
+                    ):
                         results.append(e)
                         if len(results) >= limit:
                             break
