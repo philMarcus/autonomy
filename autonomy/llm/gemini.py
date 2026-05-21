@@ -236,7 +236,7 @@ class GeminiChatSession(ChatSession):
         prompt: str,
         tool_schemas: List[Dict],
         tool_executor: Callable[[List[ToolCall]], List[ToolResult]],
-        max_rounds: int = 3,
+        max_rounds: int = 12,
         json_mode: bool = False,
     ) -> str:
         """Send a message with Gemini-native function calling.
@@ -418,8 +418,26 @@ class GeminiChatSession(ChatSession):
                 types.Content(role="user", parts=fn_response_parts)
             )
         else:
-            # Exhausted max_rounds — log a warning but return whatever we have
-            log.warning("send_message_with_tools: exhausted %d rounds", max_rounds)
+            # Exhausted max_rounds — send one final turn WITHOUT tools to force
+            # the model to produce a text response instead of another tool call.
+            log.warning("send_message_with_tools: exhausted %d rounds, forcing final response", max_rounds)
+            try:
+                _final_config = {
+                    "temperature": self._temperature,
+                    "max_output_tokens": self._max_output_tokens,
+                }
+                if self._system_instruction:
+                    _final_config["system_instruction"] = self._system_instruction
+                contents.append(types.Content(role="user", parts=[
+                    types.Part(text="You have used all available tool rounds. Produce your final JSON action now based on what you've gathered so far.")
+                ]))
+                resp = self._client.models.generate_content(
+                    model=self.model_name,
+                    contents=contents,
+                    config=types.GenerateContentConfig(**_final_config),
+                )
+            except Exception:
+                pass  # fall through to text extraction with whatever we have
 
         # --- Post-loop: capture metadata and update history -----------------------
 
