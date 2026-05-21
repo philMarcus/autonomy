@@ -1939,14 +1939,19 @@ def main():
                         report_parts.append(f"[conscious] {_k} → {_v}")
                     if _accountant_reasoning:
                         report_parts.append(f"Accountant: {_accountant_reasoning}")
-                # Tool calls made during this cycle's planning
+                # Tool usage this cycle: read tools (called during reasoning) + write tools (JSON output)
                 _tcl = getattr(chat, "_tool_call_log", [])
-                if _tcl:
+                _all_tools = []
+                for _tc in _tcl:
+                    _args_str = ", ".join(f"{k}={v}" for k, v in _tc.get("args", {}).items())
+                    _all_tools.append(f"  ↳ {_tc['tool']}({_args_str[:80]})")
+                for _ta in (_tool_actions if isinstance(_tool_actions, list) else []):
+                    _ta_args = ", ".join(f"{k}={v}" for k, v in list(_ta.get("args", {}).items())[:2])
+                    _all_tools.append(f"  → {_ta.get('tool','')}({_ta_args[:80]})")
+                if _all_tools:
                     report_parts.append("")
-                    report_parts.append(f"Tools called: {len(_tcl)}")
-                    for _tc in _tcl:
-                        _args_str = ", ".join(f"{k}={v}" for k, v in _tc.get("args", {}).items())
-                        report_parts.append(f"  {_tc['tool']}({_args_str[:100]})")
+                    report_parts.append(f"Tools used: {len(_all_tools)}")
+                    report_parts.extend(_all_tools)
                 store.write_artifact(iteration, {
                     "brain": brain_name,
                     "artifact_type": "system_cycle_report",
