@@ -21,13 +21,28 @@ except ImportError:
 
 
 def main():
+    # Load .env so OLLAMA_URL is available
+    dotenv_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env")
+    if os.path.exists(dotenv_path):
+        with open(dotenv_path, "r") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                k, v = line.split("=", 1)
+                k, v = k.strip(), v.strip().strip("'\"")
+                if k and k not in os.environ:
+                    os.environ[k] = v
+
     parser = argparse.ArgumentParser(description="Test a prompt_bench gear against an Ollama model")
     parser.add_argument("model", help="Ollama model name (e.g. gemma4:e4b, gemma3:12b)")
     parser.add_argument("gear", help="Gear name (e.g. strategist, conscious, sentry_batch)")
     parser.add_argument("--prompts-dir", default="prompts", help="Prompts directory (default: prompts/)")
     parser.add_argument("--temp", type=float, help="Override temperature (default: from metadata.json)")
     parser.add_argument("--max-tokens", type=int, help="Override max tokens")
-    parser.add_argument("--ollama-url", default="http://localhost:11434", help="Ollama API URL")
+    parser.add_argument("--ollama-url",
+                        default=os.environ.get("OLLAMA_URL", "http://localhost:11434"),
+                        help="Ollama API URL (default: $OLLAMA_URL or localhost:11434)")
     parser.add_argument("--save", action="store_true", help="Save response to response.txt in gear dir")
     parser.add_argument("--no-stream", action="store_true", help="Wait for full response instead of streaming")
     args = parser.parse_args()
