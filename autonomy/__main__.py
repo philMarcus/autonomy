@@ -1573,20 +1573,21 @@ def main():
                 _con_short = conscious_model.replace("ollama:", "") if _con_tag == "local" else conscious_model
                 emit_status("[CONSCIOUS]", f"→ {_con_short} ({_con_tag}) thinking...",
                             color=Fore.MAGENTA, cycle=iteration)
-                # Snapshot prompt for prompt_bench (always, overwrite each cycle)
+                # Snapshot prompt for prompt_bench — latest + per-cycle archive
                 try:
-                    _snap_dir = os.path.join("prompts", "snapshots", "conscious")
-                    os.makedirs(_snap_dir, exist_ok=True)
-                    with open(os.path.join(_snap_dir, "system.txt"), "w", encoding="utf-8") as _sf:
-                        _sf.write(kernel)
-                    with open(os.path.join(_snap_dir, "user.txt"), "w", encoding="utf-8") as _uf:
-                        _uf.write(prompt)
-                    with open(os.path.join(_snap_dir, "metadata.json"), "w", encoding="utf-8") as _mf:
-                        import json as _json_snap
-                        _json_snap.dump({"gear": "conscious", "model": conscious_model,
-                                         "temperature": float(ctrl.get("temperature") or 0.7),
-                                         "cycle": iteration, "system_chars": len(kernel),
-                                         "user_chars": len(prompt)}, _mf, indent=2)
+                    _snap_base = os.path.join("prompts", "snapshots")
+                    for _sd in (os.path.join(_snap_base, "conscious"),
+                                os.path.join(_snap_base, f"conscious_c{iteration}")):
+                        os.makedirs(_sd, exist_ok=True)
+                        with open(os.path.join(_sd, "system.txt"), "w", encoding="utf-8") as _sf:
+                            _sf.write(kernel)
+                        with open(os.path.join(_sd, "user.txt"), "w", encoding="utf-8") as _uf:
+                            _uf.write(prompt)
+                        with open(os.path.join(_sd, "metadata.json"), "w", encoding="utf-8") as _mf:
+                            json.dump({"gear": "conscious", "model": conscious_model,
+                                       "temperature": float(ctrl.get("temperature") or 0.7),
+                                       "cycle": iteration, "system_chars": len(kernel),
+                                       "user_chars": len(prompt)}, _mf, indent=2)
                 except Exception:
                     pass
                 _con_t0 = time.time()
