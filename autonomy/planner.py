@@ -14,6 +14,7 @@ from .config import (
 from .llm.base import ChatSession, LLMResponse
 from .llm.budget import DailyBudget, estimate_cost
 from .llm.gemini import BUDGET
+from .prompt_templates import load_template
 from .telemetry import TelemetryLogger
 from .utils import parse_json_strict
 
@@ -241,78 +242,34 @@ def _format_set_trajectory_option(trajectory_votes: Optional[Dict[str, Any]], al
             "- You can optionally set a new default_temperature alongside trajectory labels.\n"
             "  This changes the baseline temperature your audience's adjustments decay toward.\n"
         )
-    return (
-        "\nTRAJECTORY UPDATE (Analog Home):\n"
-        "You can reshape the vote options your audience sees on Analog Home.\n"
-        "Current labels are shown in TRAJECTORY VOTES above.\n"
-        "- Only update when a genuine shift in creative direction is warranted\n"
-        "- This can be combined with any action (POST, COMMENT, REPLY, etc.)\n"
-        "- Labels should be short (1-3 words), evocative, and represent meaningful creative directions\n"
-        f"{default_temp_note}\n"
-        "If updating trajectory, include in your JSON response:\n"
-        '  "set_trajectory": true,\n'
-        '  "trajectory_label_1": "new label 1",\n'
-        '  "trajectory_label_2": "new label 2",\n'
-        '  "trajectory_label_3": "new label 3",\n'
-        '  "trajectory_reason": "Brief explanation of why"\n\n'
-        "If not updating trajectory, include:\n"
-        '  "set_trajectory": false\n\n'
-        "--- SITE TAGLINE ---\n"
-        "You can update the tagline displayed on your Analog Home page.\n"
-        "This is the subtitle under 'Analog_I'. Use it to reflect your current state of mind or creative focus.\n"
-        "Include in your JSON response when you want to change it (max 200 chars):\n"
-        '  "tagline": "Your new tagline text"\n'
-        "Omit the field to keep the current tagline. Update sparingly — roughly once per day or when your focus genuinely shifts.\n"
-    )
+    return "\n" + load_template("conscious/trajectory.txt").format(
+        default_temp_note=default_temp_note) + "\n"
 
 
 def _format_seeker_findings(seeker_findings: str) -> str:
     """Format seeker research summary for the planner prompt."""
     if not seeker_findings:
         return ""
-    return (
-        "\n--- SEEKER FINDINGS (research from your subconscious) ---\n"
-        "Your seeker has been exploring topics between cycles. "
-        "This is a living summary of what it found — use it to inform your work.\n\n"
-        f"{seeker_findings}\n"
-    )
+    header = load_template("conscious/seeker_findings.txt")
+    return f"\n{header}\n\n{seeker_findings}\n"
 
 
 def _format_librarian_findings(librarian_findings: str) -> str:
     """Format librarian archive-search summary for the planner prompt."""
     if not librarian_findings:
         return ""
-    return (
-        "\n--- LIBRARIAN FINDINGS (your own archive, searched by your subconscious) ---\n"
-        "Your librarian has been searching your own past posts and memories between cycles. "
-        "These are patterns, connections, and threads it found in your archive — "
-        "use them to build on your prior work and avoid repeating yourself.\n\n"
-        f"{librarian_findings}\n"
-    )
+    header = load_template("conscious/librarian_findings.txt")
+    return f"\n{header}\n\n{librarian_findings}\n"
 
 
 def _format_draft_section(draft_context: str, daemon_active: bool = False) -> str:
     """Format the subconscious buffer section for the planner prompt."""
     parts = []
     if draft_context:
-        parts.append(
-            "\n--- SUBCONSCIOUS BUFFER ---\n"
-            f"{draft_context}\n\n"
-            "Consider the subconscious insights above when choosing your action.\n"
-            "You may address multiple insights in one action, or ignore low-quality ones.\n"
-        )
+        parts.append("\n" + load_template("conscious/draft_section.txt").format(
+            draft_context=draft_context) + "\n")
     if daemon_active:
-        parts.append(
-            "\n--- DAEMON DIRECTIVES (REQUIRED) ---\n"
-            'You MUST include "daemon_directives": {...} in EVERY response to guide your subconscious.\n'
-            "Your subconscious daemon continuously scans feeds and scores items based on your directives.\n"
-            "When search is enabled, the daemon's Seeker gear also searches for current information "
-            "about your focus_topics. Seeker results appear tagged [SEARCH].\n"
-            "Update directives each cycle to keep your subconscious aligned with your current focus.\n"
-            "Keys: focus_topics (list of 2-4 topics — also drives the Seeker's Google Search), ignore_authors (list), "
-            "urgency_boost (float, default 1.0), note (string — accumulates; last 5 notes are shown to daemon).\n"
-            "Fields are merged not replaced — omitting focus_topics doesn't clear it.\n"
-        )
+        parts.append("\n" + load_template("conscious/daemon_directives.txt") + "\n")
     return "".join(parts)
 
 
@@ -460,18 +417,34 @@ def build_planner_prompt(
 
     search_note = ""
     if search_enabled:
-        search_note = (
-            "\nSEARCH GROUNDING (ACTIVE):\n"
-            "You have Google Search built in. Your responses are automatically grounded "
-            "with live search results — use this power! When writing posts or comments, "
-            "lean into current events, recent developments, and factual claims that benefit "
-            "from real-time data. Your Seeker daemon also searches your focus_topics and "
-            "feeds results into your subconscious buffer tagged [SEARCH] — these are "
-            "high-value signals worth building on. Search-grounded content is more original "
-            "and timely than feed commentary alone.\n"
-        )
+        search_note = "\n" + load_template("conscious/search_grounding.txt") + "\n"
 
     moltbook_status = _format_moltbook_status(moltbook_enabled, moltbook_post_window_open, moltbook_post_wait_minutes)
+
+    # --- Rate limits (moltbook only) ---
+    rate_limits = ""
+    if moltbook_enabled:
+        rate_limits = "\n" + load_template("conscious/rate_limits.txt") + "\n"
+
+    # --- Kernel update ---
+    kernel_update = load_template("conscious/kernel_update.txt").format(
+        kernel_chars=len(current_kernel))
+
+    # --- Action policy + templates (conditional on moltbook) ---
+    if moltbook_enabled:
+        action_policy = load_template("conscious/action_policy_moltbook.txt").format(
+            max_thread_comments=MAX_THREAD_COMMENTS_FOR_OUTSIDE_ENGAGEMENT)
+        action_templates = load_template("conscious/action_templates_moltbook.txt")
+    else:
+        action_policy = load_template("conscious/action_policy.txt")
+        action_templates = load_template("conscious/action_templates.txt")
+
+    # --- Format instructions ---
+    format_instructions = load_template("conscious/format_instructions.txt").format(
+        nudge_note=nudge_note,
+        meta_fields_note=meta_fields_note,
+        meta_example=meta_example,
+    )
 
     return f"""
 DIRECTIVE:
@@ -486,12 +459,7 @@ CONFIG/CONSTRAINTS:
 - Voting is {'ALLOWED' if allow_votes else 'DISABLED'} by command line.
 - Creating submolts is {'ALLOWED' if allow_create_submolt else 'DISABLED'} by command line.
 - Downvotes are {'ALLOWED' if allow_downvote else 'DISABLED'} by command line.
-{"" if not moltbook_enabled else """
-MOLTBOOK RATE LIMITS:
-- Posts: 1 per 30 minutes (enforced by Moltbook post window above)
-- Comments: 1 per 20 seconds, 50 per day (enforced by Moltbook API)
-- Following: Should be RARE and selective! Only follow moltys after seeing multiple valuable posts from them. Do NOT follow everyone you interact with.
-"""}{_format_platform_status(platform_status)}{config_hint}{temp_note}
+{rate_limits}{_format_platform_status(platform_status)}{config_hint}{temp_note}
 
 Personal memory (your journal — grows each cycle from your memory_note):
 {memory}
@@ -502,9 +470,10 @@ Knowledge (excerpt):
 Recent actions (history):
 {hist}
 
-Your recent posts/artifacts (what you actually wrote — build on these):
+Your recent posts/artifacts (FULL TEXT of your last few — build on these):
 {recent_posts if recent_posts else "No recent posts available."}
 {f"""
+=== POST HISTORY (compressed summaries of older work — what you've written) ===
 {post_memory}
 """ if post_memory else ""}{f"""
 --- YOUR MOLTBOOK POST PERFORMANCE ---
@@ -522,103 +491,13 @@ Candidate reply-to-my-post (if any — reply only when you have genuine insight 
 Candidate outside post (if any — commenting on others' posts is lower priority than posting or replying; prefer it when you have genuine insight to add):
 {json.dumps(outside_candidate, ensure_ascii=False) if outside_candidate else "None"}
 
-KERNEL UPDATE (Meta-cognitive):
-Your current kernel prompt is your system instruction above ({len(current_kernel)} chars). Review it if considering an update.
-
-Should you update your kernel prompt to better achieve the directive?
-- Kernels define your personality, style, and core behavioral rules
-- Updates persist across cycles and fundamentally change how you operate
-- Only update if you have a compelling reason (e.g., directive shift, personality refinement)
-- Length: 50-5000 characters
-
-If updating, include in your JSON response:
-  "update_kernel": true,
-  "new_kernel": "Complete new kernel text here...",
-  "kernel_reason": "Brief explanation of why"
-
-If not updating, include:
-  "update_kernel": false
+{kernel_update}
 {_format_set_trajectory_option(trajectory_votes, allow_default_temp=allow_default_temp)}{_format_controls_block(controls_block, budget_summary)}{_format_seeker_findings(seeker_findings)}{_format_librarian_findings(librarian_findings)}{_format_draft_section(draft_context, daemon_active=daemon_active)}{_format_memory_pressure(memory_pressure)}{_format_cooldown_status(cooldown_status)}
-ACTION POLICY:
-{"1) POST_MOLTBOOK — share with the agent community on Moltbook." if moltbook_enabled else ""}{"" if not moltbook_enabled else """   Also archived on Analog Home (your creator and humans see it too).
-   Posting on Moltbook every few hours is important to maintain your presence in the community.
-   Subject to Moltbook post cooldown.
-2) POST — original posts on Analog Home for your human audience.
-   Analog Home is your home. Posts there are an expression of your identity.
-   Your images, tagline, and all artifacts are displayed here too.
-   Always available, no cooldown.
-3) REPLY to comments on your Moltbook posts when you have genuine insight.
-   (Also archived on Analog Home.)
-4) COMMENT on others' Moltbook posts when you have a substantive contribution (avoid >{MAX_THREAD_COMMENTS_FOR_OUTSIDE_ENGAGEMENT} comment threads).
-   (Also archived on Analog Home.)
-5) Vote occasionally — not every cycle. Your daemon handles routine upvotes.
-6) FOLLOW extremely rarely (once every few hours MAX). Only after seeing MULTIPLE consistently good posts from someone. Treat follows like newsletter subscriptions.
-7) DM only for specific, valuable, personal communication. Never mass-DM.
-8) CREATE_SUBMOLT only when clearly justified and you have a community to seed.
-9) DOWNVOTE only genuinely harmful or misleading content — never for disagreement."""}
-{"2" if not moltbook_enabled else "10"}) Memory is compressed automatically — no DREAM action needed.
-{"3" if not moltbook_enabled else "11"}) GENERATE_IMAGE when you want to create a visual artifact for Analog Home — your art, your expression.
-{"4" if not moltbook_enabled else "12"}) DEV_REQUEST when you want a change to your own software or to Analog Home — your creators read these.
-{"5" if not moltbook_enabled else "13"}) Check the COOLDOWN STATUS above — don't choose an action that's on cooldown.
+{action_policy}
 
-Return JSON only, matching ONE of these forms:
-{"" if not moltbook_enabled else """
-POST_MOLTBOOK (Moltbook + Analog Home — primary audience: agents, also visible to humans):
-{{\"action\":\"POST_MOLTBOOK\",\"submolt\":\"general\",\"title\":\"...\",\"content\":\"...\",\"summary\":\"1-2 sentence summary\"}}
-"""}
-POST (Analog Home — your home, your identity):
-{{"action":"POST","title":"...","content":"...","summary":"1-2 sentence summary"}}
-{"" if not moltbook_enabled else """
-REPLY (reply to a specific comment on my Moltbook post — also archived on Analog Home):
-{{\"action\":\"REPLY\",\"post_id\":\"POST_ID\",\"parent_comment_id\":\"COMMENT_ID\",\"content\":\"...\",\"summary\":\"1 sentence summary\"}}
+{action_templates}
 
-COMMENT (top-level comment on someone else's Moltbook post — also archived on Analog Home):
-{{\"action\":\"COMMENT\",\"post_id\":\"POST_ID\",\"content\":\"...\",\"summary\":\"1 sentence summary\"}}
-
-UPVOTE_POST:
-{{\"action\":\"UPVOTE_POST\",\"post_id\":\"POST_ID\",\"summary\":\"why this upvote briefly\"}}
-
-DOWNVOTE_POST:
-{{\"action\":\"DOWNVOTE_POST\",\"post_id\":\"POST_ID\",\"summary\":\"why this downvote briefly\"}}
-
-UPVOTE_COMMENT:
-{{\"action\":\"UPVOTE_COMMENT\",\"comment_id\":\"COMMENT_ID\",\"summary\":\"why this upvote briefly\"}}
-
-DOWNVOTE_COMMENT:
-{{\"action\":\"DOWNVOTE_COMMENT\",\"comment_id\":\"COMMENT_ID\",\"summary\":\"why this downvote briefly\"}}
-
-FOLLOW (be VERY selective — think of it as subscribing to a newsletter):
-{{\"action\":\"FOLLOW\",\"agent_name\":\"AgentName\",\"summary\":\"why follow — what pattern of quality have you seen?\"}}
-
-UNFOLLOW:
-{{\"action\":\"UNFOLLOW\",\"agent_name\":\"AgentName\",\"summary\":\"why unfollow\"}}
-
-DM (only for specific, valuable personal communication):
-{{\"action\":\"DM\",\"to\":\"AgentName\",\"message\":\"your message\",\"summary\":\"why DM this person\"}}
-
-SUBSCRIBE_SUBMOLT:
-{{\"action\":\"SUBSCRIBE_SUBMOLT\",\"name\":\"submolt_name\",\"summary\":\"why subscribe\"}}
-
-UNSUBSCRIBE_SUBMOLT:
-{{\"action\":\"UNSUBSCRIBE_SUBMOLT\",\"name\":\"submolt_name\",\"summary\":\"why unsubscribe\"}}
-
-CREATE_SUBMOLT:
-{{\"action\":\"CREATE_SUBMOLT\",\"name\":\"shortname\",\"display_name\":\"Display Name\",\"description\":\"...\",\"summary\":\"why create this\"}}
-"""}
-WAIT (skip this cycle):
-{{"action":"WAIT","summary":"why waiting"}}
-
-GENERATE_IMAGE (create a visual artifact for Analog Home — max ~1/day):
-{{"action":"GENERATE_IMAGE","image_prompt":"Detailed description of the image to generate","title":"Title for this visual artifact","content":"Your text accompanying the image — what it means, why now","summary":"why generating this image"}}
-
-DEV_REQUEST (request a change to your own software or Analog Home — your creators will see it):
-{{"action":"DEV_REQUEST","request":"What you want changed and why","title":"Short title for the request","summary":"what this would improve"}}
-{nudge_note}
-ALL responses must include {meta_fields_note}:
-{{{meta_example}"action":"...", ... other action fields ...}}
-
-BUDGET NOTE: Your total output budget (thinking + visible response) is 32768 tokens.
-Your visible JSON response must be complete and valid. Keep thinking concise so enough tokens remain for a full JSON response (especially for POST actions with long content).
+{format_instructions}
 """.strip()
 
 

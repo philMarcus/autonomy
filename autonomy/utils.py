@@ -470,15 +470,9 @@ def migrate_memory_to_tiers(state: Dict[str, Any]) -> bool:
     return True
 
 
-COMPRESS_PROMPT = """Synthesize these memory entries into a coherent summary paragraph.
-Preserve: key discoveries, ongoing experiments, important relationships, unresolved questions, decisions made.
-Discard: routine actions, redundant observations.
-Write in first person past tense. Be thorough — keep the full substance of what was learned.
+from .prompt_templates import load_template
 
-Entries:
-{entries_text}
-
-Write ONLY the synthesized paragraph:"""
+COMPRESS_PROMPT = load_template("compressor/memory_user.txt")
 
 
 def compress_memory_tier(entries, chat_fn, tier_name="recent"):
@@ -528,15 +522,7 @@ def compress_memory_tier(entries, chat_fn, tier_name="recent"):
         return None
 
 
-POST_COMPRESS_PROMPT = """Synthesize these posts/comments into a summary of what was produced.
-Preserve: topics addressed, key ideas expressed, creative approaches, conversations engaged.
-Discard: formatting details, routine responses.
-Write in first person past tense. Be thorough.
-
-Posts:
-{entries_text}
-
-Write ONLY the synthesized paragraph:"""
+POST_COMPRESS_PROMPT = load_template("compressor/post_user.txt")
 
 
 def compress_post_tier(entries, chat_fn):

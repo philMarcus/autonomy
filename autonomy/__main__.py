@@ -43,6 +43,7 @@ from .llm.gemini import GeminiBackend
 from .platforms.moltbook import MoltbookClient
 from .challenges.math_verification import MathVerificationSolver
 from .espn import get_espn_context
+from .prompt_templates import load_template
 from .planner import (
     build_planner_prompt, plan_next_action, call_text,
 )
@@ -125,16 +126,10 @@ def _compress_drafts_to_digest(overflow_drafts, registry, ctrl) -> str:
     for d in overflow_drafts:
         lines.append(f"- [{d.signal_score:.2f}] {d.suggested_action} on {d.target_summary}: {d.reasoning[:160]}")
     bullets = "\n".join(lines)
-    prompt = (
-        "Your subconscious considered these lower-scoring items but none broke through to the top. "
-        "Write a 3-5 sentence thematic digest summarizing what patterns or topics were noticed, "
-        "without listing each item. No intro, no bullet points, just the paragraph.\n\n"
-        f"{bullets}\n\n"
-        "Digest:"
-    )
+    prompt = load_template("compressor/digest_user.txt").format(bullets=bullets)
     try:
         chat = registry.create_chat(
-            model_id=compressor, system_instruction="Summarize concisely.",
+            model_id=compressor, system_instruction=load_template("compressor/digest_system.txt"),
             temperature=0.4, max_output_tokens=400,
         )
         return chat.send_message(prompt).strip()
@@ -1121,7 +1116,7 @@ def main():
                     _acc_t0 = time.time()
                     bp_chat = registry.create_chat(
                         model_id=_accountant_model,
-                        system_instruction="You are a budget planner. Respond with valid JSON only.",
+                        system_instruction=load_template("accountant/system.txt"),
                         temperature=0.3,
                         max_output_tokens=1024,
                     )
@@ -1159,7 +1154,7 @@ def main():
                             try:
                                 _fallback_chat = registry.create_chat(
                                     model_id="ollama:gemma3:12b",
-                                    system_instruction="You are a budget planner. Respond with valid JSON only.",
+                                    system_instruction=load_template("accountant/system.txt"),
                                     temperature=0.3,
                                     max_output_tokens=1024,
                                 )

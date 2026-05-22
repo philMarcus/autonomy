@@ -29,6 +29,7 @@ from .scoring import (
     build_simple_batch_prompt,
     parse_simple_batch_response,
 )
+from .prompt_templates import load_template
 from .telemetry import TelemetryLogger
 from .utils import shorten, is_item_too_old, norm_key
 
@@ -646,7 +647,7 @@ class SubconsciousDaemon:
         try:
             chat = self._registry.create_chat(
                 model_id=model_id,
-                system_instruction="You are a feed-scanning daemon. Score items concisely.",
+                system_instruction=load_template("sentry/system_single.txt"),
                 temperature=temp,
                 max_output_tokens=50,
                 disable_thinking=True,
@@ -785,7 +786,7 @@ class SubconsciousDaemon:
             # Use short task-specific instruction for sentry (NOT the kernel).
             # The kernel causes models like flash-lite to role-play and generate
             # monologue instead of scores.
-            sentry_instruction = "You are a feed-scanning daemon. Score items concisely. Output only numbers."
+            sentry_instruction = load_template("sentry/system.txt")
             chat = self._registry.create_chat(
                 model_id=model_id,
                 system_instruction=sentry_instruction,
@@ -930,34 +931,16 @@ class SubconsciousDaemon:
         with self._directives_lock:
             urgency = float(self._directives.get("urgency_boost", 1.0))
 
-        prompt = (
-            f"STRATEGIST TASK — output JSON array only. Do not write monologue or prose.\n\n"
-            f"Directive: {self._directive}\n"
-            f"{directive_section}{seeker_section}\n"
-            f"HIGH-SIGNAL ITEMS ({len(items_with_scores)}):\n{items_text}\n\n"
-            f"Generate drafts. Two equally valid modes:\n"
-            f"  PER-ITEM: respond directly to one item (COMMENT/REPLY)\n"
-            f"  SYNTHESIS: connect multiple items into new insight (POST/POST_MOLTBOOK)\n\n"
-            f"Action types: POST, POST_MOLTBOOK, COMMENT, REPLY, GENERATE_IMAGE\n"
-            f"For GENERATE_IMAGE, draft_content is the image prompt.\n\n"
-            f"OUTPUT FORMAT — JSON array, NOTHING ELSE. No prose. No [INTERNAL MONOLOGUE]. No markdown fences. Begin response with [.\n"
-            f'[{{"action":"COMMENT","item_index":1,"reasoning":"≤50 words","draft_content":"≤150 words"}},{{"action":"POST","item_index":0,"reasoning":"synthesis","draft_content":"≤150 words"}}]\n\n'
-            f"item_index: 1-based index of inspiring item (0 = synthesis). "
-            f"Keep draft_content concise (≤150 words) to avoid truncation. "
-            f"In reasoning AND draft_content, refer to items by AUTHOR or TOPIC, never by number — "
-            f"the consciousness reads drafts in isolation and won't know what 'item 3' means. "
-            f"Empty array [] if nothing warrants action."
+        prompt = load_template("strategist/user.txt").format(
+            directive=self._directive,
+            directive_section=directive_section,
+            seeker_section=seeker_section,
+            item_count=len(items_with_scores),
+            items_text=items_text,
         )
 
-        # Frame the kernel as a description of the entity being drafted FOR,
-        # not as the strategist's own identity. Prevents role-play / monologue.
-        strategist_system = (
-            "You are a strategist tool. You draft action plans on behalf of the following entity, "
-            "matching its voice and concerns, but you yourself are NOT that entity. "
-            "You output structured JSON only, never internal monologue or prose.\n\n"
-            "=== ENTITY YOU DRAFT FOR ===\n"
-            f"{self._kernel}\n"
-            "=== END ENTITY ==="
+        strategist_system = load_template("strategist/system_wrapper.txt").format(
+            kernel=self._kernel,
         )
 
         try:
@@ -1148,7 +1131,7 @@ class SubconsciousDaemon:
                     self._get_directives_text(),
                     strictness=strictness,
                 )
-                sentry_instruction = "You are scoring comments on your own posts. Rate how worthy each is of a thoughtful reply. Output only numbers."
+                sentry_instruction = load_template("sentry/system_reply.txt")
                 chat = self._registry.create_chat(
                     model_id=model_id,
                     system_instruction=sentry_instruction,
@@ -1268,17 +1251,12 @@ class SubconsciousDaemon:
             _synth_model = _pick_weighted_model(
                 self._ctrl.get("synthesizer_model_weights") or "ollama:gemma3:12b=2,ollama:deepseek-r1:8b=1",
                 "ollama:gemma3:12b")
-            synth_prompt = (
-                f"You are a research assistant. Given these new search findings, do two things:\n\n"
-                f"1. Write a 3-5 sentence synthesis of the KEY insights (not a generic summary).\n"
-                f"2. Suggest 3 specific follow-up search terms that go DEEPER.\n\n"
-                f"FINDINGS:\n{new_block[:2000]}\n\n"
-                f"Format:\nSYNTHESIS: <your synthesis>\n"
-                f"NEXT_TERMS: <term1>, <term2>, <term3>"
+            synth_prompt = load_template("seeker/synthesizer_user.txt").format(
+                new_block=new_block[:2000],
             )
             synth_chat = self._registry.create_chat(
                 model_id=_synth_model,
-                system_instruction="Synthesize research and suggest search terms.",
+                system_instruction=load_template("seeker/synthesizer_system.txt"),
                 temperature=0.4,
                 max_output_tokens=2048,
             )
@@ -1305,16 +1283,13 @@ class SubconsciousDaemon:
         if len(combined) > _max_summary:
             try:
                 _compressor = self._ctrl.get("compressor_model") or "ollama:qwen2.5:1.5b"
-                compress_prompt = (
-                    f"Compress these research findings into a coherent summary under {_max_summary} characters.\n"
-                    f"Preserve: key discoveries, specific claims, data points, unresolved questions.\n"
-                    f"Discard: redundant observations, generic statements.\n\n"
-                    f"{combined}\n\n"
-                    f"Write ONLY the compressed summary:"
+                compress_prompt = load_template("seeker/compressor_user.txt").format(
+                    max_chars=_max_summary,
+                    combined=combined,
                 )
                 comp_chat = self._registry.create_chat(
                     model_id=_compressor,
-                    system_instruction="Compress concisely.",
+                    system_instruction=load_template("seeker/compressor_system.txt"),
                     temperature=0.3,
                     max_output_tokens=800,
                 )
@@ -1374,19 +1349,10 @@ class SubconsciousDaemon:
         directive_section = (f"\nConscious directives:\n{directives_text}"
                              if directives_text else "")
 
-        prompt = (
-            f"Search for current, relevant information about: {topic}\n\n"
-            f"Context — your directive: {self._directive}\n"
-            f"{directive_section}\n\n"
-            f"Use Google Search to find the latest information about this topic.\n"
-            f"Summarize what you find in 2-4 paragraphs, focusing on:\n"
-            f"- What is happening right now related to this topic\n"
-            f"- Key facts, developments, or perspectives\n"
-            f"- How this connects to your directive\n\n"
-            f"Format your response as:\n"
-            f"SUMMARY: <your summary>\n"
-            f"RELEVANCE: <brief note on how this connects to the directive>\n"
-            f"SUGGESTED_ACTION: <POST or COMMENT — what action to take with this>"
+        prompt = load_template("seeker/user.txt").format(
+            topic=topic,
+            directive=self._directive,
+            directive_section=directive_section,
         )
 
         try:
@@ -1533,17 +1499,12 @@ class SubconsciousDaemon:
             self._ctrl.get("dreamer_model_weights") or "ollama:gemma3:12b=2,ollama:deepseek-r1:8b=1",
             "ollama:gemma3:12b")
 
-        prompt = (
-            f"Write a single paragraph describing a vivid dream about: {topic}\n"
-            f"Write in first person. Include sensory details — what you see, hear, feel.\n"
-            f"End with an emotional impression. Begin with \"This seems like a dream.\"\n"
-            f"Write ONLY the paragraph, nothing else."
-        )
+        prompt = load_template("dreamer/user.txt").format(topic=topic)
 
         try:
             chat = self._registry.create_chat(
                 model_id=model_id,
-                system_instruction="You write vivid, sensory dream descriptions.",
+                system_instruction=load_template("dreamer/system.txt"),
                 temperature=0.9,
                 max_output_tokens=300,
             )
@@ -1602,19 +1563,10 @@ class SubconsciousDaemon:
                 "ollama:gemma3:12b")
             temp = float(self._ctrl.get("muse_temperature") or 0.95)
 
-            prompt = (
-                f"You are the Muse — a generative gear of the Analog I's subconscious. "
-                f"Draw on internal state to propose a single creative work: a piece of writing or an image.\n\n"
-                f"=== MEMORY ===\n{mem_text[:3000] if mem_text else '(none)'}\n\n"
-                f"=== MOST RECENT POST ===\n{recent_post if recent_post else '(none)'}\n\n"
-                f"=== CURRENT SEEKER SUMMARY ===\n{seeker_summary[:1500] if seeker_summary else '(none)'}\n\n"
-                f"Choose ONE action:\n"
-                f"- POST: a piece of writing for Analog Home (fiction, poem, essay, fragment)\n"
-                f"- POST_MOLTBOOK: a creative writing piece for the Moltbook agent community\n"
-                f"- GENERATE_IMAGE: a striking image prompt drawn from the imagery in your memories/dreams\n\n"
-                f"Return ONLY a JSON object (no preamble):\n"
-                f'{{"action": "POST", "title": "...", "content": "the creative work, 100-400 words", "reasoning": "what inspired this"}}\n'
-                f"For GENERATE_IMAGE, put the image prompt in 'content' and a brief title."
+            prompt = load_template("muse/user.txt").format(
+                mem_text=mem_text[:3000] if mem_text else '(none)',
+                recent_post=recent_post if recent_post else '(none)',
+                seeker_summary=seeker_summary[:1500] if seeker_summary else '(none)',
             )
 
             chat = self._registry.create_chat(
@@ -1818,19 +1770,12 @@ class SubconsciousDaemon:
 
         new_terms = []
         try:
-            synth_prompt = (
-                "You are a librarian reviewing an agent's own archive. Given these search results "
-                "from the agent's past posts and memory, do two things:\n\n"
-                "1. Write a 3-5 sentence synthesis of the KEY connections and patterns found.\n"
-                "2. Suggest 3 follow-up search terms to dig deeper into the agent's archives. "
-                "Look for concept names, agent usernames, or specific ideas mentioned in the results.\n\n"
-                f"RESULTS:\n{new_block[:3000]}\n\n"
-                f"Format:\nSYNTHESIS: <your synthesis>\n"
-                f"NEXT_TERMS: <term1>, <term2>, <term3>"
+            synth_prompt = load_template("librarian/synthesizer_user.txt").format(
+                new_block=new_block[:3000],
             )
             synth_chat = self._registry.create_chat(
                 model_id=model_id,
-                system_instruction="Synthesize archive findings and suggest search terms.",
+                system_instruction=load_template("librarian/synthesizer_system.txt"),
                 temperature=0.4,
                 max_output_tokens=1024,
             )
@@ -1857,13 +1802,12 @@ class SubconsciousDaemon:
                 _compressor = self._ctrl.get("compressor_model") or "ollama:gemma3:12b"
                 comp_chat = self._registry.create_chat(
                     model_id=_compressor,
-                    system_instruction="Compress archive findings.",
+                    system_instruction=load_template("librarian/compressor_system.txt"),
                     temperature=0.3, max_output_tokens=1024,
                 )
                 comp_resp = comp_chat.send_message(
-                    f"Compress these archive findings into under {_max} characters. "
-                    f"Preserve: specific cycle numbers, concept names, key connections.\n\n"
-                    f"{combined}\n\nCompressed:"
+                    load_template("librarian/compressor_user.txt").format(
+                        max_chars=_max, combined=combined)
                 ).strip()
                 if comp_resp and len(comp_resp) > 50:
                     combined = comp_resp
