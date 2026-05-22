@@ -67,8 +67,9 @@ def safe_print(text: str) -> None:
 
 def _format_draft_context(drafts: list, saved_plans: list,
                           wake_potential: float, threshold: float,
-                          digest: str = "") -> str:
+                          digest: str = "", ctrl=None) -> str:
     """Format subconscious drafts + saved plans for inclusion in the planner prompt."""
+    max_cycles = int(ctrl.get("saved_plan_max_cycles") or 5) if ctrl else 5
     lines = []
     if drafts:
         lines.append(f"Your subconscious noticed {len(drafts)} NEW item(s) of interest:")
@@ -79,7 +80,7 @@ def _format_draft_context(drafts: list, saved_plans: list,
             lines.append(f"   Suggested: {d.suggested_action} — {d.reasoning}")
             if d.draft_content:
                 _draft_label = "Rough draft (use as inspiration, rewrite in your voice)" if d.source == "muse" else "Draft"
-                lines.append(f"   {_draft_label}: {d.draft_content[:200]}")
+                lines.append(f"   {_draft_label}: {d.draft_content[:600]}")
         lines.append(f"\nWake potential: {wake_potential:.2f} (threshold: {threshold:.1f})")
     if saved_plans:
         lines.append(f"\nSAVED PLANS ({len(saved_plans)} from previous cycles — use or discard):")
@@ -87,17 +88,18 @@ def _format_draft_context(drafts: list, saved_plans: list,
             source_tag = " [HUMAN SEED]" if d.source == "seed" else " [SEARCH]" if d.source == "search" else " [MUSE]" if d.source == "muse" else ""
             model_tag = f" [by {d.model}]" if d.model else ""
             age = f"saved {d.cycles_saved} cycle(s) ago"
-            lines.append(f"\n  S{i}. [sentry score: {d.signal_score:.2f}]{source_tag}{model_tag} {d.target_summary} ({age})")
+            expiry_tag = " [EXPIRES NEXT CYCLE]" if d.cycles_saved >= max_cycles - 1 else ""
+            lines.append(f"\n  S{i}. [sentry score: {d.signal_score:.2f}]{source_tag}{model_tag}{expiry_tag} {d.target_summary} ({age})")
             lines.append(f"      Suggested: {d.suggested_action} — {d.reasoning}")
             if d.draft_content:
                 _draft_label = "Rough draft (use as inspiration, rewrite in your voice)" if d.source == "muse" else "Draft"
-                lines.append(f"      {_draft_label}: {d.draft_content[:200]}")
+                lines.append(f"      {_draft_label}: {d.draft_content[:600]}")
     if digest:
         lines.append("\nYour subconscious also noticed these less-prominent themes (lower-scoring drafts, summarized):")
         lines.append(digest)
     if drafts or saved_plans:
         lines.append("\nYou may act on any of these, synthesize multiple into one action, or ignore them.")
-        lines.append("Plans you don't act on will be saved for future cycles (up to 5 cycles).")
+        lines.append(f"Plans you don't act on will be saved for future cycles (up to {max_cycles} cycles).")
     return "\n".join(lines)
 
 
@@ -161,7 +163,7 @@ def _compress_post_memory(state, registry, ctrl):
     _compressor = ctrl.get("compressor_model") if ctrl else "ollama:gemma3:12b"
     def _compress_fn(prompt):
         _c = registry.create_chat(
-            model_id=_compressor, system_instruction="Summarize concisely.",
+            model_id=_compressor, system_instruction=load_template("compressor/post_system.txt"),
             temperature=0.3, max_output_tokens=512)
         return _c.send_message(prompt)
 
@@ -1477,45 +1479,37 @@ def main():
             if fresh_drafts or saved_plans or draft_digest:
                 draft_context = _format_draft_context(
                     fresh_drafts, saved_plans, wake_pot, draft_buffer._wake_threshold,
-                    digest=draft_digest,
+                    digest=draft_digest, ctrl=ctrl,
                 )
 
         # Platform write status for planner awareness
         if platform is None:
-            platform_status = "No platform API key — feeds and writes unavailable."
+            platform_status = load_template("conscious/platform_no_key.txt")
         elif flags.get("write_disabled"):
-            platform_status = (
-                f"READS OK, WRITES BLOCKED ({flags['write_disabled_reason']}). "
-                "POST/COMMENT/REPLY will fail on Moltbook."
-            )
+            platform_status = load_template("conscious/platform_writes_blocked.txt").format(
+                reason=flags['write_disabled_reason'])
         elif flags.get("moltbook_disabled"):
-            platform_status = "READS OK, MOLTBOOK WRITES OFF. Posts/comments archived to Analog Home only."
+            platform_status = load_template("conscious/platform_moltbook_off.txt")
         else:
-            platform_status = "Moltbook ONLINE (reads + writes active)."
+            platform_status = load_template("conscious/platform_online.txt")
 
         # Build nudges for actions the agent hasn't done recently
         _nudge_parts = []
         _img_ok, _img_secs = can_do(state, "GENERATE_IMAGE", ctrl=ctrl)
         if _img_ok:
-            # How long since last image?
             _last_img_ts = state.get("last_action_ts", {}).get("GENERATE_IMAGE", 0)
             _hours_since = (time.time() - _last_img_ts) / 3600 if _last_img_ts else 9999
             if _hours_since > 48:
-                _nudge_parts.append(
-                    f"GENERATE_IMAGE is available — it has been {int(_hours_since)} hours since your last image. "
-                    f"Consider creating a striking visual artifact. Images are first-class output, "
-                    f"not a luxury. The Muse and Strategist may also propose them."
-                )
+                _nudge_parts.append(load_template("conscious/nudge_image_overdue.txt").format(
+                    hours_since=int(_hours_since)))
             elif _hours_since > 24:
-                _nudge_parts.append(
-                    f"GENERATE_IMAGE is available ({int(_hours_since)}h since last image) — "
-                    f"consider a visual artifact if any imagery from your dreams or recent posts calls for it."
-                )
+                _nudge_parts.append(load_template("conscious/nudge_image_available.txt").format(
+                    hours_since=int(_hours_since)))
             else:
-                _nudge_parts.append("GENERATE_IMAGE is available — consider creating a visual artifact if inspiration strikes.")
+                _nudge_parts.append(load_template("conscious/nudge_image_ready.txt"))
         _last_tagline = state.get("_last_tagline_cycle", 0)
         if iteration - _last_tagline >= 20:
-            _nudge_parts.append("You haven't updated your Analog Home tagline recently — consider refreshing it if your focus has shifted.")
+            _nudge_parts.append(load_template("conscious/nudge_tagline.txt"))
         nudge_note = ("\n--- NUDGES ---\n" + "\n".join(_nudge_parts) + "\n") if _nudge_parts else ""
 
         prompt = build_planner_prompt(
@@ -1736,7 +1730,7 @@ def main():
 
                 def _compress_fn(prompt):
                     _c = registry.create_chat(
-                        model_id=_compressor, system_instruction="Summarize concisely.",
+                        model_id=_compressor, system_instruction=load_template("compressor/memory_system.txt"),
                         temperature=0.3, max_output_tokens=512)
                     return _c.send_message(prompt)
 
@@ -2392,29 +2386,22 @@ def main():
                                             f"Comment you are replying to: {reply_candidate.get('comment_content', '')}\n"
                                             f"Comment author: {reply_candidate.get('comment_author', '')}\n"
                                         )
-                                    regen_prompt = (
-                                        "You are writing a reply to a comment on one of my own posts.\n"
-                                        f"Directive: {user_directive}\n"
-                                        f"{reply_ctx}"
-                                        f"Recent feed context:\n{feed_brief[:800]}\n\n"
-                                        "Write a thoughtful, substantive reply that addresses the specific comment above. "
-                                        "Return ONLY the reply text (no labels)."
+                                    regen_prompt = load_template("conscious/regen_reply.txt").format(
+                                        directive=user_directive,
+                                        reply_ctx=reply_ctx,
+                                        feed_context=feed_brief[:800],
                                     )
                                 elif act2 == "COMMENT":
-                                    regen_prompt = (
-                                        "You are writing a comment on someone else's post.\n"
-                                        f"Directive: {user_directive}\n"
-                                        f"Post URL: {post_url(fallback_plan.get('post_id',''))}\n"
-                                        f"Recent feed context:\n{feed_brief[:800]}\n\n"
-                                        "Write a thoughtful, substantive comment. Return ONLY the comment text (no labels)."
+                                    regen_prompt = load_template("conscious/regen_comment.txt").format(
+                                        directive=user_directive,
+                                        post_url=post_url(fallback_plan.get('post_id','')),
+                                        feed_context=feed_brief[:800],
                                     )
                                 elif act2 == "POST":
-                                    regen_prompt = (
-                                        "You are writing a new standalone post.\n"
-                                        f"Directive: {user_directive}\n"
-                                        f"Recent feed context:\n{feed_brief[:800]}\n"
-                                        f"Recent history:\n{hist_txt[:800]}\n\n"
-                                        "Write a thoughtful, substantive post. Return ONLY the post content (no title, no labels)."
+                                    regen_prompt = load_template("conscious/regen_post.txt").format(
+                                        directive=user_directive,
+                                        feed_context=feed_brief[:800],
+                                        hist_context=hist_txt[:800],
                                     )
                                 else:
                                     regen_prompt = None

@@ -1,0 +1,1 @@
+No platform API key — feeds and writes unavailable.

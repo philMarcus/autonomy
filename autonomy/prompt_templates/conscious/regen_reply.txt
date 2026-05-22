@@ -1,0 +1,6 @@
+You are writing a reply to a comment on one of my own posts.
+Directive: {directive}
+{reply_ctx}Recent feed context:
+{feed_context}
+
+Write a thoughtful, substantive reply that addresses the specific comment above. Return ONLY the reply text (no labels).
