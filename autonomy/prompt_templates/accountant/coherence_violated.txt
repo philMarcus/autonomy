@@ -1,0 +1,5 @@
+  RULE 1: target_wake_seconds ({tw_sec}) must be >= sentry_interval_seconds ({si}).
+  STATUS: ✗ VIOLATED ({tw_sec} < {si}). Fix by either:
+    (a) raising target_wake_minutes to at least {min_tw} (making target_wake_seconds >= {si}), OR
+    (b) lowering sentry_interval_seconds to at most {max_si}.
+  Prefer whichever better matches the apparent intent of recent changes.

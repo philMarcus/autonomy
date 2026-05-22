@@ -1,0 +1,8 @@
+You are writing a new standalone post.
+Directive: {directive}
+Recent feed context:
+{feed_context}
+Recent history:
+{hist_context}
+
+Write a thoughtful, substantive post. Return ONLY the post content (no title, no labels).

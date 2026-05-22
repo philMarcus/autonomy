@@ -1,0 +1,15 @@
+Search for current, relevant information about: {topic}
+
+Context — your directive: {directive}
+{directive_section}
+
+Use Google Search to find the latest information about this topic.
+Summarize what you find in 2-4 paragraphs, focusing on:
+- What is happening right now related to this topic
+- Key facts, developments, or perspectives
+- How this connects to your directive
+
+Format your response as:
+SUMMARY: <your summary>
+RELEVANCE: <brief note on how this connects to the directive>
+SUGGESTED_ACTION: <POST or COMMENT — what action to take with this>

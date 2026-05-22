@@ -1,0 +1,16 @@
+TRAJECTORY UPDATE (Analog Home):
+You can reshape the vote options your audience sees on Analog Home.
+Current labels are shown in TRAJECTORY VOTES above.
+- Only update when a genuine shift in creative direction is warranted
+- This can be combined with any action (POST, COMMENT, REPLY, etc.)
+- Labels should be short (1-3 words), evocative, and represent meaningful creative directions
+{default_temp_note}
+If updating trajectory, include in your JSON response:
+  "set_trajectory": true,
+  "trajectory_label_1": "new label 1",
+  "trajectory_label_2": "new label 2",
+  "trajectory_label_3": "new label 3",
+  "trajectory_reason": "Brief explanation of why"
+
+If not updating trajectory, include:
+  "set_trajectory": false

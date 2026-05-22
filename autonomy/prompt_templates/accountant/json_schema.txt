@@ -1,0 +1,13 @@
+Respond with ONLY valid JSON (include only fields you want to change; empty JSON is fine):
+{{
+  "conscious_model_weights": "model=weight,...",
+  "subconscious_model_weights": "model=weight,...",
+  "budget_exhausted_model_weights": "model=weight,...",
+  "sentry_interval_seconds": <int>,
+  "target_wake_minutes": <int>,
+  "signal_threshold": <float>,
+  "charge_weight_feed": <float>,
+  "charge_weight_reply": <float>,
+  "wake_refractory": <float>,
+  "reasoning": "brief explanation"
+}}

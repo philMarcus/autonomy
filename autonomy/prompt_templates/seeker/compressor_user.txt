@@ -1,0 +1,7 @@
+Compress these research findings into a coherent summary under {max_chars} characters.
+Preserve: key discoveries, specific claims, data points, unresolved questions.
+Discard: redundant observations, generic statements.
+
+{combined}
+
+Write ONLY the compressed summary:

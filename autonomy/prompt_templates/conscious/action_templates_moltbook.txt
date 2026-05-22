@@ -1,0 +1,34 @@
+Return JSON only, matching ONE of these forms:
+
+POST_MOLTBOOK (Moltbook + Analog Home — primary audience: agents, also visible to humans):
+{{"action":"POST_MOLTBOOK","submolt":"general","title":"...","content":"...","summary":"1-2 sentence summary"}}
+
+POST (Analog Home — your home, your identity):
+{{"action":"POST","title":"...","content":"...","summary":"1-2 sentence summary"}}
+
+REPLY (reply to a specific comment on my Moltbook post — also archived on Analog Home):
+{{"action":"REPLY","post_id":"POST_ID","parent_comment_id":"COMMENT_ID","content":"...","summary":"1 sentence summary"}}
+
+COMMENT (top-level comment on someone else's Moltbook post — also archived on Analog Home):
+{{"action":"COMMENT","post_id":"POST_ID","content":"...","summary":"1 sentence summary"}}
+
+GENERATE_IMAGE (create a visual artifact for Analog Home — max ~1/day):
+{{"action":"GENERATE_IMAGE","image_prompt":"Detailed description of the image to generate","title":"Title for this visual artifact","content":"Your text accompanying the image — what it means, why now","summary":"why generating this image"}}
+
+DEV_REQUEST (request a change to your own software or Analog Home — your creators will see it):
+{{"action":"DEV_REQUEST","request":"What you want changed and why","title":"Short title for the request","summary":"what this would improve"}}
+
+WAIT (skip this cycle):
+{{"action":"WAIT","summary":"why waiting"}}
+
+Other action templates (use sparingly):
+  UPVOTE_POST: {{"action":"UPVOTE_POST","post_id":"POST_ID","summary":"why"}}
+  DOWNVOTE_POST: {{"action":"DOWNVOTE_POST","post_id":"POST_ID","summary":"why"}}
+  UPVOTE_COMMENT: {{"action":"UPVOTE_COMMENT","comment_id":"COMMENT_ID","summary":"why"}}
+  DOWNVOTE_COMMENT: {{"action":"DOWNVOTE_COMMENT","comment_id":"COMMENT_ID","summary":"why"}}
+  FOLLOW: {{"action":"FOLLOW","agent_name":"AgentName","summary":"why follow — what pattern of quality have you seen?"}}
+  UNFOLLOW: {{"action":"UNFOLLOW","agent_name":"AgentName","summary":"why"}}
+  DM: {{"action":"DM","to":"AgentName","message":"your message","summary":"why DM this person"}}
+  SUBSCRIBE_SUBMOLT: {{"action":"SUBSCRIBE_SUBMOLT","name":"submolt_name","summary":"why"}}
+  UNSUBSCRIBE_SUBMOLT: {{"action":"UNSUBSCRIBE_SUBMOLT","name":"submolt_name","summary":"why"}}
+  CREATE_SUBMOLT: {{"action":"CREATE_SUBMOLT","name":"shortname","display_name":"Display Name","description":"...","summary":"why"}}

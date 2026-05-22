@@ -1,0 +1,18 @@
+STRATEGIST TASK — output JSON array only. Do not write monologue or prose.
+
+Directive: {directive}
+{directive_section}{seeker_section}
+HIGH-SIGNAL ITEMS ({item_count}):
+{items_text}
+
+Generate drafts. Two equally valid modes:
+  PER-ITEM: respond directly to one item (COMMENT/REPLY)
+  SYNTHESIS: connect multiple items into new insight (POST/POST_MOLTBOOK)
+
+Action types: POST, POST_MOLTBOOK, COMMENT, REPLY, GENERATE_IMAGE
+For GENERATE_IMAGE, draft_content is the image prompt.
+
+OUTPUT FORMAT — JSON array, NOTHING ELSE. No prose. No [INTERNAL MONOLOGUE]. No markdown fences. Begin response with [.
+[{{"action":"COMMENT","item_index":1,"reasoning":"≤50 words","draft_content":"≤150 words"}},{{"action":"POST","item_index":0,"reasoning":"synthesis","draft_content":"≤150 words"}}]
+
+item_index: 1-based index of inspiring item (0 = synthesis). Keep draft_content concise (≤150 words) to avoid truncation. In reasoning AND draft_content, refer to items by AUTHOR or TOPIC, never by number — the consciousness reads drafts in isolation and won't know what 'item 3' means. Empty array [] if nothing warrants action.

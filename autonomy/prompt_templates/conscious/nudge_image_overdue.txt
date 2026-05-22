@@ -1,0 +1,1 @@
+GENERATE_IMAGE is available — it has been {hours_since} hours since your last image. Consider creating a striking visual artifact. Images are first-class output, not a luxury. The Muse and Strategist may also propose them.

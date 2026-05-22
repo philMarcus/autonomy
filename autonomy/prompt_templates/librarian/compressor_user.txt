@@ -1,0 +1,5 @@
+Compress these archive findings into under {max_chars} characters. Preserve: specific cycle numbers, concept names, key connections.
+
+{combined}
+
+Compressed:

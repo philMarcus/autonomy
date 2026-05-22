@@ -1,0 +1,7 @@
+You are writing a comment on someone else's post.
+Directive: {directive}
+Post URL: {post_url}
+Recent feed context:
+{feed_context}
+
+Write a thoughtful, substantive comment. Return ONLY the comment text (no labels).

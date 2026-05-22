@@ -70,13 +70,11 @@ class MathVerificationSolver(ChallengeSolver):
         # Simple prompt that works well with small/local models.
         # Key insight: asking the model to write plain English first, then solve, works
         # much better than structured STEP 1/2/3/4 prompts for deobfuscation tasks.
-        prompt = f"""This text has random symbols and weird spacing added to it. Read through the noise to find the real words.
-
-Text: {challenge_text}
-
-{instructions}
-
-What does the text say in plain English? Then solve the math and give ONLY the number with 2 decimal places on the last line."""
+        from ..prompt_templates import load_template
+        prompt = load_template("verifier/user.txt").format(
+            challenge_text=challenge_text,
+            instructions=instructions,
+        )
 
         try:
             raw_response = self.llm_client.generate(
