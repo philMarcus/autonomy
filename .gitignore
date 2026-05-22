@@ -26,6 +26,9 @@ brains/*
 brains/**/*
 !brains/kernel_prompt.txt
 !brains/knowledge.txt
+# Prompt bench output
+/prompts
+
 # Virtual environment
 .venv/
 
