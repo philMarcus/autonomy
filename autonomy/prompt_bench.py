@@ -78,6 +78,28 @@ def extract_conscious(brain_name, state, kernel, knowledge, ctrl, budget, regist
     from .planner import build_planner_prompt
     from .cooldowns import cooldown_status_text
 
+    # Check for a live snapshot first (written by the agent each cycle)
+    snap_dir = os.path.join("prompts", "snapshots", "conscious")
+    snap_user = os.path.join(snap_dir, "user.txt")
+    snap_sys = os.path.join(snap_dir, "system.txt")
+    if os.path.exists(snap_user) and os.path.exists(snap_sys):
+        with open(snap_sys, "r", encoding="utf-8") as f:
+            _snap_kernel = f.read()
+        with open(snap_user, "r", encoding="utf-8") as f:
+            _snap_prompt = f.read()
+        snap_meta = {}
+        _snap_meta_path = os.path.join(snap_dir, "metadata.json")
+        if os.path.exists(_snap_meta_path):
+            with open(_snap_meta_path, "r") as f:
+                snap_meta = json.load(f)
+        snap_meta.update({
+            "gear": "conscious",
+            "notes": f"LIVE SNAPSHOT from cycle {snap_meta.get('cycle', '?')}. "
+                     "Exact prompt sent to the conscious model.",
+        })
+        return _snap_kernel, _snap_prompt, snap_meta
+
+    # No snapshot available — build from state (feed/drafts will be empty)
     directive = state.get("directive", "Participate on Moltbook.")
     mem = memory_context(state)
     hist = history_context(state, n=int(ctrl.get("history_context_n") or 15))
@@ -136,9 +158,9 @@ def extract_conscious(brain_name, state, kernel, knowledge, ctrl, budget, regist
         allow_default_temp=True,
         controls_block=controls_block,
         budget_summary=budget_summary,
-        draft_context="(no subconscious drafts this extraction)",
-        seeker_findings="(no seeker findings this extraction)",
-        librarian_findings="(no librarian findings this extraction)",
+        draft_context="(no snapshot available — run the agent once to generate prompts/snapshots/conscious/)",
+        seeker_findings="",
+        librarian_findings="",
         memory_pressure=f"recent={len(state.get('memory_tiers', {}).get('recent', []))}, "
                         f"compressed={len(state.get('memory_tiers', {}).get('compressed', []))}, "
                         f"deep={len(state.get('memory_tiers', {}).get('deep', []))}",
@@ -146,7 +168,7 @@ def extract_conscious(brain_name, state, kernel, knowledge, ctrl, budget, regist
         platform_status="",
         cooldown_status=cooldown_status,
         nudge_note="",
-        self_telemetry="(self-telemetry placeholder)",
+        self_telemetry="(no snapshot available — run the agent once to populate)",
         recent_posts=recent_posts if recent_posts else "(no recent posts)",
         post_memory=post_memory,
     )
