@@ -128,7 +128,11 @@ def _chat_with_tools(ollama_url: str, model: str, messages: list,
         if round_num == max_rounds:
             del payload["tools"]
 
-        resp = requests.post(url, json=payload, timeout=600)
+        print(f"  [round {round_num}] thinking...", end="", flush=True)
+        _round_t0 = time.time()
+        resp = requests.post(url, json=payload, timeout=1800)
+        _round_elapsed = time.time() - _round_t0
+        print(f" ({_round_elapsed:.0f}s)")
         if resp.status_code == 400:
             err = resp.json().get("error", "")
             if "does not support tools" in err:
@@ -281,7 +285,7 @@ def main():
                 "options": options,
             }
             print("Waiting for response...")
-            resp = requests.post(f"{args.ollama_url}/api/chat", json=payload, timeout=600)
+            resp = requests.post(f"{args.ollama_url}/api/chat", json=payload, timeout=1800)
             resp.raise_for_status()
             data = resp.json()
             content = data.get("message", {}).get("content", "")
