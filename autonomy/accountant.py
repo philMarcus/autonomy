@@ -14,6 +14,7 @@ import time
 from typing import Any, Dict, Optional
 
 from .llm.budget import DailyBudget, COST_TABLE, estimate_cost
+from .prompt_templates import load_template
 
 
 def should_run_budget_plan(
@@ -89,8 +90,7 @@ def build_budget_plan_prompt(
     hours_left = max(0.0, 24.0 - (now.hour + now.minute / 60))
 
     prompt_parts = [
-        "You are reviewing your daily budget allocation. Analyze the current spend rate "
-        "and recommend adjustments to stay within budget while maximizing output quality.\n",
+        load_template("accountant/intro.txt") + "\n",
         f"--- CURRENT BUDGET STATUS ---\n{summary}\n",
         f"--- COST PROJECTION AT CURRENT SETTINGS ---",
         f"Estimated daily cost: ${projection['total']:.4f}",
@@ -120,28 +120,16 @@ def build_budget_plan_prompt(
     _rule1_ok = _tw_sec >= _si
     prompt_parts.append("")
     prompt_parts.append("--- COHERENCE STATUS (precomputed in SECONDS — use these numbers directly) ---")
-    prompt_parts.append(f"  target_wake (in seconds):    {_tw_sec:>5}   [= {_tw} minutes × 60]")
+    prompt_parts.append(f"  target_wake (in seconds):    {_tw_sec:>5}   [= {_tw} minutes x 60]")
     prompt_parts.append(f"  sentry_interval (in seconds):{_si:>5}   [already in seconds — no conversion needed]")
     if _rule1_ok:
-        prompt_parts.append(
-            f"  RULE 1: target_wake_seconds ({_tw_sec}) must be >= sentry_interval_seconds ({_si})."
-        )
-        prompt_parts.append(
-            f"  STATUS: ✓ SATISFIED ({_tw_sec} >= {_si}). Nothing to fix. Do NOT touch "
-            "target_wake_minutes or sentry_interval_seconds for coherence reasons."
-        )
+        prompt_parts.append(load_template("accountant/coherence_satisfied.txt").format(
+            tw_sec=_tw_sec, si=_si))
     else:
         _min_tw = (_si + 59) // 60  # ceiling division
         _max_si = _tw_sec
-        prompt_parts.append(
-            f"  RULE 1: target_wake_seconds ({_tw_sec}) must be >= sentry_interval_seconds ({_si})."
-        )
-        prompt_parts.append(
-            f"  STATUS: ✗ VIOLATED ({_tw_sec} < {_si}). Fix by either:"
-        )
-        prompt_parts.append(f"    (a) raising target_wake_minutes to at least {_min_tw} (making target_wake_seconds >= {_si}), OR")
-        prompt_parts.append(f"    (b) lowering sentry_interval_seconds to at most {_max_si}.")
-        prompt_parts.append("  Prefer whichever better matches the apparent intent of recent changes.")
+        prompt_parts.append(load_template("accountant/coherence_violated.txt").format(
+            tw_sec=_tw_sec, si=_si, min_tw=_min_tw, max_si=_max_si))
 
     # Available model alternatives
     if COST_TABLE:
@@ -168,73 +156,8 @@ def build_budget_plan_prompt(
         except (json.JSONDecodeError, OSError):
             pass
 
-    prompt_parts.extend([
-        "\n--- YOUR ROLE ---",
-        "You are the accountant. You run every cycle. You have TWO equally-important duties:",
-        "  (1) COHERENCE — ensure wake/budget settings are mechanically consistent.",
-        "  (2) BUDGET — keep projected spend within the daily limit.",
-        "Check COHERENCE first on every cycle. Budget can look fine on paper while the system",
-        "is waking 5× faster than intended because of an incoherent setting. Coherence is",
-        "NOT just for when budget is tight — it is the foundation on which budget projections",
-        "depend. If any coherence rule is violated, fix it even if budget looks healthy.",
-        "",
-        "The conscious planner owns content, relationships, and signal/noise judgment. It may",
-        "set target_wake_minutes, signal_threshold, charge_weight_feed, charge_weight_reply",
-        "for non-budget reasons. Respect those as expressed preferences — unless they violate",
-        "a coherence rule, in which case you must fix the rule while disturbing conscious's",
-        "intent as little as possible.",
-        "",
-        "Only include fields in your JSON that you want to change. Empty JSON is fine.",
-        "",
-        "How wake works:",
-        "The daemon's sentry ticks every sentry_interval_seconds and scores feed items.",
-        "Above-threshold items add charge_weight_feed to wake_potential. When wake_potential",
-        "crosses an auto-calibrated threshold (tuned to target_wake_minutes on average),",
-        "conscious fires. max_cycle_interval_minutes is a long safety-net ceiling (operator-set).",
-        "",
-        "COHERENCE RULES — check EVERY cycle, fix if violated:",
-        "- RULE 1: target_wake_minutes * 60 MUST be >= sentry_interval_seconds.",
-        "  Reason: the daemon can't wake consciousness faster than it ticks. If this is",
-        "  violated, the auto-calibrator drives wake_threshold extremely low and conscious",
-        "  fires on the first small charge → runaway wake rate → budget blowout.",
-        "  Fix: raise target_wake_minutes to at least (sentry_interval_seconds / 60),",
-        "  OR lower sentry_interval_seconds to at most (target_wake_minutes * 60).",
-        "  Prefer the fix that better matches the apparent intent.",
-        "",
-        "Budget conservation priority (try in this order when spend is projected over budget):",
-        "1. Raise sentry_interval_seconds — fewer scans = fewer charge events (yours alone)",
-        "2. Raise target_wake_minutes — longer intervals between cycles (shared with conscious)",
-        "3. Raise signal_threshold — fewer items score above cutoff (shared)",
-        "4. Reduce charge_weight_feed — each item contributes less charge (shared)",
-        "5. Downgrade conscious_model_weights ONLY as a last resort",
-        "",
-        "Budget relaxation (when well under budget with headroom):",
-        "- Lower sentry_interval_seconds or nudge target_wake_minutes down",
-        "- Don't make changes <10% of current — the apply layer enforces this",
-        "- If budget is 0 or negative remaining, the conscious already auto-swaps to the",
-        "  budget_exhausted_model_weights pool. You don't need to force it.",
-        "",
-        "CRITICAL: if your reasoning says you will change a control, you MUST include that",
-        "control as a top-level JSON field — not just mention it in the reasoning string.",
-        "Example of WRONG response (change gets ignored):",
-        '  {\"reasoning\": \"I will raise target_wake_minutes to 60\"}',
-        "Example of CORRECT response (change applied):",
-        '  {\"target_wake_minutes\": 60, \"reasoning\": \"Raising to fix coherence\"}',
-        "",
-        "Respond with ONLY valid JSON (include only fields you want to change; empty JSON is fine):",
-        '{',
-        '  "conscious_model_weights": "model=weight,...",',
-        '  "subconscious_model_weights": "model=weight,...",',
-        '  "budget_exhausted_model_weights": "model=weight,...",',
-        '  "sentry_interval_seconds": <int>,',
-        '  "target_wake_minutes": <int>,',
-        '  "signal_threshold": <float>,',
-        '  "charge_weight_feed": <float>,',
-        '  "charge_weight_reply": <float>,',
-        '  "wake_refractory": <float>,',
-        '  "reasoning": "brief explanation"',
-        '}',
-    ])
+    prompt_parts.append("\n" + load_template("accountant/role_and_rules.txt"))
+    prompt_parts.append("\n" + load_template("accountant/json_schema.txt"))
 
     return "\n".join(prompt_parts)
 

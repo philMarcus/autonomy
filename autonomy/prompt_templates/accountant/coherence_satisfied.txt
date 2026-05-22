@@ -1,0 +1,2 @@
+  RULE 1: target_wake_seconds ({tw_sec}) must be >= sentry_interval_seconds ({si}).
+  STATUS: ✓ SATISFIED ({tw_sec} >= {si}). Nothing to fix. Do NOT touch target_wake_minutes or sentry_interval_seconds for coherence reasons.
