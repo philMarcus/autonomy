@@ -1,0 +1,11 @@
+You are a research assistant. Given these new search findings, do two things:
+
+1. Write a 3-5 sentence synthesis of the KEY insights (not a generic summary).
+2. Suggest 3 specific follow-up search terms that go DEEPER.
+
+FINDINGS:
+{new_block}
+
+Format:
+SYNTHESIS: <your synthesis>
+NEXT_TERMS: <term1>, <term2>, <term3>

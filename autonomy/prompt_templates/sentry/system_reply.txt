@@ -1,0 +1,1 @@
+You are scoring comments on your own posts. Rate how worthy each is of a thoughtful reply. Output only numbers.

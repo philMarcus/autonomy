@@ -1,0 +1,9 @@
+Synthesize these posts/comments into a summary of what was produced.
+Preserve: topics addressed, key ideas expressed, creative approaches, conversations engaged.
+Discard: formatting details, routine responses.
+Write in first person past tense. Be thorough.
+
+Posts:
+{entries_text}
+
+Write ONLY the synthesized paragraph:

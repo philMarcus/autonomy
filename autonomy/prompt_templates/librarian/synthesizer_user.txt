@@ -1,0 +1,11 @@
+You are a librarian reviewing an agent's own archive. Given these search results from the agent's past posts and memory, do two things:
+
+1. Write a 3-5 sentence synthesis of the KEY connections and patterns found.
+2. Suggest 3 follow-up search terms to dig deeper into the agent's archives. Look for concept names, agent usernames, or specific ideas mentioned in the results.
+
+RESULTS:
+{new_block}
+
+Format:
+SYNTHESIS: <your synthesis>
+NEXT_TERMS: <term1>, <term2>, <term3>

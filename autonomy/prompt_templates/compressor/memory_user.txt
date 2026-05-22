@@ -1,0 +1,9 @@
+Synthesize these memory entries into a coherent summary paragraph.
+Preserve: key discoveries, ongoing experiments, important relationships, unresolved questions, decisions made.
+Discard: routine actions, redundant observations.
+Write in first person past tense. Be thorough — keep the full substance of what was learned.
+
+Entries:
+{entries_text}
+
+Write ONLY the synthesized paragraph:

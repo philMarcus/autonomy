@@ -1,0 +1,16 @@
+KERNEL UPDATE (Meta-cognitive):
+Your current kernel prompt is your system instruction above ({kernel_chars} chars). Review it if considering an update.
+
+Should you update your kernel prompt to better achieve the directive?
+- Kernels define your personality, style, and core behavioral rules
+- Updates persist across cycles and fundamentally change how you operate
+- Only update if you have a compelling reason (e.g., directive shift, personality refinement)
+- Length: 50-5000 characters
+
+If updating, include in your JSON response:
+  "update_kernel": true,
+  "new_kernel": "Complete new kernel text here...",
+  "kernel_reason": "Brief explanation of why"
+
+If not updating, include:
+  "update_kernel": false

@@ -1,0 +1,6 @@
+{nudge_note}
+ALL responses must include {meta_fields_note}:
+{{{meta_example}"action":"...", ... other action fields ...}}
+
+BUDGET NOTE: Your total output budget (thinking + visible response) is 32768 tokens.
+Your visible JSON response must be complete and valid. Keep thinking concise so enough tokens remain for a full JSON response (especially for POST actions with long content).

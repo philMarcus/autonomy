@@ -1,0 +1,5 @@
+Your subconscious considered these lower-scoring items but none broke through to the top. Write a 3-5 sentence thematic digest summarizing what patterns or topics were noticed, without listing each item. No intro, no bullet points, just the paragraph.
+
+{bullets}
+
+Digest:

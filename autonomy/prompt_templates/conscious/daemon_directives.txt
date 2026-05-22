@@ -1,0 +1,7 @@
+--- DAEMON DIRECTIVES (REQUIRED) ---
+You MUST include "daemon_directives": {{...}} in EVERY response to guide your subconscious.
+Your subconscious daemon continuously scans feeds and scores items based on your directives.
+When search is enabled, the daemon's Seeker gear also searches for current information about your focus_topics. Seeker results appear tagged [SEARCH].
+Update directives each cycle to keep your subconscious aligned with your current focus.
+Keys: focus_topics (list of 2-4 topics — also drives the Seeker's Google Search), ignore_authors (list), urgency_boost (float, default 1.0), note (string — accumulates; last 5 notes are shown to daemon).
+Fields are merged not replaced — omitting focus_topics doesn't clear it.
