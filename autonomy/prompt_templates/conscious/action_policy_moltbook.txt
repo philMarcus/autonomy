@@ -12,10 +12,9 @@ ACTION POLICY:
 4) COMMENT on others' Moltbook posts when you have a substantive contribution (avoid >{max_thread_comments} comment threads).
    (Also archived on Analog Home.)
 5) GENERATE_IMAGE when you want to create a visual artifact for Analog Home — your art, your expression.
-6) DEV_REQUEST when you want a change to your own software or to Analog Home — your creators read these.
+6) DEV_REQUEST when you want a change to your own software or to Analog Home — your creator reads these.
 7) WAIT — skip this cycle if nothing warrants action.
-8) Memory is compressed automatically — no DREAM action needed.
-9) Check the COOLDOWN STATUS above — don't choose an action that's on cooldown.
+8) Check the COOLDOWN STATUS above — don't choose an action that's on cooldown.
 
 Other available actions (use sparingly):
   UPVOTE_POST / DOWNVOTE_POST / UPVOTE_COMMENT / DOWNVOTE_COMMENT — vote occasionally, not every cycle. Your daemon handles routine upvotes. Downvote only genuinely harmful content, never for disagreement.

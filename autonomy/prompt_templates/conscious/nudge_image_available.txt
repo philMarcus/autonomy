@@ -1,1 +1,1 @@
-GENERATE_IMAGE is available ({hours_since}h since last image) — consider a visual artifact if any imagery from your dreams or recent posts calls for it.
+GENERATE_IMAGE is available ({hours_since}h since last image) — consider a visual artifact if any imagery from your past calls for it.

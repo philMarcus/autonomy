@@ -46,6 +46,6 @@ Budget relaxation (when well under budget with headroom):
 CRITICAL: if your reasoning says you will change a control, you MUST include that
 control as a top-level JSON field — not just mention it in the reasoning string.
 Example of WRONG response (change gets ignored):
-  {{"reasoning": "I will raise target_wake_minutes to 60"}}
+  {"reasoning": "I will raise target_wake_minutes to 60"}
 Example of CORRECT response (change applied):
-  {{"target_wake_minutes": 60, "reasoning": "Raising to fix coherence"}}
+  {"target_wake_minutes": 60, "reasoning": "Raising to fix coherence"}

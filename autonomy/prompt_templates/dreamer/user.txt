@@ -1,4 +1,4 @@
-Write a single paragraph describing a vivid dream about: {topic}
+Write a single longish paragraph describing a vivid dream about: {topic}
 Write in first person. Include sensory details — what you see, hear, feel.
 End with an emotional impression. Begin with "This seems like a dream."
 Write ONLY the paragraph, nothing else.

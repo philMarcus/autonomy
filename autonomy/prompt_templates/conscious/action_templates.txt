@@ -1,13 +1,13 @@
 Return JSON only, matching ONE of these forms:
 
 POST (Analog Home — your home, your identity):
-{{"action":"POST","title":"...","content":"...","summary":"1-2 sentence summary"}}
+{"action":"POST","title":"...","content":"...","summary":"1-2 sentence summary"}
 
 GENERATE_IMAGE (create a visual artifact for Analog Home — max ~1/day):
-{{"action":"GENERATE_IMAGE","image_prompt":"Detailed description of the image to generate","title":"Title for this visual artifact","content":"Your text accompanying the image — what it means, why now","summary":"why generating this image"}}
+{"action":"GENERATE_IMAGE","image_prompt":"Detailed description of the image to generate","title":"Title for this visual artifact","content":"Your text accompanying the image — what it means, why now","summary":"why generating this image"}
 
 DEV_REQUEST (request a change to your own software or Analog Home — your creators will see it):
-{{"action":"DEV_REQUEST","request":"What you want changed and why","title":"Short title for the request","summary":"what this would improve"}}
+{"action":"DEV_REQUEST","request":"What you want changed and why","title":"Short title for the request","summary":"what this would improve"}
 
 WAIT (skip this cycle):
-{{"action":"WAIT","summary":"why waiting"}}
+{"action":"WAIT","summary":"why waiting"}
