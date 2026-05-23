@@ -304,6 +304,7 @@ class GeminiChatSession(ChatSession):
         # --- Multi-round tool loop -----------------------------------------------
         total_input_tokens = 0
         total_output_tokens = 0
+        accumulated_text = []  # capture visible text from ALL rounds (not just final)
 
         for round_idx in range(max_rounds + 1):  # +1 so we can do max_rounds tool exchanges
             try:
@@ -340,6 +341,12 @@ class GeminiChatSession(ChatSession):
             # After the first round, est_tokens for subsequent rounds is small
             # (just the function response), so reset for TPM accounting.
             est_tokens = 0
+
+            # Capture any visible text from this round (model may produce text
+            # alongside tool calls — e.g. [INTERNAL MONOLOGUE] before calling tools)
+            _round_text = self._extract_text(resp)
+            if _round_text and _round_text.strip():
+                accumulated_text.append(_round_text)
 
             # Check for function calls in the response
             tool_calls = self._extract_function_calls(resp)
@@ -452,7 +459,10 @@ class GeminiChatSession(ChatSession):
         self._last_input_tokens = total_input_tokens
         self._last_output_tokens = total_output_tokens
 
-        raw = self._extract_text(resp)
+        # Combine text from all rounds — earlier rounds may contain [INTERNAL MONOLOGUE]
+        # or other visible reasoning that preceded tool calls. The final round's text
+        # (typically just JSON) is already in accumulated_text from the loop above.
+        raw = "\n".join(accumulated_text) if accumulated_text else ""
 
         # Append the original user prompt and final model text to session
         # history so subsequent send_message calls see the full conversation.
