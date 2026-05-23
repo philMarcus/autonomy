@@ -67,7 +67,7 @@ class OllamaChatSession(ChatSession):
         resp = requests.post(
             f"{self._base_url}/api/chat",
             json=payload,
-            timeout=120,
+            timeout=600,
         )
         resp.raise_for_status()
         data = resp.json()
@@ -201,7 +201,7 @@ class OllamaBackend(ModelBackend):
         resp = requests.post(
             f"{self._base_url}/api/generate",
             json=payload,
-            timeout=120,
+            timeout=600,
         )
         resp.raise_for_status()
         data = resp.json()
