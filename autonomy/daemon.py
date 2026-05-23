@@ -1504,7 +1504,7 @@ class SubconsciousDaemon:
         try:
             chat = self._registry.create_chat(
                 model_id=model_id,
-                system_instruction=load_template("dreamer/system.txt"),
+                system_instruction=load_template("dreamer/system.txt").format(kernel=self._kernel),
                 temperature=0.9,
                 max_output_tokens=300,
             )

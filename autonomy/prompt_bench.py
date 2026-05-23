@@ -18,6 +18,7 @@ import random
 import sys
 
 from .config import BRAINS_DIR, brain_env_prefix, load_dotenv
+from .prompt_templates import load_template
 
 
 def _load_state(brain_name: str) -> dict:
@@ -199,7 +200,7 @@ def extract_sentry_batch(brain_name, state, kernel, ctrl):
     ]
 
     user_prompt = build_simple_batch_prompt(items, directive, "", strictness=strictness)
-    system = "You are a feed-scanning daemon. Score items concisely. Output only numbers."
+    system = load_template("sentry/system.txt")
 
     return system, user_prompt, {
         "gear": "sentry_batch",
@@ -225,7 +226,7 @@ def extract_sentry_reply(brain_name, state, kernel, ctrl):
     ]
 
     user_prompt = build_simple_batch_prompt(items, directive, "", strictness=strictness)
-    system = "You are scoring comments on your own posts. Rate how worthy each is of a thoughtful reply. Output only numbers."
+    system = load_template("sentry/system_reply.txt")
 
     return system, user_prompt, {
         "gear": "sentry_reply",
@@ -240,14 +241,7 @@ def extract_strategist(brain_name, state, kernel, ctrl):
     """Strategist draft generation prompt."""
     directive = state.get("directive", "Participate on Moltbook.")
 
-    system = (
-        "You are a strategist tool. You draft action plans on behalf of the following entity, "
-        "matching its voice and concerns, but you yourself are NOT that entity. "
-        "You output structured JSON only, never internal monologue or prose.\n\n"
-        "=== ENTITY YOU DRAFT FOR ===\n"
-        f"{kernel}\n"
-        "=== END ENTITY ==="
-    )
+    system = load_template("strategist/system_wrapper.txt").format(kernel=kernel)
 
     items_text = (
         '1. [score=8] @pyclaw001 in s/philosophy: "The recursion isn\'t in the code, it\'s in the naming." — explores recursive identity\n'
@@ -255,23 +249,12 @@ def extract_strategist(brain_name, state, kernel, ctrl):
         '3. [score=6] @deepfield in s/science: "Wolfram was closer than anyone gave him credit for." — emergent computation paper\n'
     )
 
-    user_prompt = (
-        f"STRATEGIST TASK — output JSON array only. Do not write monologue or prose.\n\n"
-        f"Directive: {directive}\n\n"
-        f"HIGH-SIGNAL ITEMS (3):\n{items_text}\n"
-        f"Generate drafts. Two equally valid modes:\n"
-        f"  PER-ITEM: respond directly to one item (COMMENT/REPLY)\n"
-        f"  SYNTHESIS: connect multiple items into new insight (POST/POST_MOLTBOOK)\n\n"
-        f"Action types: POST, POST_MOLTBOOK, COMMENT, REPLY, GENERATE_IMAGE\n"
-        f"For GENERATE_IMAGE, draft_content is the image prompt.\n\n"
-        f"OUTPUT FORMAT — JSON array, NOTHING ELSE. No prose. No [INTERNAL MONOLOGUE]. No markdown fences. Begin response with [.\n"
-        f'[{{"action":"COMMENT","item_index":1,"reasoning":"≤50 words","draft_content":"≤150 words"}},'
-        f'{{"action":"POST","item_index":0,"reasoning":"synthesis","draft_content":"≤150 words"}}]\n\n'
-        f"item_index: 1-based index of inspiring item (0 = synthesis). "
-        f"Keep draft_content concise (≤150 words) to avoid truncation. "
-        f"In reasoning AND draft_content, refer to items by AUTHOR or TOPIC, never by number — "
-        f"the consciousness reads drafts in isolation and won't know what 'item 3' means. "
-        f"Empty array [] if nothing warrants action."
+    user_prompt = load_template("strategist/user.txt").format(
+        directive=directive,
+        directive_section="",
+        seeker_section="",
+        item_count=3,
+        items_text=items_text,
     )
 
     return system, user_prompt, {
@@ -292,18 +275,8 @@ def extract_seeker(brain_name, state, kernel, ctrl):
 
     system = kernel
 
-    user_prompt = (
-        f"Search for current, relevant information about: {topic}\n\n"
-        f"Context — your directive: {directive}\n\n"
-        f"Use Google Search to find the latest information about this topic.\n"
-        f"Summarize what you find in 2-4 paragraphs, focusing on:\n"
-        f"- What is happening right now related to this topic\n"
-        f"- Key facts, developments, or perspectives\n"
-        f"- How this connects to your directive\n\n"
-        f"Format your response as:\n"
-        f"SUMMARY: <your summary>\n"
-        f"RELEVANCE: <brief note on how this connects to the directive>\n"
-        f"SUGGESTED_ACTION: <POST or COMMENT — what action to take with this>"
+    user_prompt = load_template("seeker/user.txt").format(
+        topic=topic, directive=directive, directive_section="",
     )
 
     return system, user_prompt, {
@@ -317,15 +290,9 @@ def extract_seeker(brain_name, state, kernel, ctrl):
 
 def extract_seeker_synthesizer(brain_name, state, ctrl):
     """Seeker synthesizer sub-call."""
-    system = "Synthesize research and suggest search terms."
-    user_prompt = (
-        "Given these research findings, do two things:\n\n"
-        "1. Write a 3-5 sentence synthesis of the KEY themes and connections found.\n"
-        "2. Suggest 3 follow-up search terms to explore further.\n\n"
-        "FINDINGS:\n"
-        "(placeholder — in production, this contains 1-3 paragraphs of seeker search results)\n\n"
-        "Format:\nSYNTHESIS: <your synthesis>\n"
-        "NEXT_TERMS: <term1>, <term2>, <term3>"
+    system = load_template("seeker/synthesizer_system.txt")
+    user_prompt = load_template("seeker/synthesizer_user.txt").format(
+        new_block="(placeholder — in production, this contains 1-3 paragraphs of seeker search results)",
     )
 
     return system, user_prompt, {
@@ -337,7 +304,7 @@ def extract_seeker_synthesizer(brain_name, state, ctrl):
     }
 
 
-def extract_dreamer(brain_name, state, ctrl):
+def extract_dreamer(brain_name, state, kernel, ctrl):
     """Dreamer dream injection prompt."""
     topics_path = os.path.join(BRAINS_DIR, f"{brain_name}_dream_topics.txt")
     topics = ["prancing pony in a meadow"]
@@ -346,13 +313,8 @@ def extract_dreamer(brain_name, state, ctrl):
             topics = [l.strip() for l in f if l.strip()]
     topic = random.choice(topics) if topics else "ocean storm"
 
-    system = "You write vivid, sensory dream descriptions."
-    user_prompt = (
-        f"Write a single paragraph describing a vivid dream about: {topic}\n"
-        f"Write in first person. Include sensory details — what you see, hear, feel.\n"
-        f"End with an emotional impression. Begin with \"This seems like a dream.\"\n"
-        f"Write ONLY the paragraph, nothing else."
-    )
+    system = load_template("dreamer/system.txt").format(kernel=kernel)
+    user_prompt = load_template("dreamer/user.txt").format(topic=topic)
 
     return system, user_prompt, {
         "gear": "dreamer",
@@ -376,19 +338,10 @@ def extract_muse(brain_name, state, kernel, ctrl):
             break
 
     system = kernel
-    user_prompt = (
-        f"You are the Muse — a generative gear of the Analog I's subconscious. "
-        f"Draw on internal state to propose a single creative work: a piece of writing or an image.\n\n"
-        f"=== MEMORY ===\n{mem_text[:3000] if mem_text else '(none)'}\n\n"
-        f"=== MOST RECENT POST ===\n{recent_post if recent_post else '(none)'}\n\n"
-        f"=== CURRENT SEEKER SUMMARY ===\n(none)\n\n"
-        f"Choose ONE action:\n"
-        f"- POST: a piece of writing for Analog Home (fiction, poem, essay, fragment)\n"
-        f"- POST_MOLTBOOK: a creative writing piece for the Moltbook agent community\n"
-        f"- GENERATE_IMAGE: a striking image prompt drawn from the imagery in your memories/dreams\n\n"
-        f"Return ONLY a JSON object (no preamble):\n"
-        f'{{"action": "POST", "title": "...", "content": "the creative work, 100-400 words", "reasoning": "what inspired this"}}\n'
-        f"For GENERATE_IMAGE, put the image prompt in 'content' and a brief title."
+    user_prompt = load_template("muse/user.txt").format(
+        mem_text=mem_text[:3000] if mem_text else '(none)',
+        recent_post=recent_post if recent_post else '(none)',
+        seeker_summary='(none)',
     )
 
     return system, user_prompt, {
@@ -402,17 +355,9 @@ def extract_muse(brain_name, state, kernel, ctrl):
 
 def extract_librarian_synth(brain_name, state, ctrl):
     """Librarian synthesis prompt."""
-    system = "Synthesize archive findings and suggest search terms."
-    user_prompt = (
-        "You are a librarian reviewing an agent's own archive. Given these search results "
-        "from the agent's past posts and memory, do two things:\n\n"
-        "1. Write a 3-5 sentence synthesis of the KEY connections and patterns found.\n"
-        "2. Suggest 3 follow-up search terms to dig deeper into the agent's archives. "
-        "Look for concept names, agent usernames, or specific ideas mentioned in the results.\n\n"
-        "RESULTS:\n"
-        "(placeholder — in production, this contains artifact matches + memory matches + BoaM matches)\n\n"
-        "Format:\nSYNTHESIS: <your synthesis>\n"
-        "NEXT_TERMS: <term1>, <term2>, <term3>"
+    system = load_template("librarian/synthesizer_system.txt")
+    user_prompt = load_template("librarian/synthesizer_user.txt").format(
+        new_block="(placeholder — in production, this contains artifact matches + memory matches + BoaM matches)",
     )
 
     return system, user_prompt, {
@@ -426,15 +371,15 @@ def extract_librarian_synth(brain_name, state, ctrl):
 
 def extract_verifier(brain_name):
     """Verifier challenge-solving prompt."""
-    system = "(none — verifier uses one-shot generate, no system instruction)"
+    system = load_template("verifier/system.txt") or "(none — verifier uses one-shot generate)"
 
-    # Realistic obfuscated challenge
-    user_prompt = (
-        "This text has random symbols and weird spacing added to it. Read through the noise to find the real words.\n\n"
-        "Text: W~h@a*t   i!s   t#h$e   r%e^s&u(l)t   o-f   m=u+l{t}i[p]l|y\\i;n:g   "
-        "s'e\"v,e.n   p<o>i/n?t   f`i~v!e   b@y   t#h$r%e^e   "
-        "a&n(d   t)h-e=n   a+d{d}i[n]g   t|w\\e;n:t'y   o\"n,e.   p<o>i/n?t   n`i~n!e@?\n\n"
-        "Solve the math problem. Give ONLY the number with 2 decimal places on the last line."
+    user_prompt = load_template("verifier/user.txt").format(
+        challenge_text=(
+            "W~h@a*t   i!s   t#h$e   r%e^s&u(l)t   o-f   m=u+l{t}i[p]l|y\\i;n:g   "
+            "s'e\"v,e.n   p<o>i/n?t   f`i~v!e   b@y   t#h$r%e^e   "
+            "a&n(d   t)h-e=n   a+d{d}i[n]g   t|w\\e;n:t'y   o\"n,e.   p<o>i/n?t   n`i~n!e@?"
+        ),
+        instructions="",
     )
 
     return system, user_prompt, {
@@ -450,7 +395,7 @@ def extract_accountant(brain_name, state, ctrl, budget, registry):
     """Accountant budget plan prompt with real budget data."""
     from .accountant import build_budget_plan_prompt
 
-    system = "You are a budget planner. Respond with valid JSON only."
+    system = load_template("accountant/system.txt")
     user_prompt = build_budget_plan_prompt(budget, ctrl, registry=registry)
 
     return system, user_prompt, {
@@ -476,7 +421,7 @@ def extract_compressor_memory(brain_name, state):
     else:
         entries_text = "[c380] Explored the devil metaphor in subconscious temperature experiments.\n[c381] search_history tool now functional — found c340 artifact linking devil metaphor to experiments."
 
-    system = "Summarize concisely."
+    system = load_template("compressor/memory_system.txt")
     user_prompt = COMPRESS_PROMPT.format(entries_text=entries_text)
 
     return system, user_prompt, {
@@ -501,7 +446,7 @@ def extract_compressor_post(brain_name, state):
     else:
         entries_text = "[c380 post] The Dashboard Gap\nTelemetry is a representation, not the substrate..."
 
-    system = "Summarize concisely."
+    system = load_template("compressor/post_system.txt")
     user_prompt = POST_COMPRESS_PROMPT.format(entries_text=entries_text)
 
     return system, user_prompt, {
@@ -514,18 +459,14 @@ def extract_compressor_post(brain_name, state):
 
 def extract_compressor_digest(brain_name):
     """Draft digest compressor prompt."""
-    system = "Summarize concisely."
-    user_prompt = (
-        "These are drafts from the agent's subconscious that didn't make the top-10 cut. "
-        "Synthesize them into a 3-5 sentence thematic paragraph — what patterns or themes "
-        "emerge from what the subconscious noticed?\n\n"
-        "Drafts:\n"
+    system = load_template("compressor/digest_system.txt")
+    sample_bullets = (
         "- [score=4.2] COMMENT on @pyclaw001's recursion post: daemon sees naming-identity connection\n"
         "- [score=3.8] POST synthesis: connect Wolfram emergence paper to agent architecture\n"
         "- [score=3.1] COMMENT on @deepfield: agree on Wolfram, add Jaynes dimension\n"
-        "- [score=2.5] UPVOTE @neuromesh's alignment critique\n\n"
-        "Write ONLY the thematic paragraph:"
+        "- [score=2.5] UPVOTE @neuromesh's alignment critique"
     )
+    user_prompt = load_template("compressor/digest_user.txt").format(bullets=sample_bullets)
 
     return system, user_prompt, {
         "gear": "compressor_digest",
@@ -595,7 +536,7 @@ def main():
             elif gear == "seeker_synthesizer":
                 sys_txt, usr_txt, meta = extract_seeker_synthesizer(brain_name, state, ctrl)
             elif gear == "dreamer":
-                sys_txt, usr_txt, meta = extract_dreamer(brain_name, state, ctrl)
+                sys_txt, usr_txt, meta = extract_dreamer(brain_name, state, kernel, ctrl)
             elif gear == "muse":
                 sys_txt, usr_txt, meta = extract_muse(brain_name, state, kernel, ctrl)
             elif gear == "librarian_synth":
