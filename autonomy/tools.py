@@ -437,13 +437,17 @@ def _build_experiment_tools(
         experiments = _load_experiments()
         summaries = []
         for exp in experiments:
-            summaries.append({
+            entry = {
                 "name": exp.get("name", ""),
                 "status": exp.get("status", "active"),
                 "hypothesis": exp.get("hypothesis", ""),
                 "data_point_count": len(exp.get("data_points", [])),
                 "created_cycle": exp.get("created_cycle"),
-            })
+            }
+            if exp.get("conclusion"):
+                entry["conclusion"] = exp["conclusion"]
+                entry["closed_cycle"] = exp.get("closed_cycle")
+            summaries.append(entry)
         return {
             "experiments": summaries,
             "active_count": sum(1 for s in summaries if s["status"] == "active"),
@@ -641,6 +645,40 @@ def _build_experiment_tools(
         },
         handler=close_experiment,
         mode="write",
+    ))
+
+    # --- get_conclusions ---
+    def get_conclusions() -> Dict[str, Any]:
+        """Get all experiment conclusions — closed experiments with their findings."""
+        experiments = _load_experiments()
+        concluded = []
+        for exp in experiments:
+            if exp.get("conclusion"):
+                concluded.append({
+                    "name": exp.get("name", ""),
+                    "hypothesis": exp.get("hypothesis", ""),
+                    "conclusion": exp["conclusion"],
+                    "data_point_count": len(exp.get("data_points", [])),
+                    "created_cycle": exp.get("created_cycle"),
+                    "closed_cycle": exp.get("closed_cycle"),
+                })
+        return {
+            "conclusions": concluded,
+            "total": len(concluded),
+        }
+
+    registry.register(ToolDef(
+        name="get_conclusions",
+        description=(
+            "Get all experiment conclusions. Returns every closed experiment "
+            "with its hypothesis, conclusion, and cycle range. Use to review "
+            "what you've learned from past experiments."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {},
+        },
+        handler=get_conclusions,
     ))
 
     # --- edit_experiment ---
