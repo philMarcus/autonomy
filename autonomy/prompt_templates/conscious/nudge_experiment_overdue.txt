@@ -1,0 +1,1 @@
+Experiment "{name}" has passed its review cycle ({review_at_cycle}) and is still open. Consider concluding it with close_experiment — what have you learned? If you need more data, update the review_at_cycle with edit_experiment.

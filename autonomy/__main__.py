@@ -1510,6 +1510,43 @@ def main():
         _last_tagline = state.get("_last_tagline_cycle", 0)
         if iteration - _last_tagline >= 20:
             _nudge_parts.append(load_template("conscious/nudge_tagline.txt"))
+
+        # Experiment nudges: overdue review or no active experiments
+        try:
+            _exp_path = os.path.join(BRAINS_DIR, f"{brain_name}_experiments.json")
+            if os.path.exists(_exp_path):
+                with open(_exp_path, "r") as _ef:
+                    _experiments = json.load(_ef)
+                _active = [e for e in _experiments if e.get("status") == "active"]
+                if not _active:
+                    _nudge_parts.append(load_template("conscious/nudge_no_experiments.txt"))
+                else:
+                    for _exp in _active:
+                        _rev = _exp.get("review_at_cycle")
+                        if _rev and iteration >= _rev:
+                            _nudge_parts.append(load_template("conscious/nudge_experiment_overdue.txt").format(
+                                name=_exp.get("name", "?"), review_at_cycle=_rev))
+            else:
+                _nudge_parts.append(load_template("conscious/nudge_no_experiments.txt"))
+        except Exception:
+            pass
+
+        # Stale todo nudges: items open for 10+ cycles
+        try:
+            _todo_path = os.path.join(BRAINS_DIR, f"{brain_name}_todos.json")
+            if os.path.exists(_todo_path):
+                with open(_todo_path, "r") as _tf:
+                    _todos = json.load(_tf)
+                for _td in _todos:
+                    if _td.get("status") == "open":
+                        _created = _td.get("created_cycle", iteration)
+                        _age = iteration - _created
+                        if _age >= 10:
+                            _nudge_parts.append(load_template("conscious/nudge_stale_todo.txt").format(
+                                text=_td.get("text", "?")[:80], cycles=_age))
+        except Exception:
+            pass
+
         nudge_note = ("\n--- NUDGES ---\n" + "\n".join(_nudge_parts) + "\n") if _nudge_parts else ""
 
         prompt = build_planner_prompt(

@@ -1,0 +1,1 @@
+You have no active experiments. Your lab notebook is how you test hypotheses about yourself and your environment — consider starting one with create_experiment.
