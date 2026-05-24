@@ -277,7 +277,11 @@ def main():
             elapsed = time.time() - start
             print(f"\n{content}")
             print(f"\n{'=' * 60}")
-            print(f"Time: {elapsed:.1f}s")
+            out_tokens = len(content) // 4
+            stats = f"Time: {elapsed:.1f}s  |  ~{out_tokens} output tokens"
+            if elapsed > 0 and out_tokens > 0:
+                stats += f"  |  ~{out_tokens / elapsed:.1f} tok/s"
+            print(stats)
 
         elif args.no_stream:
             payload = {
@@ -292,9 +296,18 @@ def main():
             data = resp.json()
             content = data.get("message", {}).get("content", "")
             elapsed = time.time() - start
+            eval_count = data.get("eval_count", 0)
+            prompt_eval = data.get("prompt_eval_count", 0)
             print(content)
             print(f"\n{'=' * 60}")
-            print(f"Time: {elapsed:.1f}s  |  Tokens: ~{len(content) // 4}")
+            stats = f"Time: {elapsed:.1f}s"
+            if eval_count:
+                stats += f"  |  Output tokens: {eval_count}  |  {eval_count / elapsed:.1f} tok/s"
+            if prompt_eval:
+                stats += f"  |  Prompt tokens: {prompt_eval}"
+            if not eval_count:
+                stats += f"  |  ~{len(content) // 4} tokens"
+            print(stats)
 
         else:
             # Stream
@@ -305,7 +318,7 @@ def main():
                 "options": options,
             }
             resp = requests.post(f"{args.ollama_url}/api/chat", json=payload,
-                                 stream=True, timeout=600)
+                                 stream=True, timeout=1800)
             resp.raise_for_status()
             full_response = []
             chunk = {}
