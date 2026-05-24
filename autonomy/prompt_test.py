@@ -224,7 +224,9 @@ def main():
             metadata = json.load(f)
 
     temp = args.temp if args.temp is not None else metadata.get("temperature", 0.7)
-    max_tokens = args.max_tokens or metadata.get("max_output_tokens", 4096)
+    # Use CLI override, or metadata value with a floor of 2048 for testing
+    # (prod limits like dreamer's 300 are too tight for model evaluation)
+    max_tokens = args.max_tokens or max(2048, metadata.get("max_output_tokens", 4096))
 
     has_system = system_text.strip() and not system_text.startswith("(none")
 
