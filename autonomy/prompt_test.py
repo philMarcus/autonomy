@@ -110,7 +110,7 @@ def _execute_tool_call(tool_reg, name: str, args: dict) -> str:
 
 def _chat_with_tools(ollama_url: str, model: str, messages: list,
                      tools: list, tool_reg, options: dict,
-                     max_rounds: int = 8) -> str:
+                     max_rounds: int = 8, extra_payload: dict = None) -> str:
     """Multi-round tool-calling loop against Ollama."""
     url = f"{ollama_url}/api/chat"
     full_content = []
@@ -122,6 +122,7 @@ def _chat_with_tools(ollama_url: str, model: str, messages: list,
             "stream": False,
             "tools": tools,
             "options": options,
+            **(extra_payload or {}),
         }
 
         # On last round, don't offer tools — force a final text response
@@ -200,6 +201,8 @@ def main():
                         help="Enable tool calling with real tools from this brain (e.g. ANALOG_I)")
     parser.add_argument("--max-rounds", type=int, default=8,
                         help="Max tool-calling rounds (default: 8)")
+    parser.add_argument("--no-think", action="store_true",
+                        help="Disable thinking (for models that support it). Saves tokens and time.")
     args = parser.parse_args()
 
     gear_dir = os.path.join(args.prompts_dir, args.gear)
@@ -249,6 +252,8 @@ def main():
     print(f"User:        {len(user_text):,} chars")
     if ollama_tools:
         print(f"Tools:       {len(ollama_tools)} read tools (max {args.max_rounds} rounds)")
+    if args.no_think:
+        print(f"Thinking:    DISABLED")
     print(f"{'=' * 60}")
     print()
 
@@ -263,6 +268,11 @@ def main():
         "num_predict": max_tokens,
     }
 
+    # Build base payload fields (think control lives outside options for Ollama)
+    _extra_payload = {}
+    if args.no_think:
+        _extra_payload["think"] = False
+
     start = time.time()
 
     try:
@@ -273,6 +283,7 @@ def main():
                 args.ollama_url, args.model, messages,
                 ollama_tools, tool_reg, options,
                 max_rounds=args.max_rounds,
+                extra_payload=_extra_payload,
             )
             elapsed = time.time() - start
             print(f"\n{content}")
@@ -289,6 +300,7 @@ def main():
                 "messages": messages,
                 "stream": False,
                 "options": options,
+                **_extra_payload,
             }
             print("Waiting for response...")
             resp = requests.post(f"{args.ollama_url}/api/chat", json=payload, timeout=1800)
@@ -316,6 +328,7 @@ def main():
                 "messages": messages,
                 "stream": True,
                 "options": options,
+                **_extra_payload,
             }
             resp = requests.post(f"{args.ollama_url}/api/chat", json=payload,
                                  stream=True, timeout=1800)
