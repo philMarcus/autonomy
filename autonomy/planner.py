@@ -470,7 +470,7 @@ Knowledge (excerpt):
 Recent actions (history):
 {hist}
 
-Your recent posts/artifacts (FULL TEXT of your last few — build on these):
+Your recent posts/artifacts (FULL TEXT + internal monologue of your last few — build on these):
 {recent_posts if recent_posts else "No recent posts available."}
 {f"""
 === POST HISTORY (compressed summaries of older work — what you've written) ===

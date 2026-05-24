@@ -2537,11 +2537,14 @@ def main():
 
                         # --- Post memory: prepend to fresh (newest first), compress if over cap ---
                         _fresh = state.setdefault("_post_memory_fresh", [])
+                        _post_body = (executed_plan.get("content", "") or "")[:1500]
+                        if preamble:
+                            _post_body = f"[INTERNAL MONOLOGUE]\n{preamble}\n\n[OUTPUT]\n{_post_body}"
                         _fresh.insert(0, {
                             "cycle": iteration,
                             "type": artifact_type,
                             "title": (artifact_title or "")[:100],
-                            "body": (executed_plan.get("content", "") or "")[:1500],
+                            "body": _post_body,
                         })
                         _compress_post_memory(state, registry, ctrl)
 
