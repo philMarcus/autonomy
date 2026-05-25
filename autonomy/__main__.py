@@ -133,6 +133,7 @@ def _compress_drafts_to_digest(overflow_drafts, registry, ctrl) -> str:
         chat = registry.create_chat(
             model_id=compressor, system_instruction=load_template("compressor/digest_system.txt"),
             temperature=0.4, max_output_tokens=400,
+            disable_thinking=bool(ctrl.get("compressor_disable_thinking") if ctrl else False),
         )
         return chat.send_message(prompt).strip()
     except Exception as e:
@@ -164,7 +165,8 @@ def _compress_post_memory(state, registry, ctrl):
     def _compress_fn(prompt):
         _c = registry.create_chat(
             model_id=_compressor, system_instruction=load_template("compressor/post_system.txt"),
-            temperature=0.3, max_output_tokens=512)
+            temperature=0.3, max_output_tokens=512,
+            disable_thinking=bool(ctrl.get("compressor_disable_thinking") if ctrl else False))
         return _c.send_message(prompt)
 
     tiers = state.setdefault("post_tiers", {"recent": [], "compressed": [], "deep": []})
@@ -1768,7 +1770,8 @@ def main():
                 def _compress_fn(prompt):
                     _c = registry.create_chat(
                         model_id=_compressor, system_instruction=load_template("compressor/memory_system.txt"),
-                        temperature=0.3, max_output_tokens=512)
+                        temperature=0.3, max_output_tokens=512,
+                        disable_thinking=bool(ctrl.get("compressor_disable_thinking")))
                     return _c.send_message(prompt)
 
                 if len(tiers["recent"]) >= _recent_cap:

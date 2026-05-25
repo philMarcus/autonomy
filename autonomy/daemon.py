@@ -650,7 +650,7 @@ class SubconsciousDaemon:
                 system_instruction=load_template("sentry/system_single.txt"),
                 temperature=temp,
                 max_output_tokens=50,
-                disable_thinking=True,
+                disable_thinking=bool(self._ctrl.get("sentry_disable_thinking")),
             )
             text = chat.send_message(prompt)
             est_in = (len(prompt)) // 4
@@ -792,7 +792,7 @@ class SubconsciousDaemon:
                 system_instruction=sentry_instruction,
                 temperature=temp,
                 max_output_tokens=max(64, 10 * len(items)),
-                disable_thinking=True,
+                disable_thinking=bool(self._ctrl.get("sentry_disable_thinking")),
             )
             text = chat.send_message(prompt)
 
@@ -851,7 +851,7 @@ class SubconsciousDaemon:
                             system_instruction=sentry_instruction,
                             temperature=temp,
                             max_output_tokens=max(64, 10 * len(items)),
-                            disable_thinking=True,
+                            disable_thinking=bool(self._ctrl.get("sentry_disable_thinking")),
                         )
                         text = chat.send_message(prompt)
                         est_in = (len(prompt)) // 4
@@ -949,6 +949,7 @@ class SubconsciousDaemon:
                 system_instruction=strategist_system,
                 temperature=temp,
                 max_output_tokens=max_tokens,
+                disable_thinking=bool(self._ctrl.get("strategist_disable_thinking")),
             )
             text = chat.send_message(prompt)
             est_in = (len(self._kernel) + len(prompt)) // 4
@@ -1037,7 +1038,8 @@ class SubconsciousDaemon:
                     try:
                         chat = self._registry.create_chat(
                             model_id=retry_model, system_instruction=strategist_system,
-                            temperature=temp, max_output_tokens=max_tokens)
+                            temperature=temp, max_output_tokens=max_tokens,
+                            disable_thinking=bool(self._ctrl.get("strategist_disable_thinking")))
                         text = chat.send_message(prompt)
                         self._budget.record_usage(retry_model,
                             _make_response(text, est_input, len(text) // 4, retry_model))
@@ -1259,6 +1261,7 @@ class SubconsciousDaemon:
                 system_instruction=load_template("seeker/synthesizer_system.txt"),
                 temperature=0.4,
                 max_output_tokens=2048,
+                disable_thinking=bool(self._ctrl.get("synthesizer_disable_thinking")),
             )
             synth_resp = synth_chat.send_message(synth_prompt).strip()
             # Parse synthesis and terms
@@ -1292,6 +1295,7 @@ class SubconsciousDaemon:
                     system_instruction=load_template("seeker/compressor_system.txt"),
                     temperature=0.3,
                     max_output_tokens=800,
+                    disable_thinking=bool(self._ctrl.get("compressor_disable_thinking")),
                 )
                 combined = comp_chat.send_message(compress_prompt).strip()
             except Exception:
@@ -1507,6 +1511,7 @@ class SubconsciousDaemon:
                 system_instruction=load_template("dreamer/system.txt").format(kernel=self._kernel),
                 temperature=0.9,
                 max_output_tokens=300,
+                disable_thinking=bool(self._ctrl.get("dreamer_disable_thinking")),
             )
             dream_text = chat.send_message(prompt).strip()
             if not dream_text or len(dream_text) < 20:
@@ -1574,6 +1579,7 @@ class SubconsciousDaemon:
                 system_instruction=self._kernel,
                 temperature=temp,
                 max_output_tokens=1500,
+                disable_thinking=bool(self._ctrl.get("muse_disable_thinking")),
             )
             text = chat.send_message(prompt)
             est_in = (len(self._kernel) + len(prompt)) // 4
@@ -1778,6 +1784,7 @@ class SubconsciousDaemon:
                 system_instruction=load_template("librarian/synthesizer_system.txt"),
                 temperature=0.4,
                 max_output_tokens=1024,
+                disable_thinking=bool(self._ctrl.get("synthesizer_disable_thinking")),
             )
             synth_resp = synth_chat.send_message(synth_prompt).strip()
 
@@ -1804,6 +1811,7 @@ class SubconsciousDaemon:
                     model_id=_compressor,
                     system_instruction=load_template("librarian/compressor_system.txt"),
                     temperature=0.3, max_output_tokens=1024,
+                    disable_thinking=bool(self._ctrl.get("compressor_disable_thinking")),
                 )
                 comp_resp = comp_chat.send_message(
                     load_template("librarian/compressor_user.txt").format(

@@ -481,6 +481,20 @@ def build_default_registry(model_registry, blacklist_str: str = "") -> ControlRe
         Control("muse_temperature", "float", 0.95,
                 "Temperature for muse creative generation", "daemon", min_val=0.0, max_val=2.0),
 
+        # --- Thinking control per role (disable for slow/large models) ---
+        Control("sentry_disable_thinking", "bool", True,
+                "Disable thinking for sentry scoring (recommended — thinking wastes tokens on scoring)", "daemon"),
+        Control("strategist_disable_thinking", "bool", False,
+                "Disable thinking for strategist draft generation", "daemon"),
+        Control("dreamer_disable_thinking", "bool", False,
+                "Disable thinking for dreamer (turn on for large/slow models like gemma4)", "daemon"),
+        Control("muse_disable_thinking", "bool", False,
+                "Disable thinking for muse creative drafts (turn on for large/slow models)", "daemon"),
+        Control("synthesizer_disable_thinking", "bool", False,
+                "Disable thinking for seeker/librarian synthesizer", "daemon"),
+        Control("compressor_disable_thinking", "bool", False,
+                "Disable thinking for memory/post compressor", "daemon"),
+
         # --- Context ---
         Control("feed_batch_size", "int", 8,
                 "Feed items per cycle", "context", min_val=1, max_val=50),
