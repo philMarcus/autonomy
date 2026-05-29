@@ -6,6 +6,7 @@ mechanism: drafts add charge, charge decays per tick, and when charge
 crosses the wake threshold the conscious loop is signaled to fire.
 """
 
+import json
 import threading
 import time
 from dataclasses import dataclass, field
@@ -26,6 +27,15 @@ class Draft:
     source: str = "feed"      # "feed" or "seed" — origin of the triggering item
     cycles_saved: int = 0     # how many cycles this has been saved (0 = fresh)
     model: str = ""           # which subconscious model produced this draft
+
+    def __post_init__(self):
+        # Models sometimes return draft_content as a nested object instead of a
+        # string. Coerce here so downstream slicing/formatting never crashes.
+        if not isinstance(self.draft_content, str):
+            try:
+                self.draft_content = json.dumps(self.draft_content, ensure_ascii=False)
+            except (TypeError, ValueError):
+                self.draft_content = str(self.draft_content)
 
     def to_dict(self) -> dict:
         """Serialize for JSON state persistence."""
