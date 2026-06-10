@@ -9,7 +9,7 @@ Tests all available models (Ollama + API) across:
 
 Usage:
     python benchmark_models.py [--role sentry|strategist|verification|compressor|all]
-                               [--models gemma3:12b,deepseek-r1:8b,...]
+                               [--models gemma4:12b,deepseek-r1:8b,...]
                                [--prompt benchmark_prompts/sentry_v2.txt]
                                [--output results.json]
                                [--update-knowledge]

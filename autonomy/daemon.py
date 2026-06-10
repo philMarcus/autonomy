@@ -1251,8 +1251,8 @@ class SubconsciousDaemon:
         new_terms = []
         try:
             _synth_model = _pick_weighted_model(
-                self._ctrl.get("synthesizer_model_weights") or "ollama:gemma3:12b=2,ollama:deepseek-r1:8b=1",
-                "ollama:gemma3:12b")
+                self._ctrl.get("synthesizer_model_weights") or "ollama:gemma4:12b=2,ollama:deepseek-r1:8b=1",
+                "ollama:gemma4:12b")
             synth_prompt = load_template("seeker/synthesizer_user.txt").format(
                 new_block=new_block[:2000],
             )
@@ -1500,8 +1500,8 @@ class SubconsciousDaemon:
 
         topic = random.choice(topics)
         model_id = _pick_weighted_model(
-            self._ctrl.get("dreamer_model_weights") or "ollama:gemma3:12b=2,ollama:deepseek-r1:8b=1",
-            "ollama:gemma3:12b")
+            self._ctrl.get("dreamer_model_weights") or "ollama:gemma4:12b=2,ollama:deepseek-r1:8b=1",
+            "ollama:gemma4:12b")
 
         prompt = load_template("dreamer/user.txt").format(topic=topic)
 
@@ -1564,8 +1564,8 @@ class SubconsciousDaemon:
             seeker_summary = self._buffer.get_seeker_summary() or ""
 
             model_id = _pick_weighted_model(
-                self._ctrl.get("muse_model_weights") or "ollama:gemma3:12b=2,ollama:deepseek-r1:8b=1",
-                "ollama:gemma3:12b")
+                self._ctrl.get("muse_model_weights") or "ollama:gemma4:12b=2,ollama:deepseek-r1:8b=1",
+                "ollama:gemma4:12b")
             temp = float(self._ctrl.get("muse_temperature") or 0.95)
 
             prompt = load_template("muse/user.txt").format(
@@ -1668,12 +1668,12 @@ class SubconsciousDaemon:
             return  # nothing to search for
 
         # Budget check — librarian uses local models (free), but skip if no budget at all
-        if not self._budget.can_afford("ollama:gemma3:12b", est_input_tokens=500, est_output_tokens=500):
+        if not self._budget.can_afford("ollama:gemma4:12b", est_input_tokens=500, est_output_tokens=500):
             return
 
         model_id = _pick_weighted_model(
-            self._ctrl.get("librarian_model_weights") or "ollama:gemma3:12b=2,ollama:deepseek-r1:8b=1",
-            "ollama:gemma3:12b",
+            self._ctrl.get("librarian_model_weights") or "ollama:gemma4:12b=2,ollama:deepseek-r1:8b=1",
+            "ollama:gemma4:12b",
         )
 
         # Search archives for each term using search_history tool logic
@@ -1806,7 +1806,7 @@ class SubconsciousDaemon:
         _max = int(self._ctrl.get("librarian_max_summary_chars") or 2000)
         if len(combined) > _max:
             try:
-                _compressor = self._ctrl.get("compressor_model") or "ollama:gemma3:12b"
+                _compressor = self._ctrl.get("compressor_model") or "ollama:gemma4:12b"
                 comp_chat = self._registry.create_chat(
                     model_id=_compressor,
                     system_instruction=load_template("librarian/compressor_system.txt"),

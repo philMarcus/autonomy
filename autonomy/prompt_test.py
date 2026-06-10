@@ -1,11 +1,11 @@
 """Test a prompt_bench output against any Ollama model, with optional tool calling.
 
 Usage:
-    python -m autonomy.prompt_test gemma4:26b strategist
-    python -m autonomy.prompt_test gemma4:26b conscious --tools ANALOG_I
-    python -m autonomy.prompt_test gemma4:26b conscious --tools ANALOG_I --max-rounds 5
-    python -m autonomy.prompt_test gemma4:26b verifier --prompts-dir prompts/snapshots/conscious_c386
-    python -m autonomy.prompt_test gemma4:26b strategist --save
+    python -m autonomy.prompt_test gemma4:26b-a4b-it-qat strategist
+    python -m autonomy.prompt_test gemma4:26b-a4b-it-qat conscious --tools ANALOG_I
+    python -m autonomy.prompt_test gemma4:26b-a4b-it-qat conscious --tools ANALOG_I --max-rounds 5
+    python -m autonomy.prompt_test gemma4:26b-a4b-it-qat verifier --prompts-dir prompts/snapshots/conscious_c386
+    python -m autonomy.prompt_test gemma4:26b-a4b-it-qat strategist --save
 """
 
 import argparse
@@ -187,7 +187,7 @@ def main():
     _load_dotenv()
 
     parser = argparse.ArgumentParser(description="Test a prompt_bench gear against an Ollama model")
-    parser.add_argument("model", help="Ollama model name (e.g. gemma4:26b, gemma3:12b)")
+    parser.add_argument("model", help="Ollama model name (e.g. gemma4:26b-a4b-it-qat, gemma4:12b)")
     parser.add_argument("gear", help="Gear name (e.g. strategist, conscious, sentry_batch)")
     parser.add_argument("--prompts-dir", default="prompts", help="Prompts directory (default: prompts/)")
     parser.add_argument("--temp", type=float, help="Override temperature (default: from metadata.json)")

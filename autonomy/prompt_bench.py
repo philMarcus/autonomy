@@ -426,7 +426,7 @@ def extract_compressor_memory(brain_name, state):
 
     return system, user_prompt, {
         "gear": "compressor_memory",
-        "model_pool": ctrl.get("compressor_model") if 'ctrl' in dir() else "ollama:gemma3:12b",
+        "model_pool": ctrl.get("compressor_model") if 'ctrl' in dir() else "ollama:gemma4:12b",
         "temperature": 0.3,
         "max_output_tokens": 512,
         "notes": f"Real memory entries ({len(recent)} in recent tier, showing up to 5).",

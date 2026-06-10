@@ -119,11 +119,11 @@ def _compress_drafts_to_digest(overflow_drafts, registry, ctrl) -> str:
     """Compress low-scoring overflow drafts into a thematic digest paragraph.
 
     Called at drain time when the draft buffer exceeds the score-kept top N.
-    Uses the compressor_model (default gemma3:12b).
+    Uses the compressor_model (default gemma4:12b).
     """
     if not overflow_drafts:
         return ""
-    compressor = ctrl.get("compressor_model") if ctrl else "ollama:gemma3:12b"
+    compressor = ctrl.get("compressor_model") if ctrl else "ollama:gemma4:12b"
     lines = []
     for d in overflow_drafts:
         lines.append(f"- [{d.signal_score:.2f}] {d.suggested_action} on {d.target_summary}: {d.reasoning[:160]}")
@@ -161,7 +161,7 @@ def _compress_post_memory(state, registry, ctrl):
     if len(fresh) <= fresh_cap:
         return
 
-    _compressor = ctrl.get("compressor_model") if ctrl else "ollama:gemma3:12b"
+    _compressor = ctrl.get("compressor_model") if ctrl else "ollama:gemma4:12b"
     def _compress_fn(prompt):
         _c = registry.create_chat(
             model_id=_compressor, system_instruction=load_template("compressor/post_system.txt"),
@@ -688,8 +688,8 @@ def main():
         _verif_backup = _pick_weighted_model(_verif_weights, "gemini-2.5-pro")
         if _verif_backup != _verif_model:
             challenge_solver.backup_llm = registry.as_llm_client(default_model_id=_verif_backup)
-        if registry.has_model("ollama:gemma3:12b"):
-            challenge_solver.backup_llm_2 = registry.as_llm_client(default_model_id="ollama:gemma3:12b")
+        if registry.has_model("ollama:gemma4:12b"):
+            challenge_solver.backup_llm_2 = registry.as_llm_client(default_model_id="ollama:gemma4:12b")
         platform = MoltbookClient(
             api_key=mb_key, telemetry=telemetry, brain_name=brain_name,
             read_only=args.read_only, challenge_solver=challenge_solver,
@@ -1113,7 +1113,7 @@ def main():
                     bp_prompt = build_budget_plan_prompt(budget, ctrl, registry)
                     _accountant_model = _pick_weighted_model(
                         ctrl.get("accountant_model_weights"),
-                        "ollama:gemma3:12b",
+                        "ollama:gemma4:12b",
                     )
                     _acc_model_short = _accountant_model.replace("ollama:", "")
                     emit_status("[ACCOUNTANT]", f"→ {_acc_model_short} ...", color=Fore.CYAN, cycle=iteration)
@@ -1142,7 +1142,7 @@ def main():
                         text=bp_raw, input_tokens=_bp_in, output_tokens=_bp_out,
                         model_id=_accountant_model))
                     bp_plan = parse_budget_plan(bp_raw)
-                    # Fall back to gemma3:12b if primary (e.g. qwen3:14b thinking model)
+                    # Fall back to gemma4:12b if primary (e.g. qwen3:14b thinking model)
                     # produced something we can't parse. Always log raw response on fail so
                     # we can see *what* was emitted.
                     if bp_plan is None:
@@ -1152,12 +1152,12 @@ def main():
                             "raw_response": bp_raw[:2000],
                             "raw_length": len(bp_raw),
                         })
-                        if _accountant_model != "ollama:gemma3:12b":
-                            emit_status("[ACCOUNTANT]", f"parse failed on {_acc_model_short}, falling back to gemma3:12b",
+                        if _accountant_model != "ollama:gemma4:12b":
+                            emit_status("[ACCOUNTANT]", f"parse failed on {_acc_model_short}, falling back to gemma4:12b",
                                         color=Fore.YELLOW, cycle=iteration)
                             try:
                                 _fallback_chat = registry.create_chat(
-                                    model_id="ollama:gemma3:12b",
+                                    model_id="ollama:gemma4:12b",
                                     system_instruction=load_template("accountant/system.txt"),
                                     temperature=0.3,
                                     max_output_tokens=1024,
@@ -1167,7 +1167,7 @@ def main():
                                 if bp_plan is None:
                                     telemetry.log("budget_plan_parse_fail", {
                                         "cycle": iteration,
-                                        "model": "ollama:gemma3:12b (fallback)",
+                                        "model": "ollama:gemma4:12b (fallback)",
                                         "raw_response": bp_raw[:2000],
                                         "raw_length": len(bp_raw),
                                     })
@@ -1201,7 +1201,7 @@ def main():
         _budget_exhausted = budget is not None and budget.remaining_usd() <= 0
         if _budget_exhausted:
             active_conscious_weights = ctrl.get("budget_exhausted_model_weights") or \
-                "ollama:qwen3:14b=2,ollama:gemma3:12b=2,ollama:deepseek-r1:8b=1"
+                "ollama:qwen3:14b=2,ollama:gemma4:12b=2,ollama:deepseek-r1:8b=1"
             emit_status("[BUDGET]",
                         f"Exhausted (${budget.spent_today_usd():.2f}/${budget.daily_limit_usd:.2f}) — using local fallback pool",
                         color=Fore.YELLOW, cycle=iteration)

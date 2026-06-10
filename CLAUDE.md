@@ -369,7 +369,7 @@ v16_0/ is the stable foundation. **Do not modify archived versions.** All future
 - `feed_batch_size`: 8 — items per sentry batch
 - `allow_downvote`: False
 - `allow_kernel_update`: True (now a control, default enabled; `--no-kernel-update` to disable)
-- Verification: `verification_model_weights` default `ollama:gemma3:12b=3,gemini-2.5-flash=1`
+- Verification: `verification_model_weights` default `ollama:gemma4:12b=3,gemini-2.5-flash=1`
 
 ### Run Tracking + Session Continuity (v16.3)
 - `session_id` persists across Ctrl+C restarts — only resets when memories/history are wiped
@@ -404,10 +404,10 @@ v16_0/ is the stable foundation. **Do not modify archived versions.** All future
 
 ### Model Tier Separation
 - **Conscious pool** (`conscious_model_weights`): pro-tier only (gemini-2.5-pro, gemini-3.1-pro-preview, claude-sonnet-4-5, claude-opus-4-6, gpt-5.2, gpt-5-pro, gpt-5.2-pro)
-- **Sentry pool** (`subconscious_model_weights`): flash-lite, ollama:gemma3:12b, haiku, mistral-small, gpt-5-nano/mini + all Ollama models
+- **Sentry pool** (`subconscious_model_weights`): flash-lite, ollama:gemma4:12b, haiku, mistral-small, gpt-5-nano/mini + all Ollama models
 - **Strategist pool** (`strategist_model_weights`): same pool as sentry (called once per tick with all high-signal items)
 - **Seeker pool** (`seeker_model_weights`): Gemini only (needs search grounding)
-- **Verification pool** (`verification_model_weights`): default ollama:gemma3:12b=3, gemini-2.5-flash=1 (gemma 6/10, free; flash as backup)
+- **Verification pool** (`verification_model_weights`): default ollama:gemma4:12b=3, gemini-2.5-flash=1 (gemma 6/10, free; flash as backup)
 - All model weight controls locked by default (operator decision). Weighted random selection per tick.
 - Sentry: `disable_thinking=True` for Ollama models, short task instruction (NOT kernel)
 - Strategist: uses kernel as system instruction. Parser strips monologue/comments before JSON extraction.
@@ -418,7 +418,7 @@ v16_0/ is the stable foundation. **Do not modify archived versions.** All future
 - Auto-discovers available models via `/api/tags`, registers as `ollama:{model_name}`
 - Much faster than HuggingFace/PyTorch (1-6s vs 30-250s) — native GGUF inference
 - Ollama manages its own model loading/unloading — no "max 1 local" restriction
-- `ollama:gemma3:12b`: 94% sentry accuracy (ties flash-lite), free, 5.7s latency
+- `ollama:gemma4:12b`: 94% sentry accuracy (ties flash-lite), free, 5.7s latency
 
 ### Hierarchical Memory (v17.0)
 - Three-tier automatic compression: recent (20 cycles) → compressed (10 summaries) → deep (10 deep)
@@ -454,7 +454,7 @@ v16_0/ is the stable foundation. **Do not modify archived versions.** All future
 - Sentry: tries different model from sentry pool
 - Strategist: tries different model from strategist pool
 - Conscious: tries each model in conscious pool sequentially; if all fail, WAITs (never degrades to local)
-- Verification: primary → backup conscious → ollama:gemma3:12b
+- Verification: primary → backup conscious → ollama:gemma4:12b
 
 ### CLI/Controls Refactor (v17.2)
 - Controls.py is the SINGLE SOURCE OF TRUTH for all defaults
@@ -627,7 +627,7 @@ The accountant prompt explicitly tells it which controls are shared with conscio
 
 ### Accountant runs every cycle
 - `should_run_budget_plan()` simplified: just returns `budget_plan_enabled`. The old threshold + 8h + first-of-day gates are gone.
-- Runs on the accountant cadre (`accountant_model_weights`, default `ollama:qwen3:14b=2,ollama:gemma3:12b=1`) — free local inference, ~5-15s per cycle.
+- Runs on the accountant cadre (`accountant_model_weights`, default `ollama:qwen3:14b=2,ollama:gemma4:12b=1`) — free local inference, ~5-15s per cycle.
 - Fires **before** conscious model selection so accountant weight changes take effect this cycle.
 - Fixed pre-existing bug where `conscious_model` was hardcoded to `"gemini-2.5-pro"` after accountant ran — now properly re-selects from (potentially updated) weights.
 
@@ -643,7 +643,7 @@ The accountant prompt explicitly tells it which controls are shared with conscio
 - Conscious-origin changes tracked in `_conscious_control_changes`, accountant-origin in `_accountant_control_changes` + `_accountant_reasoning`.
 
 ### Budget-exhausted conscious fallback
-- When `budget.remaining_usd() <= 0`, the conscious model pool swaps to `budget_exhausted_model_weights` (default `ollama:qwen3:14b=2,ollama:gemma3:12b=2,ollama:deepseek-r1:8b=1`).
+- When `budget.remaining_usd() <= 0`, the conscious model pool swaps to `budget_exhausted_model_weights` (default `ollama:qwen3:14b=2,ollama:gemma4:12b=2,ollama:deepseek-r1:8b=1`).
 - Local models still decide any action — they're not forced to WAIT. A thoughtful local POST is strictly better than a paid gemini-3.1-pro-preview deciding WAIT.
 - The retry chain at `__main__.py:~1406` uses the same `active_conscious_weights` variable, so fallback during budget exhaustion stays on local models rather than escalating back to paid.
 
@@ -668,7 +668,7 @@ The accountant prompt explicitly tells it which controls are shared with conscio
 - Defaults: `max_drafts` 10 → 40, `max_saved_plans` new control = 15, `muse_interval_ticks` default 30 → 15, `dream_interval_ticks` 30 → 60.
 
 ### Draft digest compression
-- New `_compress_drafts_to_digest()` in `__main__.py`: takes overflow drafts (below top-10 by score) and synthesizes a 3-5 sentence thematic paragraph via the compressor cadre (default gemma3:12b).
+- New `_compress_drafts_to_digest()` in `__main__.py`: takes overflow drafts (below top-10 by score) and synthesizes a 3-5 sentence thematic paragraph via the compressor cadre (default gemma4:12b).
 - Digest regenerates fresh each drain, doesn't persist.
 - Rendered in `_format_draft_context()` as "Your subconscious also noticed these less-prominent themes" — gives the conscious a thematic summary of what didn't make the cut without the verbosity of 30+ individual drafts.
 
@@ -737,7 +737,7 @@ The subconscious daemon shapes coarse-grained context (feed scoring, experiment 
 - **Ollama preferred over HuggingFace**: Local models served via Ollama REST API (1-6s) not PyTorch (30-250s)
 - **POST/POST_MOLTBOOK split**: Two actions with explicit audience intent. POST = Analog Home (human audience, no cooldown). POST_MOLTBOOK = Moltbook + archive (agent community, 30min cooldown). `output_destination` control removed.
 - **Post engagement feedback**: Agent sees Moltbook upvotes, comments, karma, followers each cycle. Audience stats (unique voters, seeders) from Analog Home `/audience` endpoint.
-- **Verification**: gemma3:12b primary (free, 6/10 accuracy with simple prompt), gemini-2.5-flash backup. `verification_model_weights` cadre.
+- **Verification**: gemma4:12b primary (free, 6/10 accuracy with simple prompt), gemini-2.5-flash backup. `verification_model_weights` cadre.
 - **Strategist parser**: Strips monologue text and `//` comments before JSON extraction — models can role-play the kernel but JSON is still recovered.
 - **Sentry thinking disabled**: `disable_thinking=True` passed to Ollama for sentry scoring — prevents thinking models from wasting tokens on reasoning blocks.
 

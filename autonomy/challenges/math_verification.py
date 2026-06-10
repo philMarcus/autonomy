@@ -135,7 +135,7 @@ class MathVerificationSolver(ChallengeSolver):
                         return {"verification_code": verification_code, "answer": answer}
                 except Exception:
                     pass
-            # 2nd backup: ollama:gemma3:12b (free, local)
+            # 2nd backup: ollama:gemma4:12b (free, local)
             if is_503 and hasattr(self, 'backup_llm_2') and self.backup_llm_2:
                 try:
                     _backup2_model = getattr(self.backup_llm_2, '_default_model_id', '?')
