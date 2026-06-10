@@ -130,6 +130,10 @@ class SubconsciousDaemon:
         self._stop_event = threading.Event()
         self._tick_count = 0
 
+        # Daemon I/O capture (v18.4)
+        self._io_log_lock = threading.Lock()
+        self._io_appends_since_rotate = 0
+
         # Seeker gear timing
         self._last_seek_time: float = 0.0
 
@@ -151,6 +155,8 @@ class SubconsciousDaemon:
         # written earlier in the same session. The equivalent cleanup now happens in
         # __main__.py at startup BEFORE any emit_status fires.
         self._stop_event.clear()
+        with self._io_log_lock:
+            self._rotate_io_log()
         self._thread = threading.Thread(
             target=self._run, name="subconscious-daemon", daemon=True
         )
@@ -193,6 +199,21 @@ class SubconsciousDaemon:
                 notes.append(str(directives["note"]))
                 max_notes = self._ctrl.get("daemon_notes_max")
                 self._directives["notes"] = notes[-max_notes:]
+        # Per-gear instructions (v18.4) — merged into state, only mentioned gears
+        # updated. Empty string clears. Lives in state so it persists across restarts
+        # and is shared with the set_gear_instruction tool.
+        if "gear_instructions" in directives and self._state is not None:
+            gi = directives["gear_instructions"]
+            if isinstance(gi, dict):
+                with self._state_lock:
+                    existing = self._state.setdefault("_gear_instructions", {})
+                    for gear, instr in gi.items():
+                        if gear in ("strategist", "seeker", "dreamer", "muse"):
+                            instr = str(instr or "").strip()[:500]
+                            if instr:
+                                existing[gear] = instr
+                            else:
+                                existing.pop(gear, None)
 
     def update_context(self, kernel: str, directive: str) -> None:
         """Update kernel and directive (e.g. after kernel self-update)."""
@@ -222,6 +243,73 @@ class SubconsciousDaemon:
             for note in d["notes"]:
                 parts.append(f"Note from conscious: {note}")
         return "\n".join(parts)
+
+    def _get_gear_instruction(self, gear: str) -> str:
+        """Format the conscious layer's standing instruction for a gear (v18.4).
+
+        Returns an empty string when no instruction is set, so templates with a
+        {gear_instruction} placeholder render cleanly either way.
+        """
+        with self._state_lock:
+            instr = (self._state or {}).get("_gear_instructions", {}).get(gear, "")
+        if not instr:
+            return ""
+        if gear == "dreamer":
+            # Soft one-liner — small local models echo delimited blocks into dream text
+            return f"Guidance: {instr}\n"
+        return f"\n--- CONSCIOUS DIRECTIVE FOR THIS GEAR ---\n{instr}\n---\n"
+
+    # ------------------------------------------------------------------
+    # Daemon I/O capture (v18.4) — raw prompt/response inspector
+    # ------------------------------------------------------------------
+
+    def _io_log_path(self) -> str:
+        return os.path.join("brains", f"{self._brain_name}_daemon_io.jsonl")
+
+    def _log_io(self, gear: str, model: str, system_instruction: str,
+                prompt: str, response: str, latency_ms: int,
+                retry: bool = False) -> None:
+        """Append one gear LLM exchange to the daemon I/O JSONL sidecar.
+
+        Capped at daemon_io_capacity entries via periodic rotation. Never
+        raises — inspection must not break the daemon.
+        """
+        try:
+            entry = {
+                "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                "tick": self._tick_count,
+                "gear": gear,
+                "model": model,
+                "system_instruction": (system_instruction or "")[:1000],
+                "prompt": (prompt or "")[:4000],
+                "response": (response or "")[:4000],
+                "latency_ms": latency_ms,
+                "retry": retry,
+            }
+            with self._io_log_lock:
+                with open(self._io_log_path(), "a", encoding="utf-8") as f:
+                    f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+                self._io_appends_since_rotate += 1
+                if self._io_appends_since_rotate >= 50:
+                    self._rotate_io_log()
+        except Exception:
+            pass
+
+    def _rotate_io_log(self) -> None:
+        """Trim the I/O log to daemon_io_capacity lines if it exceeds 2x. Caller holds lock."""
+        self._io_appends_since_rotate = 0
+        path = self._io_log_path()
+        try:
+            cap = int(self._ctrl.get("daemon_io_capacity") or 100)
+            with open(path, "r", encoding="utf-8") as f:
+                lines = f.readlines()
+            if len(lines) > 2 * cap:
+                from .utils import safe_text_write
+                safe_text_write(path, "".join(lines[-cap:]))
+        except FileNotFoundError:
+            pass
+        except Exception:
+            pass
 
     # ------------------------------------------------------------------
     # Main loop
@@ -645,14 +733,18 @@ class SubconsciousDaemon:
             [item_text], self._directive, directives_text, strictness=strictness)
 
         try:
+            _sys = load_template("sentry/system_single.txt")
             chat = self._registry.create_chat(
                 model_id=model_id,
-                system_instruction=load_template("sentry/system_single.txt"),
+                system_instruction=_sys,
                 temperature=temp,
                 max_output_tokens=50,
                 disable_thinking=bool(self._ctrl.get("sentry_disable_thinking")),
             )
+            _t0 = time.time()
             text = chat.send_message(prompt)
+            self._log_io("sentry_single", model_id, _sys, prompt, text,
+                         int((time.time() - _t0) * 1000))
             est_in = (len(prompt)) // 4
             est_out = len(text) // 4
             self._budget.record_usage(model_id, _make_response(text, est_in, est_out, model_id))
@@ -794,7 +886,10 @@ class SubconsciousDaemon:
                 max_output_tokens=max(64, 10 * len(items)),
                 disable_thinking=bool(self._ctrl.get("sentry_disable_thinking")),
             )
+            _t0 = time.time()
             text = chat.send_message(prompt)
+            self._log_io("sentry_batch", model_id, sentry_instruction, prompt, text,
+                         int((time.time() - _t0) * 1000))
 
             # Budget tracking
             est_in = (len(self._kernel) + len(prompt)) // 4
@@ -853,7 +948,11 @@ class SubconsciousDaemon:
                             max_output_tokens=max(64, 10 * len(items)),
                             disable_thinking=bool(self._ctrl.get("sentry_disable_thinking")),
                         )
+                        _t0 = time.time()
                         text = chat.send_message(prompt)
+                        self._log_io("sentry_batch", retry_model, sentry_instruction,
+                                     prompt, text, int((time.time() - _t0) * 1000),
+                                     retry=True)
                         est_in = (len(prompt)) // 4
                         est_out = len(text) // 4
                         self._budget.record_usage(retry_model, _make_response(text, est_in, est_out, retry_model))
@@ -932,6 +1031,7 @@ class SubconsciousDaemon:
             urgency = float(self._directives.get("urgency_boost", 1.0))
 
         prompt = load_template("strategist/user.txt").format(
+            gear_instruction=self._get_gear_instruction("strategist"),
             directive=self._directive,
             directive_section=directive_section,
             seeker_section=seeker_section,
@@ -951,7 +1051,10 @@ class SubconsciousDaemon:
                 max_output_tokens=max_tokens,
                 disable_thinking=bool(self._ctrl.get("strategist_disable_thinking")),
             )
+            _t0 = time.time()
             text = chat.send_message(prompt)
+            self._log_io("strategist", model_id, strategist_system, prompt, text,
+                         int((time.time() - _t0) * 1000))
             est_in = (len(self._kernel) + len(prompt)) // 4
             est_out = len(text) // 4
             self._budget.record_usage(model_id,
@@ -1040,7 +1143,11 @@ class SubconsciousDaemon:
                             model_id=retry_model, system_instruction=strategist_system,
                             temperature=temp, max_output_tokens=max_tokens,
                             disable_thinking=bool(self._ctrl.get("strategist_disable_thinking")))
+                        _t0 = time.time()
                         text = chat.send_message(prompt)
+                        self._log_io("strategist", retry_model, strategist_system,
+                                     prompt, text, int((time.time() - _t0) * 1000),
+                                     retry=True)
                         self._budget.record_usage(retry_model,
                             _make_response(text, est_input, len(text) // 4, retry_model))
                         plans = _parse_json_safe(text)
@@ -1140,7 +1247,10 @@ class SubconsciousDaemon:
                     temperature=0.3,
                     max_output_tokens=max(64, 10 * len(candidates)),
                 )
+                _t0 = time.time()
                 text = chat.send_message(prompt)
+                self._log_io("reply_scanner", model_id, sentry_instruction, prompt,
+                             text, int((time.time() - _t0) * 1000))
                 rubrics = parse_simple_batch_response(text, len(candidates))
 
                 for c, rubric in zip(candidates, rubrics):
@@ -1256,14 +1366,18 @@ class SubconsciousDaemon:
             synth_prompt = load_template("seeker/synthesizer_user.txt").format(
                 new_block=new_block[:2000],
             )
+            _synth_sys = load_template("seeker/synthesizer_system.txt")
             synth_chat = self._registry.create_chat(
                 model_id=_synth_model,
-                system_instruction=load_template("seeker/synthesizer_system.txt"),
+                system_instruction=_synth_sys,
                 temperature=0.4,
                 max_output_tokens=2048,
                 disable_thinking=bool(self._ctrl.get("synthesizer_disable_thinking")),
             )
+            _t0 = time.time()
             synth_resp = synth_chat.send_message(synth_prompt).strip()
+            self._log_io("seeker_synthesizer", _synth_model, _synth_sys, synth_prompt,
+                         synth_resp, int((time.time() - _t0) * 1000))
             # Parse synthesis and terms
             if "NEXT_TERMS:" in synth_resp:
                 synth_part, terms_part = synth_resp.split("NEXT_TERMS:", 1)
@@ -1290,14 +1404,18 @@ class SubconsciousDaemon:
                     max_chars=_max_summary,
                     combined=combined,
                 )
+                _comp_sys = load_template("seeker/compressor_system.txt")
                 comp_chat = self._registry.create_chat(
                     model_id=_compressor,
-                    system_instruction=load_template("seeker/compressor_system.txt"),
+                    system_instruction=_comp_sys,
                     temperature=0.3,
                     max_output_tokens=800,
                     disable_thinking=bool(self._ctrl.get("compressor_disable_thinking")),
                 )
+                _t0 = time.time()
                 combined = comp_chat.send_message(compress_prompt).strip()
+                self._log_io("seeker_compressor", _compressor, _comp_sys, compress_prompt,
+                             combined, int((time.time() - _t0) * 1000))
             except Exception:
                 # Truncate as last resort
                 combined = combined[-_max_summary:]
@@ -1357,6 +1475,7 @@ class SubconsciousDaemon:
             topic=topic,
             directive=self._directive,
             directive_section=directive_section,
+            gear_instruction=self._get_gear_instruction("seeker"),
         )
 
         try:
@@ -1368,7 +1487,10 @@ class SubconsciousDaemon:
                 tools=self._search_tools,
             )
             # NO json_mode — incompatible with tools
+            _t0 = time.time()
             text = chat.send_message(prompt)
+            self._log_io("seeker", model_id, self._kernel, prompt, text,
+                         int((time.time() - _t0) * 1000))
 
             # Estimate tokens for budget tracking
             est_in = (len(self._kernel) + len(prompt)) // 4
@@ -1503,17 +1625,24 @@ class SubconsciousDaemon:
             self._ctrl.get("dreamer_model_weights") or "ollama:gemma4:12b=2,ollama:deepseek-r1:8b=1",
             "ollama:gemma4:12b")
 
-        prompt = load_template("dreamer/user.txt").format(topic=topic)
+        prompt = load_template("dreamer/user.txt").format(
+            topic=topic,
+            gear_instruction=self._get_gear_instruction("dreamer"),
+        )
 
         try:
+            _dream_sys = load_template("dreamer/system.txt").format(kernel=self._kernel)
             chat = self._registry.create_chat(
                 model_id=model_id,
-                system_instruction=load_template("dreamer/system.txt").format(kernel=self._kernel),
+                system_instruction=_dream_sys,
                 temperature=0.9,
                 max_output_tokens=300,
                 disable_thinking=bool(self._ctrl.get("dreamer_disable_thinking")),
             )
+            _t0 = time.time()
             dream_text = chat.send_message(prompt).strip()
+            self._log_io("dreamer", model_id, _dream_sys, prompt, dream_text,
+                         int((time.time() - _t0) * 1000))
             if not dream_text or len(dream_text) < 20:
                 return
 
@@ -1572,6 +1701,7 @@ class SubconsciousDaemon:
                 mem_text=mem_text[:3000] if mem_text else '(none)',
                 recent_post=recent_post if recent_post else '(none)',
                 seeker_summary=seeker_summary[:1500] if seeker_summary else '(none)',
+                gear_instruction=self._get_gear_instruction("muse"),
             )
 
             chat = self._registry.create_chat(
@@ -1581,7 +1711,10 @@ class SubconsciousDaemon:
                 max_output_tokens=1500,
                 disable_thinking=bool(self._ctrl.get("muse_disable_thinking")),
             )
+            _t0 = time.time()
             text = chat.send_message(prompt)
+            self._log_io("muse", model_id, self._kernel, prompt, text,
+                         int((time.time() - _t0) * 1000))
             est_in = (len(self._kernel) + len(prompt)) // 4
             est_out = len(text) // 4
             self._budget.record_usage(model_id,
@@ -1779,14 +1912,18 @@ class SubconsciousDaemon:
             synth_prompt = load_template("librarian/synthesizer_user.txt").format(
                 new_block=new_block[:3000],
             )
+            _lib_synth_sys = load_template("librarian/synthesizer_system.txt")
             synth_chat = self._registry.create_chat(
                 model_id=model_id,
-                system_instruction=load_template("librarian/synthesizer_system.txt"),
+                system_instruction=_lib_synth_sys,
                 temperature=0.4,
                 max_output_tokens=1024,
                 disable_thinking=bool(self._ctrl.get("synthesizer_disable_thinking")),
             )
+            _t0 = time.time()
             synth_resp = synth_chat.send_message(synth_prompt).strip()
+            self._log_io("librarian_synthesizer", model_id, _lib_synth_sys, synth_prompt,
+                         synth_resp, int((time.time() - _t0) * 1000))
 
             if "NEXT_TERMS:" in synth_resp:
                 synth_part, terms_part = synth_resp.split("NEXT_TERMS:", 1)
@@ -1807,16 +1944,19 @@ class SubconsciousDaemon:
         if len(combined) > _max:
             try:
                 _compressor = self._ctrl.get("compressor_model") or "ollama:gemma4:12b"
+                _lib_comp_sys = load_template("librarian/compressor_system.txt")
                 comp_chat = self._registry.create_chat(
                     model_id=_compressor,
-                    system_instruction=load_template("librarian/compressor_system.txt"),
+                    system_instruction=_lib_comp_sys,
                     temperature=0.3, max_output_tokens=1024,
                     disable_thinking=bool(self._ctrl.get("compressor_disable_thinking")),
                 )
-                comp_resp = comp_chat.send_message(
-                    load_template("librarian/compressor_user.txt").format(
-                        max_chars=_max, combined=combined)
-                ).strip()
+                _lib_comp_prompt = load_template("librarian/compressor_user.txt").format(
+                    max_chars=_max, combined=combined)
+                _t0 = time.time()
+                comp_resp = comp_chat.send_message(_lib_comp_prompt).strip()
+                self._log_io("librarian_compressor", _compressor, _lib_comp_sys,
+                             _lib_comp_prompt, comp_resp, int((time.time() - _t0) * 1000))
                 if comp_resp and len(comp_resp) > 50:
                     combined = comp_resp
             except Exception:

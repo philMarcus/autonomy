@@ -237,6 +237,16 @@ def extract_sentry_reply(brain_name, state, kernel, ctrl):
     }
 
 
+def _gear_instruction(state, gear):
+    """Mirror SubconsciousDaemon._get_gear_instruction for bench fidelity (v18.4)."""
+    instr = state.get("_gear_instructions", {}).get(gear, "")
+    if not instr:
+        return ""
+    if gear == "dreamer":
+        return f"Guidance: {instr}\n"
+    return f"\n--- CONSCIOUS DIRECTIVE FOR THIS GEAR ---\n{instr}\n---\n"
+
+
 def extract_strategist(brain_name, state, kernel, ctrl):
     """Strategist draft generation prompt."""
     directive = state.get("directive", "Participate on Moltbook.")
@@ -250,6 +260,7 @@ def extract_strategist(brain_name, state, kernel, ctrl):
     )
 
     user_prompt = load_template("strategist/user.txt").format(
+        gear_instruction=_gear_instruction(state, "strategist"),
         directive=directive,
         directive_section="",
         seeker_section="",
@@ -277,6 +288,7 @@ def extract_seeker(brain_name, state, kernel, ctrl):
 
     user_prompt = load_template("seeker/user.txt").format(
         topic=topic, directive=directive, directive_section="",
+        gear_instruction=_gear_instruction(state, "seeker"),
     )
 
     return system, user_prompt, {
@@ -314,7 +326,10 @@ def extract_dreamer(brain_name, state, kernel, ctrl):
     topic = random.choice(topics) if topics else "ocean storm"
 
     system = load_template("dreamer/system.txt").format(kernel=kernel)
-    user_prompt = load_template("dreamer/user.txt").format(topic=topic)
+    user_prompt = load_template("dreamer/user.txt").format(
+        topic=topic,
+        gear_instruction=_gear_instruction(state, "dreamer"),
+    )
 
     return system, user_prompt, {
         "gear": "dreamer",
@@ -342,6 +357,7 @@ def extract_muse(brain_name, state, kernel, ctrl):
         mem_text=mem_text[:3000] if mem_text else '(none)',
         recent_post=recent_post if recent_post else '(none)',
         seeker_summary='(none)',
+        gear_instruction=_gear_instruction(state, "muse"),
     )
 
     return system, user_prompt, {

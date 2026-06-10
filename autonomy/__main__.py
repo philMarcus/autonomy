@@ -1586,6 +1586,7 @@ def main():
                                              count=int(ctrl.get("recent_posts_in_prompt") or 4)),
             post_engagement=_build_post_engagement(platform, state),
             post_memory=post_memory_context(state),
+            gear_instructions=state.get("_gear_instructions"),
         )
 
         # Append tools summary to prompt so the agent knows what's available

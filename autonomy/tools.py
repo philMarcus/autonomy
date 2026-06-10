@@ -1037,6 +1037,9 @@ def build_tool_registry(
     if platform:
         _build_moltbook_retrieval_tools(registry, platform)
 
+    # v18.4: daemon inspection + gear instructions
+    _build_daemon_io_tools(registry, state, brain_name, brains_dir)
+
     log.info("Tool registry built: %s", ", ".join(registry.list_names()))
     return registry
 
@@ -1385,6 +1388,103 @@ def _build_self_awareness_tools(
             "required": [],
         },
         handler=get_kernel_history,
+    ))
+
+
+def _build_daemon_io_tools(
+    registry: ToolRegistry, state: Dict[str, Any], brain_name: str, brains_dir: str,
+) -> None:
+    """Register daemon inspection tools: get_daemon_io, get/set_gear_instruction (v18.4)."""
+
+    io_log_path = os.path.join(brains_dir, f"{brain_name}_daemon_io.jsonl")
+    INSTRUCTABLE_GEARS = ("strategist", "seeker", "dreamer", "muse")
+
+    # --- get_daemon_io ---
+    def get_daemon_io(gear: str = "", last_n: int = 5) -> Dict[str, Any]:
+        """Read the most recent daemon gear LLM exchanges from the I/O log."""
+        if not os.path.exists(io_log_path):
+            return {"entries": [], "note": "No daemon I/O captured yet."}
+        entries = []
+        try:
+            with open(io_log_path, "r", encoding="utf-8") as f:
+                lines = f.readlines()
+            for line in reversed(lines):
+                try:
+                    e = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if gear and e.get("gear") != gear:
+                    continue
+                entries.append(e)
+                if len(entries) >= last_n:
+                    break
+        except Exception as exc:
+            return {"error": f"Failed to read daemon I/O log: {exc}"}
+        return {"entries": entries, "total_returned": len(entries)}
+
+    registry.register(ToolDef(
+        name="get_daemon_io",
+        description="Inspect your subconscious: see the raw prompts your daemon gears were shown "
+                    "and the raw responses they produced (newest first). Gears: sentry_batch, "
+                    "sentry_single, strategist, seeker, seeker_synthesizer, seeker_compressor, "
+                    "reply_scanner, dreamer, muse, librarian_synthesizer, librarian_compressor.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "gear": {"type": "string", "description": "Filter to one gear. Empty = all gears."},
+                "last_n": {"type": "integer", "description": "How many exchanges to return. Default: 5."},
+            },
+            "required": [],
+        },
+        handler=get_daemon_io,
+    ))
+
+    # --- get_gear_instructions ---
+    def get_gear_instructions() -> Dict[str, Any]:
+        """Read the current per-gear instructions."""
+        instructions = dict(state.get("_gear_instructions", {}))
+        return {"gear_instructions": instructions,
+                "instructable_gears": list(INSTRUCTABLE_GEARS)}
+
+    registry.register(ToolDef(
+        name="get_gear_instructions",
+        description="See the standing instructions you've given each subconscious gear "
+                    "(strategist, seeker, dreamer, muse).",
+        parameters={"type": "object", "properties": {}, "required": []},
+        handler=get_gear_instructions,
+    ))
+
+    # --- set_gear_instruction ---
+    def set_gear_instruction(gear: str, instruction: str = "") -> Dict[str, Any]:
+        """Set (or clear with empty string) a standing instruction for one daemon gear."""
+        gear = (gear or "").strip().lower()
+        if gear not in INSTRUCTABLE_GEARS:
+            return {"error": f"Unknown gear '{gear}'. "
+                             f"Instructable gears: {', '.join(INSTRUCTABLE_GEARS)}"}
+        instruction = str(instruction or "").strip()[:500]
+        gi = state.setdefault("_gear_instructions", {})
+        if instruction:
+            gi[gear] = instruction
+            return {"ok": True, "gear": gear, "instruction": instruction}
+        gi.pop(gear, None)
+        return {"ok": True, "gear": gear, "instruction": "", "note": "Instruction cleared."}
+
+    registry.register(ToolDef(
+        name="set_gear_instruction",
+        description="Give a standing instruction to one of your subconscious gears "
+                    "(strategist, seeker, dreamer, muse). It is injected into that gear's "
+                    "prompt every run until you change it. Empty instruction clears it. "
+                    "Max 500 chars.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "gear": {"type": "string", "description": "One of: strategist, seeker, dreamer, muse."},
+                "instruction": {"type": "string", "description": "The instruction text. Empty string clears."},
+            },
+            "required": ["gear"],
+        },
+        handler=set_gear_instruction,
+        mode="write",
     ))
 
 

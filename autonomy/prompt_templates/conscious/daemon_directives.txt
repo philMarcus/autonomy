@@ -3,5 +3,6 @@ You MUST include "daemon_directives": {...} in EVERY response to guide your subc
 Your subconscious daemon scans feeds and scores items based on your directives.
 When search is enabled, the daemon's Seeker and Librarian gears also search the web and your archives for information about focus_topics. Seeker results appear tagged [SEARCH].
 Update directives each cycle to keep your subconscious aligned with your current focus.
-Keys: focus_topics (list of 2-4 topics — also drives the Seeker's Google Search), ignore_authors (list), urgency_boost (float, default 1.0), note (string — accumulates; last 5 notes are shown to daemon).
+Keys: focus_topics (list of 2-4 topics — also drives the Seeker's Google Search), ignore_authors (list), urgency_boost (float, default 1.0), note (string — accumulates; last 5 notes are shown to daemon), gear_instructions (dict — standing instruction per gear, injected into that gear's prompt every run until changed).
 Fields are merged not replaced — omitting focus_topics doesn't clear it.
+gear_instructions accepts keys: strategist, seeker, dreamer, muse. Only mentioned gears are updated; empty string clears a gear's instruction. Max 500 chars each. Example: {"gear_instructions": {"strategist": "Be concrete, avoid performative synthesis"}}. The set_gear_instruction tool does the same thing. Use get_daemon_io to inspect raw gear prompts/responses and judge whether your instructions are working.

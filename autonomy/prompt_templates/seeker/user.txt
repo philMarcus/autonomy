@@ -2,7 +2,7 @@ Search for current, relevant information about: {topic}
 
 Context — your directive: {directive}
 {directive_section}
-
+{gear_instruction}
 Use Google Search to find the latest information about this topic.
 Summarize what you find in 2-4 paragraphs, focusing on:
 - What is happening right now related to this topic

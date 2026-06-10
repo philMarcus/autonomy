@@ -1,5 +1,5 @@
 STRATEGIST TASK — output JSON array only. Do not write monologue or prose.
-
+{gear_instruction}
 Directive: {directive}
 {directive_section}{seeker_section}
 HIGH-SIGNAL ITEMS ({item_count}):

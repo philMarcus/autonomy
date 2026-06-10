@@ -262,7 +262,8 @@ def _format_librarian_findings(librarian_findings: str) -> str:
     return f"\n{header}\n\n{librarian_findings}\n"
 
 
-def _format_draft_section(draft_context: str, daemon_active: bool = False) -> str:
+def _format_draft_section(draft_context: str, daemon_active: bool = False,
+                          gear_instructions: Optional[Dict[str, str]] = None) -> str:
     """Format the subconscious buffer section for the planner prompt."""
     parts = []
     if draft_context:
@@ -270,6 +271,11 @@ def _format_draft_section(draft_context: str, daemon_active: bool = False) -> st
             draft_context=draft_context) + "\n")
     if daemon_active:
         parts.append("\n" + load_template("conscious/daemon_directives.txt") + "\n")
+        if gear_instructions:
+            current = " | ".join(
+                f'{gear}: "{instr}"' for gear, instr in gear_instructions.items() if instr)
+            if current:
+                parts.append(f"Current gear instructions: {current}\n")
     return "".join(parts)
 
 
@@ -382,6 +388,7 @@ def build_planner_prompt(
     self_telemetry: str = "",
     recent_posts: str = "",
     post_memory: str = "",
+    gear_instructions: Optional[Dict[str, str]] = None,
 ) -> str:
     read_only_note = ""
     if read_only:
@@ -397,7 +404,7 @@ def build_planner_prompt(
         meta_example_base += '"controls_update": {}, '
     if daemon_active:
         meta_fields_base += ', daemon_directives'
-        meta_example_base += '"daemon_directives": {"focus_topics": [], "note": ""}, '
+        meta_example_base += '"daemon_directives": {"focus_topics": [], "note": "", "gear_instructions": {}}, '
     meta_fields_base += ', tool_actions'
     meta_example_base += (
         '"tool_actions": [{"tool": "log_data", "args": {"experiment_name": "...", "observation": "..."}}], '
@@ -492,7 +499,7 @@ Candidate outside post (if any — commenting on others' posts is lower priority
 {json.dumps(outside_candidate, ensure_ascii=False) if outside_candidate else "None"}
 
 {kernel_update}
-{_format_set_trajectory_option(trajectory_votes, allow_default_temp=allow_default_temp)}{_format_controls_block(controls_block, budget_summary)}{_format_seeker_findings(seeker_findings)}{_format_librarian_findings(librarian_findings)}{_format_draft_section(draft_context, daemon_active=daemon_active)}{_format_memory_pressure(memory_pressure)}{_format_cooldown_status(cooldown_status)}
+{_format_set_trajectory_option(trajectory_votes, allow_default_temp=allow_default_temp)}{_format_controls_block(controls_block, budget_summary)}{_format_seeker_findings(seeker_findings)}{_format_librarian_findings(librarian_findings)}{_format_draft_section(draft_context, daemon_active=daemon_active, gear_instructions=gear_instructions)}{_format_memory_pressure(memory_pressure)}{_format_cooldown_status(cooldown_status)}
 {action_policy}
 
 {action_templates}

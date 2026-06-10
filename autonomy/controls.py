@@ -454,6 +454,9 @@ def build_default_registry(model_registry, blacklist_str: str = "") -> ControlRe
                 "Max output tokens for strategist drafts", "daemon", min_val=128, max_val=8192),
         Control("max_item_age_hours", "int", 24,
                 "Ignore feed items older than this (hours)", "daemon", min_val=1, max_val=168),
+        Control("daemon_io_capacity", "int", 100,
+                "Max daemon I/O log entries retained (raw gear prompts/responses, "
+                "inspectable via get_daemon_io tool)", "daemon", min_val=10, max_val=500),
 
         # --- Daemon (Seeker gear) ---
         Control("seeker_every_n_ticks", "int", 3,
