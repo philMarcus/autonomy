@@ -888,7 +888,7 @@ def render_controls_tab(brain_filter: str):
                                 for _om in _ollama_resp.json().get("models", []):
                                     _ALL_SUBCONSCIOUS.append(f"ollama:{_om['name']}")
                         except Exception:
-                            _ALL_SUBCONSCIOUS.extend(["ollama:gemma4:12b", "ollama:deepseek-r1:8b", "ollama:qwen3.5:9b"])
+                            _ALL_SUBCONSCIOUS.extend(["ollama:gemma4:12b", "ollama:qwen3.5:9b", "ollama:ministral-3:14b"])
                         if "conscious" in key:
                             all_models = _ALL_CONSCIOUS
                         elif "seeker" in key:
@@ -1229,12 +1229,12 @@ def render_daemon_tab(brain_filter: str):
 CONTROLS_META = [
     # --- Models ---
     ("conscious_model_weights",  "weights", "gemini-2.5-pro=1,gemini-3.1-pro-preview=1", "Conscious model pool (pro-tier)", "models", None, None, None),
-    ("subconscious_model_weights", "weights", "gemini-2.5-flash-lite=1,ollama:gemma4:12b=1", "Sentry model pool (feed scoring)", "models", None, None, None),
-    ("strategist_model_weights", "weights", "gemini-2.5-flash-lite=1,ollama:gemma4:12b=1", "Strategist model pool (draft generation)", "models", None, None, None),
+    ("subconscious_model_weights", "weights", "ollama:gemma4:12b=3,ollama:qwen3.5:9b=1,ollama:phi4:latest=0.5,ollama:ministral-3:14b=1.8,ollama:lfm2.5:8b-a1b-q8_0=0.5", "Sentry model pool (feed scoring)", "models", None, None, None),
+    ("strategist_model_weights", "weights", "ollama:gemma4:12b=2,ollama:ministral-3:14b=1.0,ollama:qwen3.5:9b=0.6,ollama:gpt-oss:20b=0.5", "Strategist model pool (draft generation)", "models", None, None, None),
     ("seeker_model_weights",     "weights", "gemini-2.5-flash-lite=1", "Seeker model pool (Gemini only — search grounding)", "models", None, None, None),
-    ("synthesizer_model_weights", "weights", "ollama:gemma4:12b=2,ollama:deepseek-r1:8b=1", "Synthesizer model pool (seeker findings → insights)", "models", None, None, None),
-    ("dreamer_model_weights", "weights", "ollama:gemma4:12b=2,ollama:deepseek-r1:8b=1", "Dreamer model pool (dream generation)", "models", None, None, None),
-    ("muse_model_weights", "weights", "ollama:gemma4:12b=2,ollama:deepseek-r1:8b=1", "Muse model pool (creative generation from memory)", "models", None, None, None),
+    ("synthesizer_model_weights", "weights", "ollama:gemma4:12b=1.0,ollama:gemma4:26b-a4b-it-qat=1.0,ollama:mistral-small3.2:24b=1.0,ollama:ministral-3:14b=1.0,ollama:gpt-oss:20b=0.5", "Synthesizer model pool (seeker findings → insights)", "models", None, None, None),
+    ("dreamer_model_weights", "weights", "ollama:gemma4:12b=2,ollama:gemma4:26b-a4b-it-qat=1.0,ollama:qwen3.6:27b=1.0,ollama:mistral-small3.2:24b=1.0,ollama:gpt-oss:20b=0.5", "Dreamer model pool (dream generation)", "models", None, None, None),
+    ("muse_model_weights", "weights", "ollama:gemma4:12b=2,ollama:gemma4:26b-a4b-it-qat=1.0,ollama:qwen3.6:27b=1.0,ollama:mistral-small3.2:24b=1.0,ollama:gpt-oss:20b=0.5", "Muse model pool (creative generation from memory)", "models", None, None, None),
     ("verification_model_weights", "weights", "ollama:gemma4:12b=3,gemini-2.5-flash=1", "Verification model pool (math challenges)", "models", None, None, None),
     ("temperature",              "float", 0.7,    "Conscious LLM temperature",                      "models",   0.0,  2.0,   None),
     ("subconscious_temperature", "float", 0.3,    "Daemon LLM temperature",                         "models",   0.0,  2.0,   None),
