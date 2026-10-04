@@ -1006,6 +1006,18 @@ def main():
     # Cycle number persists across restarts (only resets on memory wipe)
     iteration = state.get("_cycle_number", 0)
 
+    # Semantic recall (v19): embeddings live in Analog Home; we compute them here.
+    recall_client = None
+    embedder = None
+    if analog_home_url:
+        try:
+            from .recall import Embedder, RecallClient
+            recall_client = RecallClient(analog_home_url)
+            embedder = Embedder(api_key=gem_key, budget=budget)
+        except Exception as _e:
+            print(f"{Fore.YELLOW}    [WARN] recall unavailable: {_e}")
+            recall_client = embedder = None
+
     # Build tool registry for the tool-augmented planner (v18).
     # Tools are available every cycle; the registry holds handlers for todo, experiments, etc.
     from .tools import build_tool_registry, expire_temp_overrides
@@ -1021,6 +1033,8 @@ def main():
         telemetry_dir=telemetry_dir,
         knowledge_path=os.path.join(BRAINS_DIR, f"{brain_name}_knowledge.txt"),
         read_only=args.read_only,
+        recall_client=recall_client,
+        embedder=embedder,
     )
 
     # Push session-start marker to live daemon feed
@@ -1106,6 +1120,27 @@ def main():
             except Exception:
                 pass
             _apply_cli_overrides()  # CLI flags always win over disk values
+
+        # --- Semantic recall sync: embed anything published since last time ---
+        # Bounded per cycle; the backfill CLI handles large gaps. Skipped in
+        # read-only mode so a DEV brain never writes to the shared store.
+        if recall_client and embedder and not args.read_only:
+            try:
+                _sync_n = int(ctrl.get("recall_sync_per_cycle") or 0)
+            except KeyError:
+                _sync_n = 0
+            if _sync_n > 0:
+                try:
+                    from .recall import sync_pending
+                    _sync = sync_pending(recall_client, embedder, limit=_sync_n)
+                    if _sync["embedded"]:
+                        emit_status("[RECALL]",
+                                    f"embedded {_sync['embedded']} docs from {_sync['artifacts']} artifacts "
+                                    f"({_sync['remaining']} still pending)",
+                                    color=Fore.CYAN, cycle=iteration)
+                    telemetry.log("recall_sync", {"cycle": iteration, **_sync})
+                except Exception as _e:
+                    telemetry.log("recall_sync_error", {"cycle": iteration, "error": str(_e)[:300]})
 
         # --- Analog Home controls (only when API URL is configured) ---
         analog_controls = {}

@@ -996,6 +996,8 @@ def build_tool_registry(
     telemetry_dir: str = "",    # path to telemetry dir (Sprint 2)
     knowledge_path: str = "",   # path to knowledge.txt (Sprint 2)
     read_only: bool = False,    # prevents writes to Analog Home API
+    recall_client: Any = None,  # recall.RecallClient (v19) — enables the `recall` tool
+    embedder: Any = None,       # recall.Embedder (v19)
 ) -> ToolRegistry:
     """Create a ToolRegistry with all built-in tools registered.
 
@@ -1040,6 +1042,11 @@ def build_tool_registry(
 
     # v18.4: daemon inspection + gear instructions
     _build_daemon_io_tools(registry, state, brain_name, brains_dir)
+
+    # v19: semantic recall over all artifacts + previous-life memory notes
+    if recall_client is not None and embedder is not None:
+        from .recall import build_recall_tool
+        build_recall_tool(registry, recall_client, embedder, state)
 
     log.info("Tool registry built: %s", ", ".join(registry.list_names()))
     return registry

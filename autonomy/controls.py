@@ -363,6 +363,10 @@ def build_default_registry(model_registry, blacklist_str: str = "") -> ControlRe
         # High-score items add charge_weight_feed to wake_potential. When wake_potential
         # crosses an auto-calibrated threshold (tuned to hit target_wake_minutes on average),
         # conscious fires. If no wake event by cycle_interval_minutes, conscious fires anyway.
+        Control("recall_sync_per_cycle", "int", 50,
+                "Max artifacts embedded for semantic recall at the start of each cycle "
+                "(0 disables the per-cycle sync; backfill with python -m autonomy.recall)",
+                "context", min_val=0, max_val=200, audience="operator"),
         Control("active_hours", "str", "09:00-17:00",
                 "Local-time window when the agent runs at all (conscious AND daemon). "
                 "Outside it the process is dormant: no cycles, no ticks, no local-model "
