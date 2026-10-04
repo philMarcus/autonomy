@@ -763,9 +763,14 @@ Analog_I was dormant Jun–Oct 2026 while Phil built Zoomer (Powers of Zen). v19
 - Run the API locally: `cd analog_home/api && DATABASE_URL=... uvicorn main:app --port 8765`. Load the prod corpus by paging `https://api.analog-i.ai/artifacts?limit=50&offset=N` into `/publish`.
 - DEV brain: copy `brains/ANALOG_I_*` to a temp `BRAINS_DIR` as `ANALOG_I_DEV_*`, set `budget_plan_enabled=false` (keeps Ollama idle), run with `ANALOG_I_DEV_GEMINI_API_KEY`, `ANALOG_I_DEV_ANALOG_HOME_API_URL=http://localhost:8765`, `--no-moltbook --no-subconscious --read-only --active-hours always`.
 
-### Open items after v19.1.1
+### Ollama context window (v19.1.2) — pre-existing bug, fixed
+- Ollama 0.35's default `num_ctx` is 4096. Longer prompts are **silently truncated from the front** — the model loses the system prompt and the start of the user turn. Measured: a 43K-char prompt evaluated 2,051 tokens and the model denied having a system prompt; with `num_ctx=16384` it evaluated 9,914 and answered correctly. The local conscious fallback (~42K chars) had been deciding on the prompt's tail; muse/accountant likely hit it at times.
+- `autonomy/llm/ollama.py` now sizes `num_ctx` per call: chars/3 + max_output + 512, rounded to 1K, floor 8192, capped by the model's own window (`/api/show`, cached) and a 64K ceiling. Applies to `send_message`, `send_message_with_tools` (recomputed per round) and `generate()`. Re-run of the budget-exhausted cycle: `qwen3:14b` read 12,810 tokens (258 s on the 10 GB card — the fallback path is slow but sees everything).
+- Native Ollama tool calling verified live on `qwen3:14b` (think on/off) and `gemma4:12b`; every pool model except `phi4` (sentry-only) reports the `tools` capability.
+- `daemon._io_log_path()` and the dreamer topics path hardcoded `"brains"`; both honour `BRAINS_DIR` now (a DEV run had written into the real brains dir).
+
+### Open items after v19.1.2
 - Deploy the API to Fly (needs `flyctl auth login` — token expired), then `python -m autonomy.recall backfill ANALOG_I` against prod and the archived memory file.
-- Ollama live tests: native tool calling, strategist/sentry on the refreshed pools.
 - `conscious_thinking_level` control for Gemini 3.x; Instagram account for daily images (via Zoomer's CDP driver); Anthropic model IDs in `llm/anthropic.py` are pre-Claude-5 (pool weight 0).
 
 ## Key Architecture Decisions
