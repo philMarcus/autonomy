@@ -669,7 +669,8 @@ def _plan_with_tools(chat, prompt, tool_registry,
         from .llm.base import LLMResponse
         in_tok = getattr(chat, '_last_input_tokens', 0) or 0
         out_tok = getattr(chat, '_last_output_tokens', 0) or 0
-        model_name = getattr(chat, '_model_id', '') or ''
+        # Sessions expose model_name (Gemini/Ollama); _model_id is a legacy alias.
+        model_name = getattr(chat, "model_name", "") or getattr(chat, "_model_id", "") or ""
         if model_name:
             budget.record_usage(model_name, LLMResponse(
                 text=raw, input_tokens=in_tok, output_tokens=out_tok,
@@ -678,7 +679,7 @@ def _plan_with_tools(chat, prompt, tool_registry,
 
     if telemetry:
         telemetry.log("llm_call", {
-            "tag": "planner", "model": getattr(chat, '_model_id', ''),
+            "tag": "planner", "model": getattr(chat, "model_name", "") or getattr(chat, "_model_id", ""),
             "prompt_chars": len(prompt),
             "response_chars": len(raw or ''),
             "input_tokens": getattr(chat, '_last_input_tokens', 0),

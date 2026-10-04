@@ -887,7 +887,8 @@ def _build_temp_control_tools(
                     "description": "The control key to override.",
                 },
                 "value": {
-                    "description": "The temporary value to set.",
+                    "type": "string",
+                    "description": "The temporary value, as text (numbers and booleans are parsed by the control registry).",
                 },
                 "duration_cycles": {
                     "type": "integer",
@@ -1592,7 +1593,7 @@ def _build_web_search_tool(registry: ToolRegistry) -> None:
             from google import genai
             from google.genai import types
 
-            # Use flash-lite for the search — cheap and fast, we only need
+            # Use 3.5 flash-lite for the search — cheap and fast, we only need
             # the grounding results, not deep reasoning.
             # Resolve API key from environment (same vars the main backend uses).
             _api_key = (os.environ.get("ANALOG_I_GEMINI_API_KEY")
@@ -1600,7 +1601,7 @@ def _build_web_search_tool(registry: ToolRegistry) -> None:
                         or os.environ.get("GOOGLE_API_KEY") or "")
             client = genai.Client(api_key=_api_key) if _api_key else genai.Client()
             response = client.models.generate_content(
-                model="gemini-2.5-flash-lite",
+                model="gemini-3.5-flash-lite",
                 contents=query,
                 config=types.GenerateContentConfig(
                     tools=[types.Tool(google_search=types.GoogleSearch())],

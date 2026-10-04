@@ -7,6 +7,7 @@ Requires: Ollama running at http://localhost:11434 (default)
 Install: https://ollama.ai
 """
 
+import json
 import logging
 import time
 from typing import Any, Callable, Dict, List, Optional
@@ -33,9 +34,11 @@ class OllamaChatSession(ChatSession):
         self._temperature = temperature
         self._max_output_tokens = max_output_tokens
         self._disable_thinking = disable_thinking
-        self._history: List[Dict[str, str]] = []
+        self._history: List[Dict[str, Any]] = []
         self._last_input_tokens = 0
         self._last_output_tokens = 0
+        self._last_thinking = ""
+        self._model_id = model_name
 
         if system_instruction:
             self._history.append({"role": "system", "content": system_instruction})
@@ -88,22 +91,117 @@ class OllamaChatSession(ChatSession):
 
         return text
 
+    @staticmethod
+    def _schemas_to_ollama_tools(tool_schemas: List[Dict]) -> List[Dict[str, Any]]:
+        """Convert our JSON-Schema tool defs to Ollama's OpenAI-style tool format."""
+        tools = []
+        for s in tool_schemas:
+            tools.append({
+                "type": "function",
+                "function": {
+                    "name": s["name"],
+                    "description": s.get("description", ""),
+                    "parameters": s.get("parameters") or {"type": "object", "properties": {}},
+                },
+            })
+        return tools
+
     def send_message_with_tools(
         self,
         prompt: str,
         tool_schemas: List[Dict],
         tool_executor: Callable[[List[ToolCall]], List[ToolResult]],
-        max_rounds: int = 3,
+        max_rounds: int = 12,
         json_mode: bool = False,
     ) -> str:
-        """Tool calling stub — falls back to text-only send_message.
+        """Send a message with Ollama-native tool calling (/api/chat ``tools``).
 
-        TODO: implement native Ollama tool calling.
+        Flow mirrors the Gemini implementation:
+        1. Send the user prompt with the tool list attached.
+        2. If the reply carries ``message.tool_calls``, execute them through
+           ``tool_executor`` and append one ``role: tool`` message per result.
+        3. Repeat until the model answers in text or ``max_rounds`` is spent,
+           in which case it is asked once more, without tools, for a final answer.
+
+        Token counts are summed across rounds into ``_last_*_tokens``.
+        ``json_mode`` is ignored while tools are attached (Ollama's ``format``
+        and tool calls don't mix well); callers parse the JSON themselves.
         """
         log = logging.getLogger("autonomy.llm.ollama")
-        log.debug("send_message_with_tools: native tool calling not yet "
-                   "implemented for Ollama — falling back to send_message")
-        return self.send_message(prompt, json_mode=json_mode)
+        ollama_model = self.model_name
+        if ollama_model.startswith("ollama:"):
+            ollama_model = ollama_model[7:]
+        tools = self._schemas_to_ollama_tools(tool_schemas)
+
+        self._history.append({"role": "user", "content": prompt})
+        total_in = 0
+        total_out = 0
+
+        def _chat(with_tools: bool) -> Dict[str, Any]:
+            payload: Dict[str, Any] = {
+                "model": ollama_model,
+                "messages": self._history,
+                "stream": False,
+                "options": {
+                    "temperature": self._temperature,
+                    "num_predict": self._max_output_tokens,
+                },
+            }
+            if with_tools and tools:
+                payload["tools"] = tools
+            if self._disable_thinking:
+                payload["think"] = False
+            resp = requests.post(f"{self._base_url}/api/chat", json=payload, timeout=600)
+            resp.raise_for_status()
+            return resp.json()
+
+        for round_idx in range(max_rounds + 1):
+            final_round = round_idx == max_rounds
+            if final_round:
+                self._history.append({
+                    "role": "user",
+                    "content": "Tool budget exhausted. Respond now with your final answer "
+                               "using what you already know.",
+                })
+            data = _chat(with_tools=not final_round)
+            msg = data.get("message", {}) or {}
+            total_in += data.get("prompt_eval_count", 0) or 0
+            total_out += data.get("eval_count", 0) or 0
+            self._last_thinking = (msg.get("thinking") or "").strip()
+            text = (msg.get("content") or "").strip()
+            tool_calls = msg.get("tool_calls") or []
+
+            # Keep the assistant turn (with its tool_calls) so the model sees its own requests.
+            assistant_turn: Dict[str, Any] = {"role": "assistant", "content": text}
+            if tool_calls:
+                assistant_turn["tool_calls"] = tool_calls
+            self._history.append(assistant_turn)
+
+            if not tool_calls or final_round:
+                if tool_calls:
+                    log.warning("send_message_with_tools: %s still requested tools on the final round",
+                                ollama_model)
+                break
+
+            calls: List[ToolCall] = []
+            for i, tc in enumerate(tool_calls):
+                fn = tc.get("function") or {}
+                args = fn.get("arguments") or {}
+                if isinstance(args, str):
+                    try:
+                        args = json.loads(args)
+                    except json.JSONDecodeError:
+                        args = {"_raw": args}
+                name = fn.get("name", "")
+                calls.append(ToolCall(id=f"call_{name}_{round_idx}_{i}", name=name, args=args))
+            log.info("Ollama tool round %d: %s", round_idx + 1, [c.name for c in calls])
+            for result in tool_executor(calls):
+                self._history.append({"role": "tool", "tool_name": result.name,
+                                      "content": result.content})
+
+        self._last_input_tokens = total_in
+        self._last_output_tokens = total_out
+        return text
 
 
 class OllamaBackend(ModelBackend):
