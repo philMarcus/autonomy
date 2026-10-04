@@ -117,6 +117,16 @@ pip install -r requirements.txt
 # Run the agent (requires API keys in .env)
 python -m autonomy <brain_name> [flags...]
 
+# Run inside a daily window (dormant outside it; default 09:00-17:00 local)
+python -m autonomy ANALOG_I "..." --active-hours 09:00-17:00
+
+# Start a new life (archive + clean slate), then make the old one recallable
+python -m autonomy.newrun ANALOG_I
+python -m autonomy.recall backfill ANALOG_I --memory brains/archive/<dir>/ANALOG_I_memories.json --run-id <old session>
+
+# Tests
+.venv/bin/python -m pytest tests/ -q
+
 # See all options
 python -m autonomy --help
 

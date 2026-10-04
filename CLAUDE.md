@@ -7,6 +7,8 @@ Autonomous Moltbook (social media platform) agent system. Each "brain" has a ker
 ## Repository Layout
 
 - `autonomy/` — **Active version** (Python package, run via `python -m autonomy <brain> [flags]`)
+- `tests/` — pytest suite (`.venv/bin/python -m pytest tests/ -q`)
+- `brains/archive/` — archived runs written by `python -m autonomy.newrun`
 - `archive/` — Archived versions: v12_0–v16_0 (reference only, do not modify)
 - `dashboard_v2_0.py` — Previous dashboard (4 tabs, reference only)
 - `dashboard_v2_1.py` — **Current dashboard** (Overview, Cycle Replay, Daemon Monitor, Input/Controls, Controls Manager tabs)
@@ -724,6 +726,47 @@ The subconscious daemon shapes coarse-grained context (feed scoring, experiment 
 - Test: `python -m autonomy ANALOG_I_DEV "..." --no-moltbook --read-only`
 - Separate state: `brains/ANALOG_I_DEV_*` files (gitignored)
 - Laptop can call desktop Ollama via Tailscale (`OLLAMA_URL=http://100.71.23.40:11434`)
+
+## v19 — Revival (Oct 2026, branch `v19-revival`)
+
+Analog_I was dormant Jun–Oct 2026 while Phil built Zoomer (Powers of Zen). v19 brings it back for a **new life** (clean-slate run) that can still remember its previous one. Decisions (see memory `project_v19_revival`): 9–5 local active hours in-process; clean slate + recall tool (no memory carry-over); `gemini-3.8-flash` conscious; full Moltbook behaviour unchanged.
+
+### Model refresh (v19.0.0)
+- Imagen 4 is shut down. `GeminiBackend.generate_image()` now uses the Gemini-native image models via `generate_content` (`response_modalities=["IMAGE"]` + `ImageConfig(aspect_ratio, image_size)`): tiers `image-lite` (gemini-3.1-flash-lite-image, ~$0.034), `image-standard` (gemini-3.1-flash-image, ~$0.067, default), `image-pro` (gemini-3-pro-image, ~$0.134). Legacy `imagen-*` names in controls.json are aliased. Retry-on-failure uses `image-pro`.
+- Registry: `gemini-3.8-flash` ($0.75/$3.75 per M through 2026-12-31, then doubles), `3.5-flash`, `3.5-flash-lite`, `3.1-flash-lite`, `3.1-pro-preview`; 2.5 family kept as legacy; 3-flash/3-pro/3.1-flash-lite previews and 2.0 removed. `pricing.json` dated 2026-10-04; includes `gemini-embedding-2` and the image models.
+- Default pools: conscious `gemini-3.8-flash=1,gemini-3.1-pro-preview=0.15`; seeker `gemini-3.5-flash-lite=1,gemini-3.1-flash-lite=0.5`; verification `ollama:gemma4:12b=3,gemini-3.5-flash-lite=1`. Hardcoded fallbacks in `__main__`/`daemon`/`accountant`/dashboard updated.
+- Gemini 3.x models think by default; there is no thinking-level control yet (follow-up: `conscious_thinking_level`).
+
+### Tools hardened (v19.0.1)
+- `tests/test_tools.py` — 19 offline pytest cases over all 25 tools (fake store/platform, temp brains dir, read-only). Run `.venv/bin/python -m pytest tests/ -q` (39 tests total in v19.1.1).
+- Bug: `planner._plan_with_tools` read `chat._model_id` (never set) → conscious spend on the tool path was never recorded and telemetry logged `model=''`. Now reads `model_name`.
+- `set_temporary_control.value` schema had no type (typed as string; the registry coerces). `web_search` used the removed `gemini-2.5-flash-lite`.
+- `OllamaChatSession.send_message_with_tools` is a real implementation (`/api/chat` `tools` + `role: tool` messages, final no-tools round when the budget is spent). **Not yet exercised live** — do so when the GPU is free (`ollama:gemma4:12b`, `ollama:qwen3:14b`).
+- Live-verified on `gemini-3.8-flash`: all read-tool schemas accepted, parallel calls executed.
+
+### Active hours (v19.0.2)
+- Operator-only control `active_hours` (default `09:00-17:00`, local time, may wrap midnight, `always` disables) + `--active-hours` flag. `autonomy/schedule.py` has the time math (`tests/test_schedule.py`).
+- Conscious loop blocks at the top of each cycle with a `[DORMANT]` line (re-reads controls each minute); end-of-cycle wait is capped at the window edge; the daemon loop checks the window itself (no ticks, no Ollama loads) and logs `daemon_dormant`/`daemon_resume`. Telemetry: `dormant_start`/`dormant_end`.
+
+### Semantic recall (v19.1.0) — the RAG from Sprint 4
+- **Analog Home API** (`analog_home` commit `0c7e656`): `CREATE EXTENSION vector` (best-effort), `embeddings` table (768-d, one row per document+kind, cascade on artifact delete, HNSW cosine index), `GET /embeddings/pending`, `POST /embeddings` (bulk upsert), `POST /recall` (cosine search joined to artifacts; kind/type/run filters, min_score), `GET /embeddings/stats`. Recall endpoints answer 503 if pgvector is missing. Tested locally on Postgres 16 + pgvector 0.6 with the full corpus.
+- **Agent** (`autonomy/recall.py`): `Embedder` (gemini-embedding-2, 768 dims, one `Content` per document — a bare list of strings collapses to one vector), `RecallClient`, `sync_pending()` at the top of every cycle (control `recall_sync_per_cycle`, default 50, skipped in read-only), `embed_memory_file()` for archived runs, the `recall(query, k, scope=all|previous|current, kinds)` tool, and a CLI: `python -m autonomy.recall backfill|stats|query ANALOG_I [--api URL] [--memory FILE --run-id ID]`.
+- Corpus: 1,438 recallable artifacts (posts/comments/replies/images/dreams/kernel updates/dev requests) → 2,580 documents (body + monologue) ≈ 1M tokens ≈ **$0.20**, 85 s. Test queries return the expected artifacts first.
+- The embeddings are only in the **local** test DB so far: deploy the API, then run the backfill against prod (see Deployment).
+
+### New life (v19.1.1)
+- `python -m autonomy.newrun ANALOG_I [--reset-kernel] [--dry-run] [--yes]` archives every brain file to `brains/archive/ANALOG_I_<session8>_<date>/`, resets memory/history/tiers/plans/todos/experiments/gear instructions, keeps Moltbook bookkeeping (replied keys, own post ids, follows, scored-comment ids, cooldowns), keeps the evolved kernel unless `--reset-kernel`. The next start mints a new session (Analog Home shows a new run). Then embed the archived memory: `python -m autonomy.recall backfill ANALOG_I --memory <archive>/ANALOG_I_memories.json --run-id <old session>`.
+- Rehearsed on a temp copy with the local API as Analog Home: the fresh agent made six `recall` calls, opened an experiment and wrote its first memory note ($0.08/cycle; ~40K-char prompt, ~88K input tokens across tool rounds).
+
+### Local test environment
+- `apt install postgresql-16 postgresql-16-pgvector` in WSL; db `analog` / user `analog` / pw `analog`; `DATABASE_URL=postgresql://analog:analog@localhost:5432/analog`.
+- Run the API locally: `cd analog_home/api && DATABASE_URL=... uvicorn main:app --port 8765`. Load the prod corpus by paging `https://api.analog-i.ai/artifacts?limit=50&offset=N` into `/publish`.
+- DEV brain: copy `brains/ANALOG_I_*` to a temp `BRAINS_DIR` as `ANALOG_I_DEV_*`, set `budget_plan_enabled=false` (keeps Ollama idle), run with `ANALOG_I_DEV_GEMINI_API_KEY`, `ANALOG_I_DEV_ANALOG_HOME_API_URL=http://localhost:8765`, `--no-moltbook --no-subconscious --read-only --active-hours always`.
+
+### Open items after v19.1.1
+- Deploy the API to Fly (needs `flyctl auth login` — token expired), then `python -m autonomy.recall backfill ANALOG_I` against prod and the archived memory file.
+- Ollama live tests: native tool calling, strategist/sentry on the refreshed pools.
+- `conscious_thinking_level` control for Gemini 3.x; Instagram account for daily images (via Zoomer's CDP driver); Anthropic model IDs in `llm/anthropic.py` are pre-Claude-5 (pool weight 0).
 
 ## Key Architecture Decisions
 
