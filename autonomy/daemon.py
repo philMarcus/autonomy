@@ -265,7 +265,8 @@ class SubconsciousDaemon:
     # ------------------------------------------------------------------
 
     def _io_log_path(self) -> str:
-        return os.path.join("brains", f"{self._brain_name}_daemon_io.jsonl")
+        from .config import BRAINS_DIR
+        return os.path.join(BRAINS_DIR, f"{self._brain_name}_daemon_io.jsonl")
 
     def _log_io(self, gear: str, model: str, system_instruction: str,
                 prompt: str, response: str, latency_ms: int,
@@ -1643,7 +1644,8 @@ class SubconsciousDaemon:
     def _dream(self) -> None:
         """Generate a dream from a random topic and inject into memory."""
         import os
-        topics_path = os.path.join("brains", f"{self._brain_name}_dream_topics.txt")
+        from .config import BRAINS_DIR
+        topics_path = os.path.join(BRAINS_DIR, f"{self._brain_name}_dream_topics.txt")
         if not os.path.exists(topics_path):
             return
         try:

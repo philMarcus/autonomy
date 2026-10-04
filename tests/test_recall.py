@@ -155,3 +155,19 @@ def test_recall_tool_scopes_and_kinds():
     assert client.recall_calls[-1]["run_id"] == "cur"
     client.recall = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("api down"))
     assert "recall failed" in call(query="q")["error"]
+
+
+# ---------------------------------------------------------------- ollama context sizing
+
+def test_ollama_num_ctx_sizing():
+    from autonomy.llm import ollama as O
+    # Small prompt → floor
+    assert O._num_ctx_for(1000, 512, 262144) == 8192
+    # 42K chars ≈ 14K tokens + 4K output + margin → rounded up to 1024, ≥ 8192
+    v = O._num_ctx_for(42000, 4096, 262144)
+    assert v >= 14000 + 4096 and v % 1024 == 0 and v <= 20480
+    # Capped by the model's window and by the ceiling
+    assert O._num_ctx_for(42000, 4096, 16384) == 16384
+    assert O._num_ctx_for(10_000_000, 4096, 262144) == O._NUM_CTX_CEILING
+    assert O._messages_chars([{"role": "user", "content": "abc"}, {"role": "assistant", "content": "de",
+                                                                    "tool_calls": [{"function": {"name": "x"}}]}]) > 5

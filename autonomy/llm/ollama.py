@@ -16,6 +16,62 @@ import requests
 
 from .base import ChatSession, LLMResponse, ModelBackend, ModelInfo, ToolCall, ToolResult
 
+# ----------------------------------------------------------------------
+# Context window sizing
+#
+# Ollama's default num_ctx is small (4096 in 0.35). Anything longer is
+# silently truncated from the FRONT — the model loses the system prompt and
+# the beginning of the user turn and answers from the tail. Our prompts run
+# 10-50K chars, so every call sizes num_ctx to what it actually sends:
+# generous token estimate + room for the answer, rounded up, floored at 8K,
+# capped by the model's own window (from /api/show) and a sanity ceiling so
+# a runaway prompt can't demand a KV cache the GPU can't hold.
+# ----------------------------------------------------------------------
+_CHARS_PER_TOKEN = 3.0        # conservative for English + markdown + JSON
+_NUM_CTX_FLOOR = 8192
+_NUM_CTX_CEILING = 65536
+_NUM_CTX_MARGIN = 512
+_model_ctx_cache: Dict[str, int] = {}
+
+
+def _model_context_length(base_url: str, ollama_model: str) -> int:
+    """The model's trained context window per /api/show (cached). 32768 if unknown."""
+    if ollama_model in _model_ctx_cache:
+        return _model_ctx_cache[ollama_model]
+    ctx = 32768
+    try:
+        resp = requests.post(f"{base_url}/api/show", json={"model": ollama_model}, timeout=10)
+        if resp.ok:
+            info = resp.json().get("model_info") or {}
+            for k, v in info.items():
+                if k.endswith(".context_length") and isinstance(v, int) and v > 0:
+                    ctx = v
+                    break
+    except Exception:
+        pass
+    _model_ctx_cache[ollama_model] = ctx
+    return ctx
+
+
+def _num_ctx_for(chars: int, max_output: int, model_ctx: int) -> int:
+    """Context window to request for a call that sends `chars` characters."""
+    need = int(chars / _CHARS_PER_TOKEN) + max(0, int(max_output)) + _NUM_CTX_MARGIN
+    need = ((need + 1023) // 1024) * 1024
+    need = max(_NUM_CTX_FLOOR, need)
+    return max(1024, min(need, _NUM_CTX_CEILING, model_ctx))
+
+
+def _messages_chars(messages: List[Dict[str, Any]], extra: Any = None) -> int:
+    total = 0
+    for m in messages:
+        c = m.get("content")
+        total += len(c) if isinstance(c, str) else len(json.dumps(c, default=str))
+        if m.get("tool_calls"):
+            total += len(json.dumps(m["tool_calls"], default=str))
+    if extra is not None:
+        total += len(json.dumps(extra, default=str))
+    return total
+
 
 class OllamaChatSession(ChatSession):
     """Stateful multi-turn chat via Ollama's /api/chat endpoint."""
@@ -59,6 +115,8 @@ class OllamaChatSession(ChatSession):
             "options": {
                 "temperature": self._temperature,
                 "num_predict": self._max_output_tokens,
+                "num_ctx": _num_ctx_for(_messages_chars(self._history), self._max_output_tokens,
+                                        _model_context_length(self._base_url, ollama_model)),
             },
         }
         # Disable thinking when requested (e.g. sentry scoring — thinking blocks confuse parsers)
@@ -145,6 +203,10 @@ class OllamaChatSession(ChatSession):
                 "options": {
                     "temperature": self._temperature,
                     "num_predict": self._max_output_tokens,
+                    "num_ctx": _num_ctx_for(
+                        _messages_chars(self._history, tools if with_tools else None),
+                        self._max_output_tokens,
+                        _model_context_length(self._base_url, ollama_model)),
                 },
             }
             if with_tools and tools:
@@ -289,6 +351,8 @@ class OllamaBackend(ModelBackend):
             "options": {
                 "temperature": temperature,
                 "num_predict": max_output_tokens,
+                "num_ctx": _num_ctx_for(len(prompt), max_output_tokens,
+                                        _model_context_length(self._base_url, ollama_model)),
             },
         }
         # Disable thinking for tasks that need clean output (verification, scoring)
