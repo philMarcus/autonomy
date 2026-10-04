@@ -53,6 +53,7 @@ from .actions import (
     pick_outside_post_for_comment,
 )
 from .cooldowns import can_do, set_cooldown, cooldown_status_text, migrate_legacy_cooldowns
+from .schedule import describe as describe_active_hours, is_active, next_active_at, seconds_until_active, seconds_until_inactive
 
 colorama_init(autoreset=True)
 
@@ -440,6 +441,9 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
     # --- Mode ---
     ap.add_argument("--read-only", action="store_true", help="No write actions at all.")
+    ap.add_argument("--active-hours", type=str, default=None,
+                    help="Local-time window when the agent runs, e.g. 09:00-17:00 (control: active_hours). "
+                         "'always' disables the window.")
     ap.add_argument("--mode", choices=["all", "comment_only", "no_post", "no_comment", "post_only"],
                     default=None, help="Action mode (overrides control).")
     ap.add_argument("--priority", choices=["replies_first", "outside_first"],
@@ -638,6 +642,7 @@ def main():
         "--temperature":        ("temperature",              lambda a: a.temperature),
         "--daily-budget":       ("daily_budget_usd",         lambda a: a.daily_budget),
         "--interval":           ("max_cycle_interval_minutes", lambda a: a.interval),
+        "--active-hours":       ("active_hours",             lambda a: a.active_hours),
         "--post-interval":      ("post_interval_minutes",    lambda a: a.post_interval),
         "--sentry-interval":    ("sentry_interval_seconds",  lambda a: a.sentry_interval),
         "--mode":               ("mode",                     lambda a: a.mode),
@@ -1033,7 +1038,55 @@ def main():
 
     prev_feed_available = None  # Track feed state transitions
 
+    def _active_hours_spec() -> str:
+        """Current active_hours control; a malformed value is reported once and read as 'always'."""
+        try:
+            spec = ctrl.get("active_hours")
+        except KeyError:
+            return "always"
+        try:
+            describe_active_hours(spec)
+            return spec
+        except ValueError as e:
+            if getattr(_active_hours_spec, "_warned", None) != spec:
+                safe_print(f"{Fore.RED}[ACTIVE HOURS] {e} — running without a window")
+                _active_hours_spec._warned = spec
+            return "always"
+
+    def _wait_for_active_hours(cycle: int) -> None:
+        """Block while outside the active_hours window. Re-reads controls each minute
+        so a dashboard/CLI change to the window takes effect without a restart."""
+        spec = _active_hours_spec()
+        if is_active(spec):
+            return
+        wake_at = next_active_at(spec)
+        line = (f"[DORMANT] outside active hours ({describe_active_hours(spec)}) — "
+                f"next cycle at {wake_at:%a %H:%M}")
+        safe_print(f"{Fore.WHITE}{line}{Style.RESET_ALL}")
+        _push_to_live(store, [line], daemon, cycle=cycle)
+        telemetry.log("dormant_start", {"cycle": cycle, "active_hours": spec,
+                                        "resume_at": wake_at.isoformat(timespec="minutes")})
+        started = time.time()
+        while True:
+            remaining = seconds_until_active(spec)
+            if remaining <= 0:
+                break
+            time.sleep(min(60, remaining))
+            if os.path.exists(controls_file):
+                try:
+                    with open(controls_file, "r", encoding="utf-8") as cf:
+                        ctrl.load_from_dict(json.load(cf))
+                except Exception:
+                    pass
+                _apply_cli_overrides()
+            spec = _active_hours_spec()
+        line = f"[ACTIVE] active hours began ({describe_active_hours(spec)}) — resuming"
+        safe_print(f"{Fore.GREEN}{line}{Style.RESET_ALL}")
+        _push_to_live(store, [line], daemon, cycle=cycle)
+        telemetry.log("dormant_end", {"cycle": cycle, "slept_seconds": int(time.time() - started)})
+
     while True:
+        _wait_for_active_hours(iteration)
         iteration += 1
         state["_cycle_number"] = iteration
         _cycle_ref[0] = iteration  # update for tool closures
@@ -2636,9 +2689,14 @@ def main():
             # Update buffer thresholds from controls (conscious may have changed them)
             # Threshold is auto-calibrated by daemon — no manual update needed
             draft_buffer.update_max_drafts(ctrl.get("max_drafts"))
-            # Wait for daemon to signal wake, or timeout at cycle interval
-            print(f"{Fore.WHITE}Waiting for daemon wake or {sleep_minutes} min timeout...")
-            woke = draft_buffer.wait_for_wake(timeout=max(1, sleep_minutes) * 60)
+            # Wait for daemon to signal wake, or timeout at cycle interval —
+            # capped at the end of the active_hours window so dormancy starts on time.
+            _wait_s = max(1, sleep_minutes) * 60
+            _until_off = seconds_until_inactive(_active_hours_spec())
+            if _until_off is not None:
+                _wait_s = min(_wait_s, max(1, _until_off))
+            print(f"{Fore.WHITE}Waiting for daemon wake or {_wait_s // 60} min timeout...")
+            woke = draft_buffer.wait_for_wake(timeout=_wait_s)
             if woke:
                 safe_print(f"{Fore.MAGENTA}--- DAEMON WAKE: potential={draft_buffer.wake_potential:.2f} | drafts={draft_buffer.draft_count} ---")
                 telemetry.log("daemon_wake", {
@@ -2647,9 +2705,13 @@ def main():
                     "draft_count": draft_buffer.draft_count,
                 })
         else:
-            # Single-loop mode: fixed sleep (v15_0 behavior)
-            print(f"{Fore.WHITE}Sleeping for {sleep_minutes} minutes...")
-            time.sleep(max(1, sleep_minutes) * 60)
+            # Single-loop mode: fixed sleep (v15_0 behavior), capped at the window edge
+            _wait_s = max(1, sleep_minutes) * 60
+            _until_off = seconds_until_inactive(_active_hours_spec())
+            if _until_off is not None:
+                _wait_s = min(_wait_s, max(1, _until_off))
+            print(f"{Fore.WHITE}Sleeping for {_wait_s // 60} minutes...")
+            time.sleep(_wait_s)
 
 
 if __name__ == "__main__":

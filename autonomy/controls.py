@@ -363,6 +363,11 @@ def build_default_registry(model_registry, blacklist_str: str = "") -> ControlRe
         # High-score items add charge_weight_feed to wake_potential. When wake_potential
         # crosses an auto-calibrated threshold (tuned to hit target_wake_minutes on average),
         # conscious fires. If no wake event by cycle_interval_minutes, conscious fires anyway.
+        Control("active_hours", "str", "09:00-17:00",
+                "Local-time window when the agent runs at all (conscious AND daemon). "
+                "Outside it the process is dormant: no cycles, no ticks, no local-model "
+                "loads. Format HH:MM-HH:MM (may wrap midnight) or 'always'.",
+                "timing", audience="operator"),
         Control("max_cycle_interval_minutes", "int", 360,
                 "Safety-net max sleep between cycles. The daemon normally wakes conscious "
                 "much sooner via target_wake_minutes; this is a fallback for quiet periods.",

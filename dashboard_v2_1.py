@@ -1251,6 +1251,7 @@ CONTROLS_META = [
     ("budget_conserve_threshold","float", 0.2,    "Switch to cheaper models below this remaining fraction", "cost", 0.0, 1.0, None),
     # --- Timing ---
     ("max_cycle_interval_minutes", "int", 360,    "Safety-net max sleep between cycles (target_wake drives normal cadence)", "wake", 30, 1440, None),
+    ("active_hours",             "str",   "09:00-17:00", "Local-time window when the agent runs (HH:MM-HH:MM or 'always'); dormant outside it", "timing", None, None, None),
     ("sentry_interval_seconds",  "int",   300,    "Seconds between sentry scans",                   "timing",   10,   None,  None),
     ("seeker_every_n_ticks",     "int",   3,      "Seeker runs every N sentry ticks",               "timing",   1,    20,    None),
     ("target_wake_minutes",      "int",   60,     "Target avg minutes between conscious wakes (auto-calibrates threshold)", "timing", 5, 360, None),

@@ -21,6 +21,7 @@ from colorama import Fore, Style
 
 from .actions import execute_daemon_action
 from .buffer import Draft, DraftBuffer
+from . import schedule as _sched
 from .controls import ControlRegistry
 from .cooldowns import can_do
 from .llm import DailyBudget, ModelRegistry
@@ -315,9 +316,42 @@ class SubconsciousDaemon:
     # Main loop
     # ------------------------------------------------------------------
 
+    def _active_hours_spec(self) -> str:
+        try:
+            spec = self._ctrl.get("active_hours")
+            _sched.parse_active_hours(spec)
+            return spec
+        except (KeyError, ValueError):
+            return "always"
+
     def _run(self) -> None:
         """Main daemon loop — runs in background thread."""
+        dormant = False
         while not self._stop_event.is_set():
+            # Honour the active_hours window independently of the conscious thread,
+            # which may be blocked in wait_for_wake when the window closes.
+            spec = self._active_hours_spec()
+            if not _sched.is_active(spec):
+                if not dormant:
+                    dormant = True
+                    resume_at = _sched.next_active_at(spec)
+                    self._emit(f"[DAEMON] dormant outside active hours "
+                               f"({_sched.describe(spec)}) — resumes {resume_at:%a %H:%M}",
+                               color=Fore.WHITE)
+                    self._flush_tick_lines(complete=True)
+                    self._telemetry.log("daemon_dormant", {
+                        "brain": self._brain_name, "tick": self._tick_count,
+                        "resume_at": resume_at.isoformat(timespec="minutes"),
+                    })
+                self._stop_event.wait(timeout=min(60, max(1, _sched.seconds_until_active(spec))))
+                continue
+            if dormant:
+                dormant = False
+                self._emit(f"[DAEMON] active hours began ({_sched.describe(spec)}) — resuming",
+                           color=Fore.GREEN)
+                self._flush_tick_lines(complete=True)
+                self._telemetry.log("daemon_resume", {"brain": self._brain_name,
+                                                      "tick": self._tick_count})
             try:
                 self._tick()
             except Exception as e:
