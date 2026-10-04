@@ -424,7 +424,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     ap.add_argument("brain", help="Brain name (used as filename prefix in BRAINS_DIR).")
     ap.add_argument("directive", nargs="?", default="Participate on Moltbook.",
                     help="Directive for the agent (default: 'Participate on Moltbook.').")
-    DEFAULT_CONSCIOUS_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-pro").strip()
+    DEFAULT_CONSCIOUS_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.8-flash").strip()
 
     # --- Output destinations ---
     ap.add_argument("--no-moltbook", dest="moltbook_enabled", action="store_false", default=True,
@@ -529,7 +529,7 @@ def main():
     telemetry_dir = (os.environ.get("TELEMETRY_DIR", "telemetry") or "telemetry").strip()
     telemetry = TelemetryLogger(brain_name=brain_name, run_id=run_id, base_dir=telemetry_dir, read_only=args.read_only)
     # Temporary model defaults (will be replaced by controls after load)
-    conscious_model = args.conscious_model or args.gemini_model or "gemini-2.5-pro"
+    conscious_model = args.conscious_model or args.gemini_model or "gemini-3.8-flash"
 
     telemetry.log("run_start", {
         "version": VERSION, "brain_env_prefix": prefix,
@@ -670,7 +670,7 @@ def main():
     _apply_cli_overrides(verbose=True)
 
     # === PHASE 4: Derived values from controls (single source of truth) ===
-    conscious_model = "gemini-2.5-pro"
+    conscious_model = "gemini-3.8-flash"
     budget = DailyBudget(daily_limit_usd=float(ctrl.get("daily_budget_usd")))
 
     # Platform client: always create for reads if API key exists
@@ -680,12 +680,12 @@ def main():
     if mb_key:
         # Use verification cadre for challenges — picks from weighted pool
         from .daemon import _pick_weighted_model
-        _verif_weights = ctrl.get("verification_model_weights") or "gemini-2.5-flash=1"
-        _verif_model = _pick_weighted_model(_verif_weights, "gemini-2.5-flash")
+        _verif_weights = ctrl.get("verification_model_weights") or "gemini-3.5-flash-lite=1"
+        _verif_model = _pick_weighted_model(_verif_weights, "gemini-3.5-flash-lite")
         challenge_llm = registry.as_llm_client(default_model_id=_verif_model)
         challenge_solver = MathVerificationSolver(llm_client=challenge_llm, telemetry=telemetry)
         # Backup: try another model from pool, then Gemma (local, free, 5/5 on simple prompt)
-        _verif_backup = _pick_weighted_model(_verif_weights, "gemini-2.5-pro")
+        _verif_backup = _pick_weighted_model(_verif_weights, "gemini-3.8-flash")
         if _verif_backup != _verif_model:
             challenge_solver.backup_llm = registry.as_llm_client(default_model_id=_verif_backup)
         if registry.has_model("ollama:gemma4:12b"):
@@ -1201,7 +1201,7 @@ def main():
         _budget_exhausted = budget is not None and budget.remaining_usd() <= 0
         if _budget_exhausted:
             active_conscious_weights = ctrl.get("budget_exhausted_model_weights") or \
-                "ollama:qwen3:14b=2,ollama:gemma4:12b=2,ollama:deepseek-r1:8b=1"
+                "ollama:qwen3:14b=2,ollama:gemma4:12b=2"
             emit_status("[BUDGET]",
                         f"Exhausted (${budget.spent_today_usd():.2f}/${budget.daily_limit_usd:.2f}) — using local fallback pool",
                         color=Fore.YELLOW, cycle=iteration)
@@ -1209,7 +1209,7 @@ def main():
             active_conscious_weights = ctrl.get("conscious_model_weights")
         conscious_model = _pick_weighted_model(
             active_conscious_weights,
-            "gemini-2.5-pro",
+            "gemini-3.8-flash",
         )
         _is_local = conscious_model.startswith("ollama:")
         _model_color = Fore.GREEN if _is_local else Fore.CYAN
@@ -1766,7 +1766,7 @@ def main():
                 _recent_cap = int(ctrl.get("memory_recent_capacity") if ctrl else 20)
                 _compressed_cap = int(ctrl.get("memory_compressed_capacity") if ctrl else 10)
                 _deep_cap = int(ctrl.get("memory_deep_capacity") if ctrl else 10)
-                _compressor = ctrl.get("compressor_model") if ctrl else "gemini-2.5-flash"
+                _compressor = ctrl.get("compressor_model") if ctrl else "gemini-3.5-flash-lite"
 
                 def _compress_fn(prompt):
                     _c = registry.create_chat(
@@ -2131,7 +2131,7 @@ def main():
                         emit_status("[IMAGE]", "No image_prompt in plan, skipping.",
                                     color=Fore.RED, cycle=iteration)
                     else:
-                        img_tier = ctrl.get("image_model_tier") or "imagen-ultra"
+                        img_tier = gemini_backend_imagen.resolve_image_tier(ctrl.get("image_model_tier"))
                         emit_status("[IMAGE]", f"Generating ({img_tier}): {image_prompt[:120]}...",
                                     color=Fore.MAGENTA, cycle=iteration)
                         try:
@@ -2140,7 +2140,7 @@ def main():
                                 prompt=image_prompt, tier=img_tier,
                                 aspect_ratio="4:3",
                             )
-                            # Compress PNG to JPEG (Imagen outputs ~1MB PNG; JPEG is ~10x smaller)
+                            # Compress PNG to JPEG (the model emits ~1MB PNG; JPEG is ~10x smaller)
                             try:
                                 from PIL import Image as _PILImage
                                 _pil_img = _PILImage.open(io.BytesIO(image_bytes))
@@ -2195,13 +2195,13 @@ def main():
 
                         except Exception as first_error:
                             image_ok = False
-                            # Retry once with imagen-ultra if original tier was different
-                            if img_tier != "imagen-ultra":
-                                emit_status("[IMAGE]", f"{str(first_error)[:100]} — retrying with imagen-ultra...",
+                            # Retry once with image-pro if original tier was different
+                            if img_tier != "image-pro":
+                                emit_status("[IMAGE]", f"{str(first_error)[:100]} — retrying with image-pro...",
                                             color=Fore.YELLOW, cycle=iteration)
                                 try:
                                     image_bytes, img_model_id, img_cost = gemini_backend_imagen.generate_image(
-                                        prompt=image_prompt, tier="imagen-ultra",
+                                        prompt=image_prompt, tier="image-pro",
                                         aspect_ratio="4:3",
                                     )
                                     try:
@@ -2230,12 +2230,12 @@ def main():
                                         "image_mime": _img_mime,
                                         "temperature": cycle_temperature,
                                     })
-                                    emit_status("[IMAGE]", f"Retry succeeded ({len(image_bytes)} bytes, imagen-ultra)",
+                                    emit_status("[IMAGE]", f"Retry succeeded ({len(image_bytes)} bytes, image-pro)",
                                                 color=Fore.GREEN, cycle=iteration)
                                     telemetry.log("image_generated", {
                                         "cycle": iteration, "prompt": image_prompt[:500],
                                         "size_bytes": len(image_bytes), "model": img_model_id,
-                                        "tier": "imagen-ultra", "cost_usd": img_cost,
+                                        "tier": "image-pro", "cost_usd": img_cost,
                                         "retry": True, "original_tier": img_tier,
                                     })
                                     add_history(state, {

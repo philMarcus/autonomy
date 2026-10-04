@@ -39,10 +39,10 @@ def estimate_daily_cost(ctrl) -> Dict[str, float]:
     sentry_interval = max(1, int(ctrl.get("sentry_interval_seconds")))
     max_cycle_interval = max(1, int(ctrl.get("max_cycle_interval_minutes")))
     # Use first model from sentry weights as cost estimate proxy
-    _sw = ctrl.get("subconscious_model_weights") or "gemini-2.5-flash-lite=1"
-    sub_model = _sw.split("=")[0].strip() if "=" in _sw else "gemini-2.5-flash-lite"
-    _cw = ctrl.get("conscious_model_weights") or "gemini-2.5-pro=1"
-    con_model = _cw.split("=")[0].strip() if "=" in _cw else "gemini-2.5-pro"
+    _sw = ctrl.get("subconscious_model_weights") or "gemini-3.5-flash-lite=1"
+    sub_model = _sw.split("=")[0].strip() if "=" in _sw else "gemini-3.5-flash-lite"
+    _cw = ctrl.get("conscious_model_weights") or "gemini-3.8-flash=1"
+    con_model = _cw.split("=")[0].strip() if "=" in _cw else "gemini-3.8-flash"
 
     # Estimated calls per 24 hours
     sentry_calls = (24 * 3600) / sentry_interval

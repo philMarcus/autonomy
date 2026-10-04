@@ -37,7 +37,7 @@ from .utils import shorten, is_item_too_old, norm_key
 def _pick_weighted_model(weights_str: str, fallback: str) -> str:
     """Pick a model from a weighted pool string.
 
-    Format: "model_id=weight,model_id=weight" e.g. "local:qwen2.5-1.5b=5,gemini-2.5-flash-lite=1"
+    Format: "model_id=weight,model_id=weight" e.g. "local:qwen2.5-1.5b=5,gemini-3.5-flash-lite=1"
     Models with weight 0 are excluded. Uses weighted random selection.
     Returns fallback if weights_str is empty or unparseable.
     """
@@ -823,7 +823,7 @@ class SubconsciousDaemon:
             weights_str = ",".join(filtered) if filtered else weights_str
         # Fallback: first model from weights string
         fallback = (weights_str.split("=")[0].strip() if "=" in weights_str
-                    else "gemini-2.5-flash-lite")
+                    else "gemini-3.5-flash-lite")
         model = _pick_weighted_model(weights_str, fallback)
         self._tick_model_counts[model] = self._tick_model_counts.get(model, 0) + 1
         return model
@@ -836,7 +836,7 @@ class SubconsciousDaemon:
             filtered = [p for p in pairs if not p.startswith(f"{exclude}=")]
             weights_str = ",".join(filtered) if filtered else weights_str
         fallback = (weights_str.split("=")[0].strip() if "=" in weights_str
-                    else "gemini-2.5-flash-lite")
+                    else "gemini-3.5-flash-lite")
         model = _pick_weighted_model(weights_str, fallback)
         return model
 
@@ -1323,8 +1323,8 @@ class SubconsciousDaemon:
             self._flush_tick_lines()
             return
 
-        _seeker_weights = self._ctrl.get("seeker_model_weights") or "gemini-2.5-flash-lite=1"
-        model_id = _pick_weighted_model(_seeker_weights, "gemini-2.5-flash-lite")
+        _seeker_weights = self._ctrl.get("seeker_model_weights") or "gemini-3.5-flash-lite=1"
+        model_id = _pick_weighted_model(_seeker_weights, "gemini-3.5-flash-lite")
         temp = self._ctrl.get("subconscious_temperature")
         max_tokens = self._ctrl.get("seeker_max_tokens")
         max_topics = self._ctrl.get("seeker_max_topics")

@@ -1,8 +1,8 @@
-# v16.2 Available Models
+# v19.0 Available Models
 
 ## Pricing
 
-**Source of truth:** `autonomy/llm/pricing.json` (USD per 1K tokens, updated 2026-03-31).
+**Source of truth:** `autonomy/llm/pricing.json` (USD per 1K tokens, updated 2026-10-04).
 
 The benchmark script warns if pricing.json is older than 30 days. Update it by editing the JSON file directly — reference links to each provider's pricing page are included in the file.
 
@@ -10,7 +10,7 @@ The benchmark script warns if pricing.json is older than 30 days. Update it by e
 
 | Provider | Models Available | Search Grounding | Key Env Var |
 |---|---|---|---|
-| Gemini | 2.5 Flash, 2.5 Flash-Lite, 2.5 Pro, 3 Flash Preview, 3 Pro Preview, 3.1 Pro Preview, 3.1 Flash-Lite Preview, 2.0 Flash (deprecated), 2.0 Flash-Lite (deprecated) | Yes | `GEMINI_API_KEY` |
+| Gemini | 3.8 Flash, 3.5 Flash, 3.5 Flash-Lite, 3.1 Flash-Lite, 3.1 Pro Preview, 2.5 Pro / Flash / Flash-Lite (legacy) | Yes | `GEMINI_API_KEY` |
 | Anthropic | Claude Haiku 4.5, Sonnet 4.6, Opus 4.6 | No | `ANTHROPIC_API_KEY` |
 | OpenAI | GPT-5 Nano/Mini, GPT-5.1/5.2, GPT-5 Pro/5.2 Pro, GPT-5.4 Nano/Mini | No | `OPENAI_API_KEY` |
 | Mistral | Mistral Small, Mistral Large | No | `MISTRAL_API_KEY` |
@@ -19,7 +19,11 @@ Per-brain keys take priority: `{PREFIX}_GEMINI_API_KEY` > `GEMINI_API_KEY`. `{PR
 
 ### Deprecation Notices
 
-- **Gemini 2.0 Flash / Flash-Lite**: Shut down June 1, 2026. Migrate to 2.5 Flash-Lite (cheapest) or 2.5 Flash.
+- **Imagen 4 (all tiers)**: shut down Sep 2026. Images now come from the Gemini-native image models via `GeminiBackend.generate_image()`: `image-lite` = `gemini-3.1-flash-lite-image` (~$0.034/img, 1K only), `image-standard` = `gemini-3.1-flash-image` (~$0.067/img, default), `image-pro` = `gemini-3-pro-image` (~$0.134/img). Old `imagen-*` tier names in controls.json are aliased.
+- **Gemini 3 Flash Preview / 3 Pro Preview / 3.1 Flash-Lite Preview**: removed from the API; dropped from the registry Oct 2026.
+- **Gemini 2.5 family**: still served but Google restricts it for new projects. Kept as legacy entries; defaults moved to 3.8 Flash (conscious) and 3.5 Flash-Lite (seeker/verification).
+- **Gemini 3.6–3.8 Flash promo pricing** ($0.75/$3.75 per M) ends 2026-12-31 — doubles after. Update pricing.json in January.
+- **Gemini 2.0 Flash / Flash-Lite**: shut down June 1, 2026.
 
 ## Local Models
 
@@ -57,11 +61,8 @@ Run `python benchmark_models.py --role all` to test models on sentry/strategist/
 ## Usage Examples
 
 ```bash
-# Default (Gemini 2.5 Pro conscious, daemon enabled, search enabled)
+# Default (conscious pool from controls: gemini-3.8-flash=1, gemini-3.1-pro-preview=0.15)
 python -m autonomy ANALOG_I
-
-# Budget: use Flash for conscious, Flash-Lite for daemon
-python -m autonomy ANALOG_I --conscious-model gemini-2.5-flash --subconscious-model gemini-2.5-flash-lite
 
 # Premium conscious
 python -m autonomy ANALOG_I --conscious-model gemini-3.1-pro-preview

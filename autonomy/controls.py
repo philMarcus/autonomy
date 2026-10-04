@@ -278,14 +278,15 @@ def build_default_registry(model_registry, blacklist_str: str = "") -> ControlRe
 
     # Pro-tier models suitable for conscious (high-quality reasoning)
     _CONSCIOUS_TIER = {
-        "gemini-2.5-pro", "gemini-3.1-pro-preview",
+        "gemini-3.8-flash", "gemini-3.5-flash", "gemini-3.1-pro-preview",
+        "gemini-2.5-pro",
         "claude-sonnet-4-6", "claude-opus-4-6",
         "gpt-5.4",
     }
     # Cheap/fast models suitable for subconscious (sentry, strategist)
     _SUBCONSCIOUS_TIER = {
+        "gemini-3.5-flash-lite", "gemini-3.1-flash-lite",
         "gemini-2.5-flash", "gemini-2.5-flash-lite",
-        "gemini-3-flash-preview", "gemini-3.1-flash-lite-preview",
         "claude-haiku-4-5", "mistral-small-latest",
         "gpt-5.4-nano", "gpt-5.4-mini",
     }
@@ -298,7 +299,8 @@ def build_default_registry(model_registry, blacklist_str: str = "") -> ControlRe
 
     controls = [
         # --- LLM ---
-        Control("conscious_model_weights", "weights", "gemini-2.5-pro=1",
+        Control("conscious_model_weights", "weights",
+                "gemini-3.8-flash=1,gemini-3.1-pro-preview=0.15",
                 "Weighted model pool for conscious (pro-tier only)", "llm",
                 choices=conscious_choices, audience="accountant"),
         Control("budget_exhausted_model_weights", "weights",
@@ -319,7 +321,8 @@ def build_default_registry(model_registry, blacklist_str: str = "") -> ControlRe
                 "ollama:qwen3.5:9b=0.6,ollama:gpt-oss:20b=0.5",
                 "Weighted model pool for STRATEGIST drafts (local only — free)", "llm",
                 choices=subconscious_choices),
-        Control("seeker_model_weights", "weights", "gemini-2.5-flash-lite=1",
+        Control("seeker_model_weights", "weights",
+                "gemini-3.5-flash-lite=1,gemini-3.1-flash-lite=0.5",
                 "Weighted model pool for SEEKER research (Gemini only — needs search grounding)", "llm",
                 choices=_GEMINI_TIER),
         Control("synthesizer_model_weights", "weights",
@@ -338,7 +341,7 @@ def build_default_registry(model_registry, blacklist_str: str = "") -> ControlRe
                 "Weighted model pool for MUSE (creative generation from memory)", "llm",
                 choices=subconscious_choices),
         Control("verification_model_weights", "weights",
-                "ollama:gemma4:12b=3,gemini-2.5-flash=1",
+                "ollama:gemma4:12b=3,gemini-3.5-flash-lite=1",
                 "Weighted model pool for math verification challenges", "llm",
                 choices=subconscious_choices + _GEMINI_TIER),
         Control("temperature", "float", 0.7,
@@ -391,9 +394,9 @@ def build_default_registry(model_registry, blacklist_str: str = "") -> ControlRe
                 "Minutes between Moltbook posts", "timing", min_val=5, max_val=1440),
         Control("image_cooldown_minutes", "int", 1440,
                 "Min minutes between image generations (default 1440 = 24h)", "timing", min_val=10, max_val=10080),
-        Control("image_model_tier", "str", "imagen-ultra",
-                "Imagen tier: fast ($0.02), standard ($0.04), ultra ($0.06)", "llm",
-                choices=["imagen-fast", "imagen-standard", "imagen-ultra"]),
+        Control("image_model_tier", "str", "image-standard",
+                "Image model tier: image-lite (~$0.03/img), image-standard (~$0.07), image-pro (~$0.13)", "llm",
+                choices=["image-lite", "image-standard", "image-pro"]),
 
         # --- Social ---
         Control("mode", "str", "all",

@@ -493,48 +493,43 @@ class GeminiChatSession(ChatSession):
 # Gemini ModelBackend
 # ============================================================
 
-# All Gemini models this backend serves
+# All Gemini models this backend serves.
+# Prices are USD per 1K tokens (paid tier, text in/out) — keep in sync with
+# pricing.json. Checked against https://ai.google.dev/gemini-api/docs/pricing
+# on 2026-10-04.
 GEMINI_MODELS: List[ModelInfo] = [
-    # --- 2.5 family ---
+    # --- 3.x family (current) ---
     ModelInfo(
-        model_id="gemini-2.5-flash",
+        model_id="gemini-3.8-flash",
         provider="gemini",
-        display_name="Gemini 2.5 Flash",
+        display_name="Gemini 3.8 Flash",
+        # Promotional pricing through 2026-12-31; doubles (0.0015 / 0.0075) from 2027-01-01.
+        input_cost_per_1k=0.00075,
+        output_cost_per_1k=0.00375,
+        supports_tools=True,
+    ),
+    ModelInfo(
+        model_id="gemini-3.5-flash",
+        provider="gemini",
+        display_name="Gemini 3.5 Flash",
+        input_cost_per_1k=0.0015,
+        output_cost_per_1k=0.009,
+        supports_tools=True,
+    ),
+    ModelInfo(
+        model_id="gemini-3.5-flash-lite",
+        provider="gemini",
+        display_name="Gemini 3.5 Flash-Lite",
         input_cost_per_1k=0.0003,
         output_cost_per_1k=0.0025,
         supports_tools=True,
     ),
     ModelInfo(
-        model_id="gemini-2.5-flash-lite",
+        model_id="gemini-3.1-flash-lite",
         provider="gemini",
-        display_name="Gemini 2.5 Flash-Lite",
-        input_cost_per_1k=0.0001,
-        output_cost_per_1k=0.0004,
-        supports_tools=True,
-    ),
-    ModelInfo(
-        model_id="gemini-2.5-pro",
-        provider="gemini",
-        display_name="Gemini 2.5 Pro",
-        input_cost_per_1k=0.00125,
-        output_cost_per_1k=0.01,
-        supports_tools=True,
-    ),
-    # --- 3.x family ---
-    ModelInfo(
-        model_id="gemini-3-flash-preview",
-        provider="gemini",
-        display_name="Gemini 3 Flash Preview",
-        input_cost_per_1k=0.0005,
-        output_cost_per_1k=0.003,
-        supports_tools=True,
-    ),
-    ModelInfo(
-        model_id="gemini-3-pro-preview",
-        provider="gemini",
-        display_name="Gemini 3 Pro Preview",
-        input_cost_per_1k=0.002,
-        output_cost_per_1k=0.012,
+        display_name="Gemini 3.1 Flash-Lite",
+        input_cost_per_1k=0.00025,
+        output_cost_per_1k=0.0015,
         supports_tools=True,
     ),
     ModelInfo(
@@ -545,29 +540,30 @@ GEMINI_MODELS: List[ModelInfo] = [
         output_cost_per_1k=0.012,
         supports_tools=True,
     ),
+    # --- 2.5 family (legacy: still served, but Google restricts it for new projects) ---
     ModelInfo(
-        model_id="gemini-3.1-flash-lite-preview",
+        model_id="gemini-2.5-pro",
         provider="gemini",
-        display_name="Gemini 3.1 Flash-Lite Preview",
-        input_cost_per_1k=0.00025,
-        output_cost_per_1k=0.0015,
+        display_name="Gemini 2.5 Pro (legacy)",
+        input_cost_per_1k=0.00125,
+        output_cost_per_1k=0.01,
         supports_tools=True,
     ),
-    # --- 2.0 family (deprecated June 2026) ---
     ModelInfo(
-        model_id="gemini-2.0-flash",
+        model_id="gemini-2.5-flash",
         provider="gemini",
-        display_name="Gemini 2.0 Flash (deprecated)",
+        display_name="Gemini 2.5 Flash (legacy)",
+        input_cost_per_1k=0.0003,
+        output_cost_per_1k=0.0025,
+        supports_tools=True,
+    ),
+    ModelInfo(
+        model_id="gemini-2.5-flash-lite",
+        provider="gemini",
+        display_name="Gemini 2.5 Flash-Lite (legacy)",
         input_cost_per_1k=0.0001,
         output_cost_per_1k=0.0004,
         supports_tools=True,
-    ),
-    ModelInfo(
-        model_id="gemini-2.0-flash-lite",
-        provider="gemini",
-        display_name="Gemini 2.0 Flash-Lite (deprecated)",
-        input_cost_per_1k=0.000075,
-        output_cost_per_1k=0.0003,
     ),
 ]
 
@@ -644,41 +640,86 @@ class GeminiBackend(ModelBackend):
             latency_ms=latency_ms,
         )
 
-    # Imagen model tiers: fast ($0.02), standard ($0.04), ultra ($0.06)
-    IMAGEN_MODELS = {
-        "imagen-fast": {"model_id": "imagen-4.0-fast-generate-001", "cost": 0.02},
-        "imagen-standard": {"model_id": "imagen-4.0-generate-001", "cost": 0.04},
-        "imagen-ultra": {"model_id": "imagen-4.0-ultra-generate-001", "cost": 0.06},
+    # Image generation tiers. Imagen 4 was shut down (Sep 2026); images now
+    # come from the Gemini-native image models ("Nano Banana") through
+    # generate_content. Cost is per 1K-resolution image — billing is really
+    # per output token (a 1K image is ~1120 tokens), so these are the pricing
+    # page's per-image figures as of 2026-10-04.
+    IMAGE_MODELS = {
+        "image-lite":     {"model_id": "gemini-3.1-flash-lite-image", "cost": 0.0336, "max_size": "1K"},
+        "image-standard": {"model_id": "gemini-3.1-flash-image",      "cost": 0.067,  "max_size": "4K"},
+        "image-pro":      {"model_id": "gemini-3-pro-image",          "cost": 0.134,  "max_size": "4K"},
     }
+    # Legacy Imagen tier names still found in older controls.json files.
+    IMAGE_TIER_ALIASES = {
+        "imagen-fast": "image-lite",
+        "imagen-standard": "image-standard",
+        "imagen-ultra": "image-pro",
+    }
+    DEFAULT_IMAGE_TIER = "image-standard"
+
+    @classmethod
+    def resolve_image_tier(cls, tier: Optional[str]) -> str:
+        """Map any tier name (including legacy Imagen names) to a valid IMAGE_MODELS key."""
+        tier = (tier or "").strip()
+        tier = cls.IMAGE_TIER_ALIASES.get(tier, tier)
+        return tier if tier in cls.IMAGE_MODELS else cls.DEFAULT_IMAGE_TIER
 
     def generate_image(
         self,
         prompt: str,
-        tier: str = "imagen-ultra",
+        tier: str = "image-standard",
         aspect_ratio: str = "1:1",
+        image_size: str = "1K",
     ) -> tuple:
-        """Generate an image from a text prompt using Imagen.
+        """Generate an image from a text prompt with a Gemini image model.
 
         Args:
-            tier: "imagen-fast" ($0.02), "imagen-standard" ($0.04), or "imagen-ultra" ($0.06)
+            tier: "image-lite" (~$0.034), "image-standard" (~$0.067), or
+                  "image-pro" (~$0.134). Legacy "imagen-*" names are accepted.
+            aspect_ratio: one of 1:1, 2:3, 3:2, 3:4, 4:3, 9:16, 16:9, 21:9.
+            image_size: "1K", "2K" or "4K" (lite tier is 1K only).
 
-        Returns (raw_png_bytes, model_id, cost_usd).
+        Returns (raw_image_bytes, model_id, cost_usd). Bytes are whatever the
+        model emitted (PNG by default); callers re-encode to JPEG.
         """
-        info = self.IMAGEN_MODELS.get(tier, self.IMAGEN_MODELS["imagen-ultra"])
+        tier = self.resolve_image_tier(tier)
+        info = self.IMAGE_MODELS[tier]
         model_id = info["model_id"]
-        cost = info["cost"]
+        if info["max_size"] == "1K":
+            image_size = "1K"
 
-        response = self._client.models.generate_images(
+        response = self._client.models.generate_content(
             model=model_id,
-            prompt=prompt,
-            config=types.GenerateImagesConfig(
-                number_of_images=1,
-                aspect_ratio=aspect_ratio,
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                response_modalities=["IMAGE"],
+                image_config=types.ImageConfig(
+                    aspect_ratio=aspect_ratio,
+                    image_size=image_size,
+                ),
             ),
         )
-        if not response.generated_images:
-            raise RuntimeError("Imagen returned no images")
-        return response.generated_images[0].image.image_bytes, model_id, cost
+
+        image_bytes = b""
+        for cand in (response.candidates or []):
+            parts = getattr(getattr(cand, "content", None), "parts", None) or []
+            for part in parts:
+                inline = getattr(part, "inline_data", None)
+                if inline is not None and inline.data:
+                    image_bytes = inline.data
+                    break
+            if image_bytes:
+                break
+        if not image_bytes:
+            # Surface any text the model returned (safety refusal etc.) so the error is actionable.
+            text = ""
+            try:
+                text = (response.text or "").strip()
+            except Exception:
+                pass
+            raise RuntimeError(f"{model_id} returned no image" + (f": {text[:200]}" if text else ""))
+        return image_bytes, model_id, info["cost"]
 
     def available_models(self) -> List[ModelInfo]:
         return list(GEMINI_MODELS)

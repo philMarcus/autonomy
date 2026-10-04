@@ -174,6 +174,11 @@ def read_brain_events(brain_name: str) -> list[dict]:
 # We apply a thinking multiplier to output cost estimates.
 _MODEL_COSTS = {
     # (input_per_1K, output_per_1K, thinking_multiplier)
+    "gemini-3.8-flash": (0.00075, 0.00375, 4.0),
+    "gemini-3.5-flash": (0.0015, 0.009, 4.0),
+    "gemini-3.5-flash-lite": (0.0003, 0.0025, 3.0),
+    "gemini-3.1-flash-lite": (0.00025, 0.0015, 3.0),
+    "gemini-3.1-pro-preview": (0.002, 0.012, 5.0),
     "gemini-2.5-flash-lite": (0.0001, 0.0004, 3.0),
     "gemini-2.5-flash": (0.0003, 0.0025, 4.0),
     "gemini-2.5-pro": (0.00125, 0.01, 5.0),
@@ -864,19 +869,21 @@ def render_controls_tab(brain_filter: str):
 
                         # Full pool of available models for this weight control
                         _ALL_CONSCIOUS = [
-                            "gemini-2.5-pro", "gemini-3.1-pro-preview",
+                            "gemini-3.8-flash", "gemini-3.1-pro-preview",
+                            "gemini-3.5-flash", "gemini-2.5-pro",
                             "claude-sonnet-4-6", "claude-opus-4-6",
                             "gpt-5.4",
                         ]
                         _ALL_SUBCONSCIOUS = [
+                            "gemini-3.5-flash-lite", "gemini-3.1-flash-lite",
                             "gemini-2.5-flash-lite", "gemini-2.5-flash",
-                            "gemini-3-flash-preview", "gemini-3.1-flash-lite-preview",
                             "claude-haiku-4-5", "mistral-small-latest",
                             "gpt-5.4-nano", "gpt-5.4-mini",
                         ]
                         _ALL_GEMINI = [
+                            "gemini-3.5-flash-lite", "gemini-3.1-flash-lite",
+                            "gemini-3.8-flash", "gemini-3.5-flash",
                             "gemini-2.5-flash-lite", "gemini-2.5-flash",
-                            "gemini-3-flash-preview", "gemini-3.1-flash-lite-preview",
                             "gemini-2.5-pro", "gemini-3.1-pro-preview",
                         ]
                         # Auto-discover Ollama models
@@ -1263,7 +1270,7 @@ CONTROLS_META = [
     ("allow_downvote",           "bool",  False,  "Allow downvoting",                               "output",   None, None,  None),
     ("allow_kernel_update",      "bool",  True,   "Allow agent to rewrite its kernel prompt",       "output",   None, None,  None),
     ("max_replies_per_post",     "int",   3,      "Max replies to any single post",                 "output",   1,    10,    None),
-    ("image_model_tier",         "str",   "imagen-ultra", "Imagen tier (fast=$0.02, standard=$0.04, ultra=$0.06)", "output", None, None, ["imagen-fast", "imagen-standard", "imagen-ultra"]),
+    ("image_model_tier",         "str",   "image-standard", "Image tier (lite=$0.03, standard=$0.07, pro=$0.13)", "output", None, None, ["image-lite", "image-standard", "image-pro"]),
     # --- Moltbook ---
     ("post_interval_minutes",    "int",   30,     "Minutes between Moltbook posts",                 "moltbook", 5,    1440,  None),
     ("post_failure_cooldown_seconds", "int", 900, "Cooldown after a failed post (secs)",            "moltbook", 60,   7200,  None),
