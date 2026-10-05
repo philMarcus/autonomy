@@ -124,19 +124,15 @@ def _compress_drafts_to_digest(overflow_drafts, registry, ctrl) -> str:
     """
     if not overflow_drafts:
         return ""
-    compressor = ctrl.get("compressor_model") if ctrl else "ollama:gemma4:12b"
     lines = []
     for d in overflow_drafts:
         lines.append(f"- [{d.signal_score:.2f}] {d.suggested_action} on {d.target_summary}: {d.reasoning[:160]}")
     bullets = "\n".join(lines)
     prompt = load_template("compressor/digest_user.txt").format(bullets=bullets)
     try:
-        chat = registry.create_chat(
-            model_id=compressor, system_instruction=load_template("compressor/digest_system.txt"),
-            temperature=0.4, max_output_tokens=400,
-            disable_thinking=bool(ctrl.get("compressor_disable_thinking") if ctrl else False),
-        )
-        return chat.send_message(prompt).strip()
+        from .utils import make_compressor_fn
+        return make_compressor_fn(registry, ctrl, "compressor/digest_system.txt",
+                                  temperature=0.4, max_output_tokens=600)(prompt)
     except Exception as e:
         safe_print(f"{Fore.YELLOW}[DAEMON] digest compression failed: {e}")
         return ""
@@ -162,13 +158,8 @@ def _compress_post_memory(state, registry, ctrl):
     if len(fresh) <= fresh_cap:
         return
 
-    _compressor = ctrl.get("compressor_model") if ctrl else "ollama:gemma4:12b"
-    def _compress_fn(prompt):
-        _c = registry.create_chat(
-            model_id=_compressor, system_instruction=load_template("compressor/post_system.txt"),
-            temperature=0.3, max_output_tokens=512,
-            disable_thinking=bool(ctrl.get("compressor_disable_thinking") if ctrl else False))
-        return _c.send_message(prompt)
+    from .utils import make_compressor_fn
+    _compress_fn = make_compressor_fn(registry, ctrl, "compressor/post_system.txt")
 
     tiers = state.setdefault("post_tiers", {"recent": [], "compressed": [], "deep": []})
 
@@ -1854,14 +1845,15 @@ def main():
                 _recent_cap = int(ctrl.get("memory_recent_capacity") if ctrl else 20)
                 _compressed_cap = int(ctrl.get("memory_compressed_capacity") if ctrl else 10)
                 _deep_cap = int(ctrl.get("memory_deep_capacity") if ctrl else 10)
-                _compressor = ctrl.get("compressor_model") if ctrl else "gemini-3.5-flash-lite"
+                from .utils import make_compressor_fn
 
-                def _compress_fn(prompt):
-                    _c = registry.create_chat(
-                        model_id=_compressor, system_instruction=load_template("compressor/memory_system.txt"),
-                        temperature=0.3, max_output_tokens=512,
-                        disable_thinking=bool(ctrl.get("compressor_disable_thinking")))
-                    return _c.send_message(prompt)
+                def _on_compress_result(model_id, text, ok):
+                    telemetry.log("memory_compress", {
+                        "cycle": iteration, "model": model_id, "ok": ok, "chars": len(text),
+                    })
+
+                _compress_fn = make_compressor_fn(registry, ctrl, "compressor/memory_system.txt",
+                                                  on_result=_on_compress_result)
 
                 if len(tiers["recent"]) >= _recent_cap:
                     half = _recent_cap // 2

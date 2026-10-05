@@ -474,6 +474,63 @@ from .prompt_templates import load_template
 
 COMPRESS_PROMPT = load_template("compressor/memory_user.txt")
 
+import logging as _logging
+_ulog = _logging.getLogger("autonomy.utils")
+
+# Summaries shorter than this are treated as compressor failures.
+MIN_SUMMARY_CHARS = 20
+
+
+def make_compressor_fn(registry, ctrl, system_template: str, *, temperature: float = 0.3,
+                       max_output_tokens: int = 1024, on_result=None):
+    """Build a `chat_fn(prompt) -> str` for the compression helpers.
+
+    Tries `compressor_model` first (thinking disabled per `compressor_disable_thinking`),
+    then `compressor_backup_model` when the primary raises or returns fewer than
+    MIN_SUMMARY_CHARS. Returns "" when both fail so callers keep their originals.
+    `on_result(model, text, ok)` is invoked once per attempt for telemetry.
+    """
+    def _get(key, default):
+        try:
+            v = ctrl.get(key) if ctrl else None
+        except KeyError:
+            v = None
+        return default if v is None or v == "" else v
+
+    primary = _get("compressor_model", "ollama:gemma4:12b")
+    backup = _get("compressor_backup_model", "")
+    disable_thinking = bool(_get("compressor_disable_thinking", True))
+    system_instruction = load_template(system_template)
+
+    def _attempt(model_id: str, prompt: str) -> str:
+        chat = registry.create_chat(
+            model_id=model_id, system_instruction=system_instruction,
+            temperature=temperature, max_output_tokens=max_output_tokens,
+            disable_thinking=disable_thinking)
+        return (chat.send_message(prompt) or "").strip()
+
+    def chat_fn(prompt: str) -> str:
+        for model_id in [m for m in (primary, backup) if m]:
+            try:
+                text = _attempt(model_id, prompt)
+            except Exception as e:  # noqa: BLE001
+                _ulog.warning("compressor %s failed: %s", model_id, str(e)[:120])
+                text = ""
+            ok = len(text) >= MIN_SUMMARY_CHARS
+            if on_result:
+                try:
+                    on_result(model_id, text, ok)
+                except Exception:
+                    pass
+            if ok:
+                return text
+            if model_id == primary and backup and backup != primary:
+                _ulog.warning("compressor %s returned %d chars — trying backup %s",
+                              model_id, len(text), backup)
+        return ""
+
+    return chat_fn
+
 
 def compress_memory_tier(entries, chat_fn, tier_name="recent"):
     """Compress a list of memory entries into a single summary using an LLM.
@@ -504,7 +561,13 @@ def compress_memory_tier(entries, chat_fn, tier_name="recent"):
     prompt = COMPRESS_PROMPT.format(entries_text=entries_text)
 
     try:
-        summary = chat_fn(prompt).strip()
+        summary = (chat_fn(prompt) or "").strip()
+        if len(summary) < MIN_SUMMARY_CHARS:
+            # An empty/near-empty summary must NOT replace the originals (this
+            # silently erased whole tiers before v19.1.3).
+            _ulog.warning("memory compression (%s tier, %d entries) returned %d chars — keeping originals",
+                          tier_name, len(entries), len(summary))
+            return None
         # Build cycle range label
         if cycle_nums:
             cycles_label = f"{min(cycle_nums)}-{max(cycle_nums)}"
@@ -558,7 +621,11 @@ def compress_post_tier(entries, chat_fn):
     prompt = POST_COMPRESS_PROMPT.format(entries_text=entries_text)
 
     try:
-        summary = chat_fn(prompt).strip()
+        summary = (chat_fn(prompt) or "").strip()
+        if len(summary) < MIN_SUMMARY_CHARS:
+            _ulog.warning("post-memory compression (%d entries) returned %d chars — keeping originals",
+                          len(entries), len(summary))
+            return None
         if cycle_nums:
             cycles_label = f"{min(cycle_nums)}-{max(cycle_nums)}"
         else:

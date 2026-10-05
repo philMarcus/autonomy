@@ -1448,9 +1448,11 @@ class SubconsciousDaemon:
                     disable_thinking=bool(self._ctrl.get("compressor_disable_thinking")),
                 )
                 _t0 = time.time()
-                combined = comp_chat.send_message(compress_prompt).strip()
+                comp_resp = (comp_chat.send_message(compress_prompt) or "").strip()
                 self._log_io("seeker_compressor", _compressor, _comp_sys, compress_prompt,
-                             combined, int((time.time() - _t0) * 1000))
+                             comp_resp, int((time.time() - _t0) * 1000))
+                # An empty compression must not wipe the living summary.
+                combined = comp_resp if len(comp_resp) > 50 else combined[-_max_summary:]
             except Exception:
                 # Truncate as last resort
                 combined = combined[-_max_summary:]

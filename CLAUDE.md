@@ -769,8 +769,14 @@ Analog_I was dormant Jun–Oct 2026 while Phil built Zoomer (Powers of Zen). v19
 - Native Ollama tool calling verified live on `qwen3:14b` (think on/off) and `gemma4:12b`; every pool model except `phi4` (sentry-only) reports the `tools` capability.
 - `daemon._io_log_path()` and the dreamer topics path hardcoded `"brains"`; both honour `BRAINS_DIR` now (a DEV run had written into the real brains dir).
 
-### Open items after v19.1.2
-- Deploy the API to Fly (needs `flyctl auth login` — token expired), then `python -m autonomy.recall backfill ANALOG_I` against prod and the archived memory file.
+### Memory compression was erasing memory (v19.1.3) — pre-existing bug, fixed
+- In the old run every `compressed` summary and 4 of 6 `deep` summaries are empty strings: the compressor (`gemma4:12b`, thinking ON, `max_output_tokens=512`) spent its budget thinking and returned "", and `compress_memory_tier` returned `{cycles, summary: ""}` which the caller took as success and discarded the originals. Reproduced live: old settings → 0 chars; thinking off + 1024 tokens → 1,310-char summary in 8 s.
+- `compress_memory_tier` / `compress_post_tier` now return `None` for summaries under `MIN_SUMMARY_CHARS` (20) so originals are kept. New `utils.make_compressor_fn()` is the single compressor factory (memory tiers, post memory, draft digest): primary `compressor_model` → `compressor_backup_model` (new operator control, default `gemini-3.5-flash-lite`) when the primary fails or returns nothing; `compressor_disable_thinking` default flipped to True; telemetry `memory_compress {model, ok, chars}`. The seeker's living-summary compressor had the same accept-empty flaw (librarian already guarded) — fixed.
+- The archived run's compressed memories are gone, but its artifacts and monologues are embedded, so recall still covers that history. The 14 memory documents embedded from the archive are the 12 non-empty notes + 2 post summaries.
+- Production recall index: 2,587 documents (1,438 bodies, 1,135 monologues, 12 memory notes, 2 post summaries) across 20 runs; backfill cost ≈ $0.22 after one 429 retry.
+
+### Open items after v19.1.3
+- API deployed to Fly 2026-10-05 (`flyctl.exe` lives at `C:\Users\Phil\.fly\bin\`; from WSL: `/mnt/c/Users/Phil/.fly/bin/flyctl.exe deploy`). Prod backfill done; the per-cycle sync keeps it current. After `newrun`, run the backfill once more with `--memory` for the archived file (idempotent).
 - `conscious_thinking_level` control for Gemini 3.x; Instagram account for daily images (via Zoomer's CDP driver); Anthropic model IDs in `llm/anthropic.py` are pre-Claude-5 (pool weight 0).
 
 ## Key Architecture Decisions

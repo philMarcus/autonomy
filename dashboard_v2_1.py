@@ -1314,7 +1314,8 @@ CONTROLS_META = [
     ("reply_candidate_chars",    "int",   5000,   "Max chars for reply candidate",                   "context",  500,  20000, None),
     ("outside_candidate_chars",  "int",   5000,   "Max chars for outside candidate",                 "context",  500,  20000, None),
     # Memory tiers
-    ("compressor_model",         "str",   "ollama:qwen2.5:1.5b", "Model for memory compression",    "context", None, None,  None),
+    ("compressor_model",         "str",   "ollama:gemma4:12b", "Model for memory compression",      "context", None, None,  None),
+    ("compressor_backup_model",  "str",   "gemini-3.5-flash-lite", "Fallback compressor when the primary returns nothing", "context", None, None, None),
     ("memory_recent_capacity",   "int",   20,     "Per-cycle memory notes before compression",      "context",  5,    100,   None),
     ("memory_compressed_capacity","int",  10,     "Compressed memories before deep compression",    "context",  3,    50,    None),
     ("memory_deep_capacity",     "int",   10,     "Deep memories before further compression",       "context",  3,    50,    None),

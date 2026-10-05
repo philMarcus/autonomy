@@ -448,6 +448,9 @@ def build_default_registry(model_registry, blacklist_str: str = "") -> ControlRe
                 "Deep memories before further compression", "context", min_val=3, max_val=20),
         Control("compressor_model", "str", "ollama:gemma4:12b",
                 "Model for automatic memory compression", "context"),
+        Control("compressor_backup_model", "str", "gemini-3.5-flash-lite",
+                "Fallback compressor when the primary returns an empty summary (empty = none)",
+                "context", audience="operator"),
         Control("post_memory_fresh_cap", "int", 4,
                 "Full posts kept locally before sliding-window compression", "context", min_val=1, max_val=20),
         Control("post_memory_recent_cap", "int", 10,
@@ -511,7 +514,7 @@ def build_default_registry(model_registry, blacklist_str: str = "") -> ControlRe
                 "Disable thinking for muse creative drafts (turn on for large/slow models)", "daemon"),
         Control("synthesizer_disable_thinking", "bool", False,
                 "Disable thinking for seeker/librarian synthesizer", "daemon"),
-        Control("compressor_disable_thinking", "bool", False,
+        Control("compressor_disable_thinking", "bool", True,
                 "Disable thinking for memory/post compressor", "daemon"),
 
         # --- Context ---
