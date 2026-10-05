@@ -33,6 +33,9 @@ EMBED_MODEL = "gemini-embedding-2"
 EMBED_DIM = 768
 MAX_DOC_CHARS = 8000      # embedding input cap per document (well under the model limit)
 EMBED_BATCH = 20          # documents per embed_content call
+EMBED_RETRIES = 6         # on 429/5xx: sleep 5, 10, 20, 40, 80, 160 s
+_RETRYABLE = ("429", "RESOURCE_EXHAUSTED", "503", "UNAVAILABLE", "500", "INTERNAL",
+              "504", "DEADLINE_EXCEEDED", "timed out", "ReadTimeout")
 DEFAULT_KINDS = ("artifact_body", "artifact_monologue")
 # Mirrors the API's default: content + the agent's own kernel/dev-request history.
 RECALL_TYPES = ["post", "comment", "reply", "image", "dream",
@@ -57,15 +60,31 @@ class Embedder:
         self._budget = budget
         self.calls = 0
         self.chars = 0
+        self.retries = 0
+
+    def _call(self, contents, task_type: str):
+        """One embed_content call with exponential backoff on rate limits / 5xx."""
+        from google.genai import types
+        delay = 5.0
+        for attempt in range(EMBED_RETRIES + 1):
+            try:
+                return self._client.models.embed_content(
+                    model=self.model, contents=contents,
+                    config=types.EmbedContentConfig(task_type=task_type, output_dimensionality=self.dim),
+                )
+            except Exception as e:  # noqa: BLE001
+                msg = str(e)
+                if attempt >= EMBED_RETRIES or not any(s in msg for s in _RETRYABLE):
+                    raise
+                log.warning("embed_content %s — retry %d/%d in %.0fs", msg[:80], attempt + 1, EMBED_RETRIES, delay)
+                self.retries += 1
+                time.sleep(delay)
+                delay = min(delay * 2, 160.0)
 
     def _embed(self, texts: List[str], task_type: str) -> List[List[float]]:
         from google.genai import types
         texts = [(t or "")[:MAX_DOC_CHARS] for t in texts]
-        resp = self._client.models.embed_content(
-            model=self.model,
-            contents=[types.Content(parts=[types.Part(text=t)]) for t in texts],
-            config=types.EmbedContentConfig(task_type=task_type, output_dimensionality=self.dim),
-        )
+        resp = self._call([types.Content(parts=[types.Part(text=t)]) for t in texts], task_type)
         vecs = [list(e.values) for e in resp.embeddings]
         if len(vecs) != len(texts):
             raise RuntimeError(f"embed_content returned {len(vecs)} vectors for {len(texts)} docs")
@@ -359,8 +378,20 @@ def main(argv: Optional[List[str]] = None) -> int:
     # backfill
     t0 = time.time()
     done = 0
+    failures = 0
     while True:
-        res = sync_pending(client, embedder, limit=max(1, min(args.batch, 200)))
+        try:
+            res = sync_pending(client, embedder, limit=max(1, min(args.batch, 200)))
+            failures = 0
+        except Exception as e:  # noqa: BLE001
+            failures += 1
+            if failures > 5:
+                print(f"  giving up after {failures} consecutive failures: {str(e)[:200]}")
+                return 1
+            wait = 30 * failures
+            print(f"  page failed ({str(e)[:120]}) — retrying in {wait}s")
+            time.sleep(wait)
+            continue
         done += res["artifacts"]
         print(f"  embedded {res['embedded']:3d} docs from {res['artifacts']:3d} artifacts | "
               f"remaining {res['remaining']} | {embedder.chars:,} chars so far | {time.time()-t0:.0f}s")
@@ -372,7 +403,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         n = embed_memory_file(client, embedder, args.memory, run_id=args.run_id, brain=args.brain)
         print(f"  embedded {n} memory documents from {args.memory}")
     est = embedder.chars / 4 / 1e6 * 0.20
-    print(f"done: {done} artifacts, {embedder.calls} embed calls, ~{embedder.chars/4:,.0f} tokens (~${est:.2f})")
+    print(f"done: {done} artifacts, {embedder.calls} embed calls ({embedder.retries} retries), "
+          f"~{embedder.chars/4:,.0f} tokens (~${est:.2f})")
     print(json.dumps(client.stats(), indent=2))
     return 0
 

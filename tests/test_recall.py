@@ -171,3 +171,39 @@ def test_ollama_num_ctx_sizing():
     assert O._num_ctx_for(10_000_000, 4096, 262144) == O._NUM_CTX_CEILING
     assert O._messages_chars([{"role": "user", "content": "abc"}, {"role": "assistant", "content": "de",
                                                                     "tool_calls": [{"function": {"name": "x"}}]}]) > 5
+
+
+def test_embedder_retries_on_rate_limit(monkeypatch):
+    """429s back off and retry; other errors raise immediately."""
+    monkeypatch.setattr(R.time, "sleep", lambda s: None)
+    emb = R.Embedder.__new__(R.Embedder)
+    emb.model, emb.dim, emb._budget, emb.calls, emb.chars, emb.retries = "m", 768, None, 0, 0, 0
+
+    class Resp:
+        def __init__(self, n):
+            self.embeddings = [type("E", (), {"values": [0.0] * 768})() for _ in range(n)]
+
+    attempts = {"n": 0}
+
+    class Models:
+        def embed_content(self, model, contents, config):
+            attempts["n"] += 1
+            if attempts["n"] < 3:
+                raise RuntimeError("429 RESOURCE_EXHAUSTED. Resource exhausted.")
+            return Resp(len(contents))
+
+    emb._client = type("C", (), {"models": Models()})()
+    assert len(emb.embed_documents(["a", "b"])) == 2
+    assert attempts["n"] == 3 and emb.retries == 2
+
+    attempts["n"] = 0
+
+    class Bad:
+        def embed_content(self, model, contents, config):
+            attempts["n"] += 1
+            raise RuntimeError("400 INVALID_ARGUMENT")
+
+    emb._client = type("C", (), {"models": Bad()})()
+    with pytest.raises(RuntimeError):
+        emb.embed_query("x")
+    assert attempts["n"] == 1
