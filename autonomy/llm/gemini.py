@@ -209,12 +209,14 @@ class GeminiChatSession(ChatSession):
         # underestimate cost by 2-10x for reasoning models.
         self._last_input_tokens = 0
         self._last_output_tokens = 0
+        self._last_cached_tokens = 0
         try:
             usage = resp.usage_metadata
             self._last_input_tokens = getattr(usage, "prompt_token_count", 0) or 0
             visible_out = getattr(usage, "candidates_token_count", 0) or 0
             thinking = getattr(usage, "thoughts_token_count", 0) or 0
             self._last_output_tokens = visible_out + thinking
+            self._last_cached_tokens = getattr(usage, "cached_content_token_count", 0) or 0
         except (AttributeError, TypeError):
             pass
 
@@ -360,7 +362,8 @@ class GeminiChatSession(ChatSession):
 
         # --- Multi-round tool loop -----------------------------------------------
         total_input_tokens = 0
-        total_output_tokens = 0
+        total_output_tokens = 0
+        total_cached_tokens = 0
         accumulated_text = []  # capture visible text from ALL rounds (not just final)
 
         for round_idx in range(max_rounds + 1):  # +1 so we can do max_rounds tool exchanges
@@ -384,13 +387,14 @@ class GeminiChatSession(ChatSession):
                     BUDGET.note_429()
                 raise
 
-            # Accumulate token usage across rounds
+            # Accumulate token usage across rounds (cached = served from the lazy context cache)
             try:
                 usage = resp.usage_metadata
                 total_input_tokens += getattr(usage, "prompt_token_count", 0) or 0
                 visible_out = getattr(usage, "candidates_token_count", 0) or 0
                 thinking = getattr(usage, "thoughts_token_count", 0) or 0
                 total_output_tokens += visible_out + thinking
+                total_cached_tokens += getattr(usage, "cached_content_token_count", 0) or 0
             except (AttributeError, TypeError):
                 pass
 
@@ -514,7 +518,8 @@ class GeminiChatSession(ChatSession):
 
         # Store cumulative token counts for cost tracking
         self._last_input_tokens = total_input_tokens
-        self._last_output_tokens = total_output_tokens
+        self._last_output_tokens = total_output_tokens
+        self._last_cached_tokens = total_cached_tokens
 
         # Combine text from all rounds — earlier rounds may contain [INTERNAL MONOLOGUE]
         # or other visible reasoning that preceded tool calls. The final round's text
@@ -684,12 +689,14 @@ class GeminiBackend(ModelBackend):
         # Include thoughts_token_count (billed at output rate for thinking models)
         input_tokens = 0
         output_tokens = 0
+        cached_tokens = 0
         try:
             usage = response.usage_metadata
             input_tokens = getattr(usage, "prompt_token_count", 0) or 0
             visible_out = getattr(usage, "candidates_token_count", 0) or 0
             thinking = getattr(usage, "thoughts_token_count", 0) or 0
             output_tokens = visible_out + thinking
+            cached_tokens = getattr(usage, "cached_content_token_count", 0) or 0
         except (AttributeError, TypeError):
             pass
 
@@ -697,6 +704,7 @@ class GeminiBackend(ModelBackend):
             text=text,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
+            cached_tokens=cached_tokens,
             model_id=model_id,
             latency_ms=latency_ms,
         )

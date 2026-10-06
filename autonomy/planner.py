@@ -82,6 +82,7 @@ def parse_json_with_one_repair(
         if budget:
             budget.record_usage(model_name, LLMResponse(
                 text=raw, input_tokens=in_tok, output_tokens=out_tok,
+                cached_tokens=getattr(chat, '_last_cached_tokens', 0) or 0,
                 model_id=model_name,
             ))
 
@@ -678,11 +679,13 @@ def _plan_with_tools(chat, prompt, tool_registry,
         from .llm.base import LLMResponse
         in_tok = getattr(chat, '_last_input_tokens', 0) or 0
         out_tok = getattr(chat, '_last_output_tokens', 0) or 0
+        cached_tok = getattr(chat, '_last_cached_tokens', 0) or 0
         # Sessions expose model_name (Gemini/Ollama); _model_id is a legacy alias.
         model_name = getattr(chat, "model_name", "") or getattr(chat, "_model_id", "") or ""
         if model_name:
             budget.record_usage(model_name, LLMResponse(
                 text=raw, input_tokens=in_tok, output_tokens=out_tok,
+                cached_tokens=getattr(chat, '_last_cached_tokens', 0) or 0,
                 model_id=model_name,
             ))
 
@@ -693,6 +696,7 @@ def _plan_with_tools(chat, prompt, tool_registry,
             "response_chars": len(raw or ''),
             "input_tokens": getattr(chat, '_last_input_tokens', 0),
             "output_tokens": getattr(chat, '_last_output_tokens', 0),
+            "cached_tokens": getattr(chat, '_last_cached_tokens', 0),
         })
 
     # Store raw response for preamble extraction

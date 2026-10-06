@@ -1,5 +1,5 @@
 {
-    "_note": "USD per 1K tokens. Updated 2026-10-04. Add new models here.",
+    "_note": "USD per 1K tokens. Updated 2026-10-06. cached_input = context-cache read rate (default 10% of input).",
     "_gemini": "https://ai.google.dev/gemini-api/docs/pricing",
     "_anthropic": "https://platform.claude.com/docs/en/about-claude/pricing",
     "_openai": "https://openai.com/api/pricing/",
@@ -7,7 +7,8 @@
     "gemini-3.8-flash": {
         "input": 0.00075,
         "output": 0.00375,
-        "_note": "promo through 2026-12-31; 0.0015/0.0075 from 2027-01-01"
+        "_note": "promo through 2026-12-31 (cached 0.00015 from 2027-01-01); 0.0015/0.0075 from 2027-01-01",
+        "cached_input": 7.5e-05
     },
     "gemini-3.5-flash": {
         "input": 0.0015,
@@ -23,7 +24,8 @@
     },
     "gemini-3.1-pro-preview": {
         "input": 0.002,
-        "output": 0.012
+        "output": 0.012,
+        "cached_input": 0.0002
     },
     "gemini-2.5-pro": {
         "input": 0.00125,

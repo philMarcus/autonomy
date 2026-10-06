@@ -44,12 +44,20 @@ def _load_pricing() -> Dict[str, Dict[str, float]]:
 COST_TABLE: Dict[str, Dict[str, float]] = _load_pricing()
 
 
-def estimate_cost(model_id: str, input_tokens: int, output_tokens: int) -> float:
-    """Estimate USD cost for a given model and token counts."""
+def estimate_cost(model_id: str, input_tokens: int, output_tokens: int, cached_tokens: int = 0) -> float:
+    """Estimate USD cost for a model and token counts.
+
+    `cached_tokens` is the part of `input_tokens` served from a context cache,
+    priced at the model's `cached_input` rate (10% of input when not listed).
+    """
     costs = COST_TABLE.get(model_id)
     if not costs:
         return 0.0
-    return (input_tokens / 1000) * costs["input"] + (output_tokens / 1000) * costs["output"]
+    cached = max(0, min(int(cached_tokens or 0), int(input_tokens or 0)))
+    fresh = max(0, int(input_tokens or 0) - cached)
+    cached_rate = costs.get("cached_input", costs["input"] * 0.1)
+    return ((fresh / 1000) * costs["input"] + (cached / 1000) * cached_rate
+            + (int(output_tokens or 0) / 1000) * costs["output"])
 
 
 def pricing_age_days() -> int:
@@ -89,7 +97,8 @@ class DailyBudget:
             self._ensure_today()
             cost = response.cost_usd
             if cost <= 0:
-                cost = estimate_cost(model_id, response.input_tokens, response.output_tokens)
+                cost = estimate_cost(model_id, response.input_tokens, response.output_tokens,
+                                     getattr(response, "cached_tokens", 0))
             self._spend_by_model[model_id] = self._spend_by_model.get(model_id, 0.0) + cost
 
     def remaining_usd(self) -> float:

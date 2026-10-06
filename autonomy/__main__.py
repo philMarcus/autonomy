@@ -1202,7 +1202,8 @@ def main():
                         model_id=_accountant_model,
                         system_instruction=load_template("accountant/system.txt"),
                         temperature=0.3,
-                        max_output_tokens=1024,
+                        max_output_tokens=2048,
+                        disable_thinking=bool(ctrl.get("accountant_disable_thinking")),
                     )
                     bp_raw = bp_chat.send_message(bp_prompt)
                     # Surface the thought trace (if any) — thinking models like qwen3:14b
@@ -1240,7 +1241,8 @@ def main():
                                     model_id="ollama:gemma4:12b",
                                     system_instruction=load_template("accountant/system.txt"),
                                     temperature=0.3,
-                                    max_output_tokens=1024,
+                                    max_output_tokens=2048,
+                                    disable_thinking=bool(ctrl.get("accountant_disable_thinking")),
                                 )
                                 bp_raw = _fallback_chat.send_message(bp_prompt)
                                 bp_plan = parse_budget_plan(bp_raw)
@@ -1807,8 +1809,15 @@ def main():
                 else:
                     raise
 
-            # Display any non-JSON LLM output (reasoning, preamble, etc.)
-            preamble = plan.pop("_preamble", "")
+            # Display any non-JSON LLM output (reasoning, preamble, etc.). Gemini 3.x
+            # tends to put the [INTERNAL MONOLOGUE] block *inside* the JSON as a field
+            # rather than as text before it — accept either so it is published.
+            preamble = plan.pop("_preamble", "") or ""
+            for _mono_key in ("internal_monologue", "monologue", "INTERNAL MONOLOGUE"):
+                _mono_val = plan.pop(_mono_key, None)
+                if _mono_val and not preamble:
+                    preamble = _mono_val if isinstance(_mono_val, str) else json.dumps(_mono_val, ensure_ascii=False, indent=1)
+            preamble = (preamble or "").strip()
             if preamble:
                 safe_print(f"{Fore.CYAN}--- REASONING ---")
                 safe_print(f"{Fore.WHITE}{preamble}")
@@ -2694,12 +2703,13 @@ def main():
         try:
             _cycle_in = getattr(chat, '_last_input_tokens', 0) or 0
             _cycle_out = getattr(chat, '_last_output_tokens', 0) or 0
+            _cycle_cached = getattr(chat, '_last_cached_tokens', 0) or 0
             from .llm.budget import estimate_cost
-            _cycle_cost = estimate_cost(conscious_model, _cycle_in, _cycle_out)
+            _cycle_cost = estimate_cost(conscious_model, _cycle_in, _cycle_out, _cycle_cached)
             _today_spent = budget.spent_today_usd() if budget else 0.0
             _budget_limit = budget.daily_limit_usd if budget else 0.0
             _budget_line = (
-                f"[BUDGET] cycle ${_cycle_cost:.4f} ({_cycle_in:,} in, {_cycle_out:,} out) "
+                f"[BUDGET] cycle ${_cycle_cost:.4f} ({_cycle_in:,} in / {_cycle_cached:,} cached, {_cycle_out:,} out) "
                 f"| today ${_today_spent:.2f}/${_budget_limit:.2f}"
             )
             safe_print(f"{Fore.CYAN}{_budget_line}{Style.RESET_ALL}")

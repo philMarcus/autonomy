@@ -39,6 +39,7 @@ class LLMResponse:
     text: str
     input_tokens: int = 0
     output_tokens: int = 0
+    cached_tokens: int = 0             # subset of input_tokens served from a context cache
     cost_usd: float = 0.0
     model_id: str = ""
     latency_ms: int = 0

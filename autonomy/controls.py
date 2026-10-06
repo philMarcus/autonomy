@@ -521,6 +521,9 @@ def build_default_registry(model_registry, blacklist_str: str = "") -> ControlRe
                 "Disable thinking for muse creative drafts (turn on for large/slow models)", "daemon"),
         Control("synthesizer_disable_thinking", "bool", False,
                 "Disable thinking for seeker/librarian synthesizer", "daemon"),
+        Control("accountant_disable_thinking", "bool", True,
+                "Disable thinking for the accountant (thinking models return empty JSON when "
+                "thinking consumes the output budget)", "daemon"),
         Control("compressor_disable_thinking", "bool", True,
                 "Disable thinking for memory/post compressor", "daemon"),
 
