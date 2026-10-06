@@ -40,6 +40,8 @@ EXPECTED_TOOLS = {
     "get_daemon_io", "get_gear_instructions", "set_gear_instruction",
     # moltbook
     "lookup_agent", "get_thread",
+    # phil's projects (v19.2)
+    "list_phil_projects", "read_phil_project",
 }
 
 

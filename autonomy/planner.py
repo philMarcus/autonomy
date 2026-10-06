@@ -374,6 +374,7 @@ def build_planner_prompt(
     cycle_temperature: Optional[float] = None,
     default_temperature: float = 0.7,
     allow_default_temp: bool = False,
+    sampling_applied: bool = True,
     post_engagement: str = "",
     controls_block: str = "",
     budget_summary: str = "",
@@ -421,6 +422,14 @@ def build_planner_prompt(
         )
     elif cycle_temperature is not None:
         temp_note = f"\nTEMPERATURE: {cycle_temperature:.2f} (default).\n"
+    if temp_note and not sampling_applied:
+        # Gemini 3.6+ ignores sampling temperature, so the dial only works if the
+        # model reads it as an instruction.
+        temp_note = temp_note.rstrip("\n") + (
+            " Your model does not apply sampling temperature, so treat this number as an "
+            "instruction: above the default, take more creative risks and range wider; "
+            "below it, be more focused and precise.\n"
+        )
 
     search_note = ""
     if search_enabled:

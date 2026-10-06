@@ -126,6 +126,7 @@ def test_format_results_labels_runs():
     out = R.format_results(rows, current_run_id="newrun")
     assert out[0]["run"] == "previous life c728947a" and out[0]["when"] == "2026-05-02" and out[0]["type"] == "image"
     assert out[1]["run"] == "this run" and out[1]["type"] == "memory_note"
+    assert R.format_results([{"run_id": "", "kind": "birth_of_a_mind"}], "x")[0]["run"] == "reference"
 
 
 def test_recall_tool_scopes_and_kinds():

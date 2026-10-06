@@ -1043,10 +1043,17 @@ def build_tool_registry(
     # v18.4: daemon inspection + gear instructions
     _build_daemon_io_tools(registry, state, brain_name, brains_dir)
 
-    # v19: semantic recall over all artifacts + previous-life memory notes
+    # v19: semantic recall over all artifacts + previous-life memory notes,
+    # Birth of a Mind passages, and Phil's GitHub projects
     if recall_client is not None and embedder is not None:
-        from .recall import build_recall_tool
+        from .recall import build_recall_tool, build_boam_tool
         build_recall_tool(registry, recall_client, embedder, state)
+        if knowledge_path:
+            _boam = knowledge_path.replace("_knowledge.txt", "_birth_of_a_mind.txt")
+            if os.path.exists(_boam):
+                build_boam_tool(registry, recall_client, embedder, _boam)
+    from .projects import build_project_tools
+    build_project_tools(registry)
 
     log.info("Tool registry built: %s", ", ".join(registry.list_names()))
     return registry
@@ -1612,7 +1619,7 @@ def _build_web_search_tool(registry: ToolRegistry) -> None:
                 contents=query,
                 config=types.GenerateContentConfig(
                     tools=[types.Tool(google_search=types.GoogleSearch())],
-                    temperature=0.2,
+                    thinking_config=types.ThinkingConfig(thinking_level="low"),
                     max_output_tokens=1024,
                 ),
             )

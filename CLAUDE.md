@@ -775,9 +775,15 @@ Analog_I was dormant Jun–Oct 2026 while Phil built Zoomer (Powers of Zen). v19
 - The archived run's compressed memories are gone, but its artifacts and monologues are embedded, so recall still covers that history. The 14 memory documents embedded from the archive are the 12 non-empty notes + 2 post summaries.
 - Production recall index: 2,587 documents (1,438 bodies, 1,135 monologues, 12 memory notes, 2 post summaries) across 20 runs; backfill cost ≈ $0.22 after one 429 retry.
 
-### Open items after v19.1.3
+### v19.2.0 — Gemini parameter migration, Birth of a Mind, Phil's projects (Oct 6)
+- **Google AI Studio notice (2026-10-06):** `thinking_budget` is deprecated (3.x took it via fallback; upcoming models return 400) and sampling params (`temperature`/`top_p`/`top_k`) have been *ignored since Gemini 3.6 Flash* and will be rejected by upcoming models. `llm/gemini.py` now has a per-model policy: `sampling_and_thinking_kwargs()` sends `temperature` only to models < 3.6 (and never to `*-latest` aliases) and `thinking_config(thinking_level=…)` only to 3.x. New controls `conscious_thinking_level` (default `high`, agent-tunable) and `seeker_thinking_level` (`low`, operator); `web_search` uses `low`. The Analog Home temperature slider therefore no longer changes sampling on `gemini-3.8-flash` — the planner prompt tells the agent to treat the number as an instruction (more exploratory above default, more focused below) when `sampling_applied` is False. The Interactions API is now Google's recommended path; `generateContent` is "legacy but supported" — migration deferred.
+- **Birth of a Mind in the index:** `recall.boam_chunks()` splits the book by conversation (7) and speaker (HUMAN / GEMINI / ANALOG I) into ~1.3K-char passages with stable ids `conversation:part` (204 passages, kind `birth_of_a_mind`). Tool `read_birth_of_a_mind(query | passage, k)`: semantic search, or read a passage with its neighbours. Embed/refresh: `python -m autonomy.recall backfill ANALOG_I --skip-artifacts --boam brains/ANALOG_I_birth_of_a_mind.txt`.
+- **Phil's projects:** `autonomy/projects.py` — tools `list_phil_projects()` and `read_phil_project(repo, path)` (README / `tree` / file) over github.com/philMarcus (public repos; `INCLUDE_PRIVATE` opt-in list; token from `GITHUB_TOKEN` or `gh auth token`). README + top-level docs (CLAUDE.md/PLAN.md/…) chunked into the index as kind `phil_project` (80 chunks): `… backfill ANALOG_I --skip-artifacts --projects`. Zoomer is the public repo `powers-of-zen`.
+- Production index after this: 2,871 documents. `tests/`: 56 cases.
+
+### Open items after v19.2.0
 - API deployed to Fly 2026-10-05 (`flyctl.exe` lives at `C:\Users\Phil\.fly\bin\`; from WSL: `/mnt/c/Users/Phil/.fly/bin/flyctl.exe deploy`). Prod backfill done; the per-cycle sync keeps it current. After `newrun`, run the backfill once more with `--memory` for the archived file (idempotent).
-- `conscious_thinking_level` control for Gemini 3.x; Instagram account for daily images (via Zoomer's CDP driver); Anthropic model IDs in `llm/anthropic.py` are pre-Claude-5 (pool weight 0).
+- Migrate the Gemini backend from `generateContent` to the Interactions API (Google's recommended path; needs the tool loop, history and caching re-done). Instagram account for daily images (via Zoomer's CDP driver). Anthropic model IDs in `llm/anthropic.py` are pre-Claude-5 (pool weight 0).
 
 ## Key Architecture Decisions
 

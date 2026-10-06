@@ -348,6 +348,13 @@ def build_default_registry(model_registry, blacklist_str: str = "") -> ControlRe
                 "Conscious LLM temperature", "llm", min_val=0.0, max_val=2.0),
         Control("subconscious_temperature", "float", 0.3,
                 "Daemon LLM temperature", "llm", min_val=0.0, max_val=2.0),
+        Control("conscious_thinking_level", "str", "high",
+                "How hard you reason before answering (Gemini 3.x thinking_level). "
+                "'default' lets the model choose. Thinking tokens are billed as output.",
+                "llm", choices=["default", "minimal", "low", "medium", "high"]),
+        Control("seeker_thinking_level", "str", "low",
+                "Thinking level for the seeker's search calls", "llm",
+                choices=["default", "minimal", "low", "medium", "high"], audience="operator"),
 
         # --- Cost ---
         Control("daily_budget_usd", "float", 2.0,

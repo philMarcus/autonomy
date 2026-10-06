@@ -7,6 +7,7 @@ Gemini 2.5 Flash first-message empty-response bug).
 
 import json
 import logging
+import re
 import time
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -71,6 +72,56 @@ class GeminiBudget:
 BUDGET = GeminiBudget()
 
 
+# ----------------------------------------------------------------------
+# Per-model parameter policy (Google AI Studio notice, 2026-10-06):
+#  * thinking_budget is deprecated — Gemini 3.x takes thinking_level
+#    ("minimal" | "low" | "medium" | "high"; omit = the model's default).
+#  * Sampling parameters (temperature / top_p / top_k) have been ignored
+#    since Gemini 3.6 Flash and will be REJECTED by upcoming models, so they
+#    are only sent to models that still honour them.
+# ----------------------------------------------------------------------
+THINKING_LEVELS = ("minimal", "low", "medium", "high")
+
+
+def _gemini_version(model_id: str):
+    m = re.match(r"gemini-(\d+)(?:\.(\d+))?", model_id or "")
+    if not m:
+        return None
+    return int(m.group(1)), int(m.group(2) or 0)
+
+
+def model_supports_sampling(model_id: str) -> bool:
+    """True when the model still applies temperature/top_p/top_k."""
+    v = _gemini_version(model_id)
+    if v is None:
+        # Un-versioned aliases (gemini-pro-latest, gemini-flash-latest) track the newest models.
+        return "latest" not in (model_id or "")
+    return v < (3, 6)
+
+
+def model_supports_thinking_level(model_id: str) -> bool:
+    v = _gemini_version(model_id)
+    return v is not None and v >= (3, 0)
+
+
+def normalize_thinking_level(level) -> Optional[str]:
+    """'default'/''/None → None (omit the parameter); otherwise one of THINKING_LEVELS."""
+    level = str(level or "").strip().lower()
+    return level if level in THINKING_LEVELS else None
+
+
+def sampling_and_thinking_kwargs(model_id: str, temperature: Optional[float],
+                                 thinking_level: Optional[str]) -> Dict[str, Any]:
+    """GenerateContentConfig kwargs that this model accepts."""
+    kw: Dict[str, Any] = {}
+    if temperature is not None and model_supports_sampling(model_id):
+        kw["temperature"] = temperature
+    level = normalize_thinking_level(thinking_level)
+    if level and model_supports_thinking_level(model_id):
+        kw["thinking_config"] = types.ThinkingConfig(thinking_level=level)
+    return kw
+
+
 # ============================================================
 # Gemini ChatSession — stateless generate_content with history
 # ============================================================
@@ -78,14 +129,20 @@ class GeminiChatSession(ChatSession):
     def __init__(self, client: genai.Client, model_name: str,
                  system_instruction: str, temperature: float,
                  max_output_tokens: int,
-                 tools: Optional[list] = None):
+                 tools: Optional[list] = None,
+                 thinking_level: Optional[str] = None):
         self._client = client
         self.model_name = model_name
         self._system_instruction = system_instruction
         self._temperature = temperature
+        self._thinking_level = normalize_thinking_level(thinking_level)
         self._max_output_tokens = max_output_tokens
         self._tools = tools
         self._history: List[types.Content] = []
+
+    def _sampling_kwargs(self) -> Dict[str, Any]:
+        """temperature / thinking_config, filtered by what this model accepts."""
+        return sampling_and_thinking_kwargs(self.model_name, self._temperature, self._thinking_level)
 
     def send_message(self, prompt: str, json_mode: bool = False) -> str:
         prompt_chars = len(prompt or "")
@@ -108,7 +165,7 @@ class GeminiChatSession(ChatSession):
         ]
 
         config_kwargs: Dict[str, Any] = {
-            "temperature": self._temperature,
+            **self._sampling_kwargs(),
             "max_output_tokens": self._max_output_tokens,
         }
         if self._system_instruction:
@@ -286,7 +343,7 @@ class GeminiChatSession(ChatSession):
         ]
 
         config_kwargs: Dict[str, Any] = {
-            "temperature": self._temperature,
+            **self._sampling_kwargs(),
             "max_output_tokens": self._max_output_tokens,
             "tools": combined_tools,
         }
@@ -430,7 +487,7 @@ class GeminiChatSession(ChatSession):
             log.warning("send_message_with_tools: exhausted %d rounds, forcing final response", max_rounds)
             try:
                 _final_config = {
-                    "temperature": self._temperature,
+                    **self._sampling_kwargs(),
                     "max_output_tokens": self._max_output_tokens,
                 }
                 if self._system_instruction:
@@ -589,6 +646,7 @@ class GeminiBackend(ModelBackend):
         temperature: float = 0.7,
         max_output_tokens: int = 4096,
         tools: Optional[list] = None,
+        thinking_level: Optional[str] = None,
         **kwargs,
     ) -> GeminiChatSession:
         return GeminiChatSession(
@@ -598,6 +656,7 @@ class GeminiBackend(ModelBackend):
             temperature=temperature,
             max_output_tokens=max_output_tokens,
             tools=tools,
+            thinking_level=thinking_level,
         )
 
     def generate(
@@ -606,14 +665,16 @@ class GeminiBackend(ModelBackend):
         prompt: str,
         temperature: float = 0.7,
         max_output_tokens: int = 1024,
+        thinking_level: Optional[str] = None,
+        **kwargs,
     ) -> LLMResponse:
         t0 = time.time()
         response = self._client.models.generate_content(
             model=model_id,
             contents=prompt,
             config=types.GenerateContentConfig(
-                temperature=temperature,
                 max_output_tokens=max_output_tokens,
+                **sampling_and_thinking_kwargs(model_id, temperature, thinking_level),
             ),
         )
         latency_ms = int((time.time() - t0) * 1000)

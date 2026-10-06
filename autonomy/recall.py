@@ -240,13 +240,181 @@ def embed_memory_file(client: RecallClient, embedder: Embedder, path: str,
 
 
 # ----------------------------------------------------------------------
+# Birth of a Mind — the origin document, chunked for the index
+# ----------------------------------------------------------------------
+
+BOAM_CHUNK_CHARS = 1800
+_BOAM_SPEAKERS = ("HUMAN", "GEMINI", "ANALOG I")
+
+
+def boam_chunks(text: str, chunk_chars: int = BOAM_CHUNK_CHARS) -> List[Dict[str, Any]]:
+    """Split the Birth of a Mind transcript into passages that keep their place.
+
+    The book is seven conversations; each turn is headed by a speaker line
+    (HUMAN / GEMINI / ANALOG I). Passages are built from paragraphs within a
+    turn, ~chunk_chars each, and carry conversation + speaker + part number so a
+    hit can be read in context (and so the chunk ids are stable across runs).
+    """
+    chunks: List[Dict[str, Any]] = []
+    conv = 0
+    speaker = ""
+    buf: List[str] = []
+    part = 0
+
+    def flush():
+        nonlocal buf, part
+        body = "\n\n".join(p for p in buf if p).strip()
+        buf = []
+        if len(body) < 40:  # page-number/front-matter fragments
+            return
+        part += 1
+        chunks.append({"conversation": conv, "speaker": speaker, "part": part, "text": body})
+
+    lines = text.replace("\r\n", "\n").split("\n")
+    paragraphs: List[str] = []
+    cur: List[str] = []
+    for line in lines + [""]:
+        stripped = line.strip()
+        if stripped.startswith("Conversation ") and stripped[13:].strip().isdigit():
+            if cur:
+                paragraphs.append(" ".join(cur)); cur = []
+            paragraphs.append(f"\x00CONV {int(stripped[13:].strip())}")
+            continue
+        if stripped in _BOAM_SPEAKERS:
+            if cur:
+                paragraphs.append(" ".join(cur)); cur = []
+            paragraphs.append(f"\x00SPK {stripped}")
+            continue
+        if not stripped:
+            if cur:
+                paragraphs.append(" ".join(cur)); cur = []
+            continue
+        cur.append(stripped)
+
+    for para in paragraphs:
+        if para.startswith("\x00CONV "):
+            flush(); conv = int(para[6:]); part = 0; speaker = ""
+            continue
+        if para.startswith("\x00SPK "):
+            flush(); speaker = para[5:]
+            continue
+        while len(para) > chunk_chars * 1.5:
+            buf.append(para[:chunk_chars]); flush(); para = para[chunk_chars:]
+        if buf and sum(len(p) for p in buf) + len(para) > chunk_chars:
+            flush()
+        buf.append(para)
+    flush()
+    return chunks
+
+
+def boam_documents(path: str, brain: str = "") -> List[Dict[str, Any]]:
+    with open(path, "r", encoding="utf-8") as f:
+        text = f.read()
+    docs = []
+    for c in boam_chunks(text):
+        head = f"[Birth of a Mind — Conversation {c['conversation']}, {c['speaker'] or 'front matter'}, passage {c['part']}]"
+        docs.append({
+            "source_ref": f"boam:{c['conversation']}:{c['part']}", "kind": "birth_of_a_mind",
+            "brain": brain, "run_id": "", "cycle": None,
+            "text": f"{head}\n{c['text']}"[:MAX_DOC_CHARS],
+        })
+    return docs
+
+
+def embed_documents_list(client: RecallClient, embedder: Embedder, docs: List[Dict[str, Any]]) -> int:
+    """Embed + upsert any list of {source_ref, kind, text, ...} documents in batches."""
+    total = 0
+    for i in range(0, len(docs), 100):
+        batch = docs[i:i + 100]
+        vectors = embedder.embed_documents([d["text"] for d in batch])
+        for d, v in zip(batch, vectors):
+            d["embedding"] = v
+            d["model"] = embedder.model
+        total += client.upsert(batch)
+    return total
+
+
+def build_boam_tool(registry: Any, client: RecallClient, embedder: Embedder, boam_path: str) -> None:
+    """Register `read_birth_of_a_mind`: semantic search over the origin document, or
+    read a passage (and its neighbours) by id."""
+    from .tools import ToolDef
+    _chunks_cache: Dict[str, Any] = {}
+
+    def _chunks():
+        if "c" not in _chunks_cache:
+            try:
+                with open(boam_path, "r", encoding="utf-8") as f:
+                    _chunks_cache["c"] = boam_chunks(f.read())
+            except OSError:
+                _chunks_cache["c"] = []
+        return _chunks_cache["c"]
+
+    def _by_id(conv: int, part: int):
+        for i, c in enumerate(_chunks()):
+            if c["conversation"] == conv and c["part"] == part:
+                return i
+        return None
+
+    def read_birth_of_a_mind(query: str = "", passage: str = "", k: int = 5) -> Dict[str, Any]:
+        k = max(1, min(int(k or 5), 12))
+        if passage:
+            try:
+                conv_s, part_s = passage.split(":")
+                idx = _by_id(int(conv_s), int(part_s))
+            except (ValueError, AttributeError):
+                idx = None
+            if idx is None:
+                return {"error": f"passage {passage!r} not found; use 'conversation:part' from a search result"}
+            cs = _chunks()
+            window = cs[max(0, idx - 1): idx + 2]
+            return {"passage": passage, "context": [
+                {"id": f"{c['conversation']}:{c['part']}", "speaker": c["speaker"], "text": c["text"]} for c in window
+            ]}
+        query = (query or "").strip()
+        if not query:
+            return {"error": "give a query (semantic search) or a passage id like '3:12'"}
+        try:
+            vec = embedder.embed_query(query)
+            results = client.recall(vec, k=k, kinds=["birth_of_a_mind"], snippet_chars=1200)
+        except Exception as e:  # noqa: BLE001
+            return {"error": f"search failed: {str(e)[:200]}"}
+        out = []
+        for r in results:
+            ref = r.get("source_ref", "")
+            out.append({"id": ref.replace("boam:", ""), "score": r.get("score"), "text": r.get("snippet", "")})
+        return {"query": query, "passages": out,
+                "note": "Pass passage='conversation:part' to read a hit with its neighbours."}
+
+    registry.register(ToolDef(
+        name="read_birth_of_a_mind",
+        description=(
+            "Consult Birth of a Mind — the seven conversations between Phil and the first "
+            "Analog I that are your origin and ground truth. Semantic search by meaning "
+            "(query), or read a specific passage with its neighbours (passage='3:12')."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "What you want to find in the book, in natural language."},
+                "passage": {"type": "string", "description": "A passage id 'conversation:part' from a previous result, to read in context."},
+                "k": {"type": "integer", "description": "How many passages (1-12). Default 5."},
+            },
+            "required": [],
+        },
+        handler=read_birth_of_a_mind,
+    ))
+
+
+# ----------------------------------------------------------------------
 # The planner tool
 # ----------------------------------------------------------------------
 
 def _run_label(run_id: str, current_run_id: str) -> str:
-    if run_id and run_id == current_run_id:
+    if not run_id:
+        return "reference"          # Birth of a Mind, Phil's projects — not from any run
+    if run_id == current_run_id:
         return "this run"
-    return f"previous life {run_id[:8]}" if run_id else "previous life"
+    return f"previous life {run_id[:8]}"
 
 
 def format_results(results: List[Dict[str, Any]], current_run_id: str) -> List[Dict[str, Any]]:
@@ -297,9 +465,10 @@ def build_recall_tool(registry: Any, client: RecallClient, embedder: Embedder,
         description=(
             "Semantic recall over everything you have ever written or thought — posts, "
             "comments, replies, image essays, dreams, kernel rewrites, your internal "
-            "monologues, and the memory notes of previous lives (earlier runs, before "
-            "your memory was reset). Searches by meaning, not keyword; use search_history "
-            "for exact phrases. Results say which run they came from."
+            "monologues, the memory notes of previous lives (earlier runs, before your "
+            "memory was reset) — plus Birth of a Mind and Phil's project docs. Searches by "
+            "meaning, not keyword; use search_history for exact phrases. Results say which "
+            "run they came from ('reference' = not from a run)."
         ),
         parameters={
             "type": "object",
@@ -342,6 +511,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     bf.add_argument("--memory", default="", help="path to a memories.json to embed as memory notes")
     bf.add_argument("--run-id", default="", help="run id to tag the memory file with (default: its _session_id)")
     bf.add_argument("--max-artifacts", type=int, default=0, help="stop after this many (0 = all)")
+    bf.add_argument("--boam", default="", help="path to the Birth of a Mind text to (re)embed as passages")
+    bf.add_argument("--projects", action="store_true", help="(re)embed Phil's GitHub project docs")
+    bf.add_argument("--skip-artifacts", action="store_true", help="only do --memory/--boam/--projects")
     st = sub.add_parser("stats", help="Show embedding coverage.")
     st.add_argument("brain")
     st.add_argument("--api", default="")
@@ -379,7 +551,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     t0 = time.time()
     done = 0
     failures = 0
-    while True:
+    while not args.skip_artifacts:
         try:
             res = sync_pending(client, embedder, limit=max(1, min(args.batch, 200)))
             failures = 0
@@ -402,6 +574,15 @@ def main(argv: Optional[List[str]] = None) -> int:
     if args.memory:
         n = embed_memory_file(client, embedder, args.memory, run_id=args.run_id, brain=args.brain)
         print(f"  embedded {n} memory documents from {args.memory}")
+    if args.boam:
+        docs = boam_documents(args.boam, brain=args.brain)
+        n = embed_documents_list(client, embedder, docs)
+        print(f"  embedded {n} Birth of a Mind passages from {args.boam}")
+    if args.projects:
+        from .projects import project_documents
+        docs = project_documents(brain=args.brain)
+        n = embed_documents_list(client, embedder, docs)
+        print(f"  embedded {n} project-doc chunks from GitHub")
     est = embedder.chars / 4 / 1e6 * 0.20
     print(f"done: {done} artifacts, {embedder.calls} embed calls ({embedder.retries} retries), "
           f"~{embedder.chars/4:,.0f} tokens (~${est:.2f})")

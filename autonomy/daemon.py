@@ -1516,12 +1516,17 @@ class SubconsciousDaemon:
         )
 
         try:
+            try:
+                _seek_thinking = self._ctrl.get("seeker_thinking_level")
+            except KeyError:
+                _seek_thinking = None
             chat = self._registry.create_chat(
                 model_id=model_id,
                 system_instruction=self._kernel,
                 temperature=temp,
                 max_output_tokens=max_tokens,
                 tools=self._search_tools,
+                thinking_level=_seek_thinking,
             )
             # NO json_mode — incompatible with tools
             _t0 = time.time()

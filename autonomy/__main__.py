@@ -39,7 +39,7 @@ from .utils import (
 )
 from .buffer import Draft
 from .llm import ModelRegistry, DailyBudget
-from .llm.gemini import GeminiBackend
+from .llm.gemini import GeminiBackend, model_supports_sampling
 from .platforms.moltbook import MoltbookClient
 from .challenges.math_verification import MathVerificationSolver
 from .espn import get_espn_context
@@ -1304,12 +1304,17 @@ def main():
         # ("built-in tools and function calling are not compatible").
         # This also means non-Gemini models get search for free.
         _chat_tools = None if tool_registry else search_tools
+        _conscious_thinking = ctrl.get("conscious_thinking_level")
+        if _conscious_thinking in (None, "", "default"):
+            _conscious_thinking = None
+        _sampling_applied = model_supports_sampling(conscious_model)
         chat = registry.create_chat(
             model_id=conscious_model,
             system_instruction=kernel,
             max_output_tokens=32768,
             temperature=cycle_temperature,
             tools=_chat_tools,
+            thinking_level=_conscious_thinking,
         )
         chat._telemetry = telemetry
         chat._brain_name = brain_name
@@ -1645,6 +1650,7 @@ def main():
             trajectory_votes=analog_trajectory,
             cycle_temperature=cycle_temperature if analog_home_url else None,
             default_temperature=agent_default_temperature,
+            sampling_applied=_sampling_applied,
             allow_default_temp=bool(args.enable_default_temp),
             cooldown_status=cooldown_status_text(state, ctrl=ctrl),
             controls_block=ctrl.to_llm_block(),
@@ -1743,6 +1749,7 @@ def main():
                                 temperature=cycle_temperature,
                                 max_output_tokens=32768,
                                 tools=_chat_tools,
+                                thinking_level=_conscious_thinking,
                             )
                             plan = plan_next_action(paid_chat, prompt, telemetry=telemetry, brain_name=brain_name, budget=budget, tool_registry=tool_registry, max_rounds=int(ctrl.get("tool_max_rounds") or 12))
                             chat = paid_chat
@@ -1776,6 +1783,7 @@ def main():
                                     temperature=cycle_temperature,
                                     max_output_tokens=32768,
                                     tools=_chat_tools,
+                                    thinking_level=_conscious_thinking,
                                 )
                                 plan = plan_next_action(chat, prompt, telemetry=telemetry, brain_name=brain_name, budget=budget, tool_registry=tool_registry, max_rounds=int(ctrl.get("tool_max_rounds") or 12))
                                 conscious_model = _candidate  # update to actual model used
