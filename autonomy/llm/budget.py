@@ -169,17 +169,19 @@ class DailyBudget:
                 "spend_by_model": dict(self._spend_by_model),
             }
 
-    def load_from_state(self, saved: Dict[str, Any]) -> None:
-        """Restore spend from saved state, applying date-boundary rules.
+    def load_from_state(self, saved: Dict[str, Any], reset: bool = False) -> None:
+        """Restore today's spend from saved state.
 
-        Rules:
-          - If saved date == today (UTC): restore spend exactly.
-          - If saved date is from a prior day: PRORATE — give back only the
-            budget fraction that matches hours elapsed in today's UTC day.
-            This prevents a restart late in the day from granting a full
-            24h budget. Recorded as a synthetic __prorate__ line item so
-            the starting `spent` correctly reflects "already consumed".
-          - If no saved date at all: prorate from empty.
+          - saved date == today (UTC): restore the per-model spend exactly, so a
+            restart mid-day resumes with the right amount already spent.
+          - otherwise (prior day, or nothing saved): start at $0. The daily
+            limit is a cap, not an entitlement, so a late-day restart simply
+            has the whole cap available for what is left of the day.
+          - reset=True (--reset-budget): start at $0 regardless.
+
+        Earlier versions wrote a synthetic "__prorate__" line item that charged
+        the budget for hours of the UTC day that had already passed; it is
+        dropped on load if present.
         """
         import datetime
         today = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d")
@@ -187,19 +189,15 @@ class DailyBudget:
         with self._lock:
             self._spend_date = today
             self._spend_by_model.clear()
-            if saved_date == today:
-                for k, v in (saved or {}).get("spend_by_model", {}).items():
-                    try:
-                        self._spend_by_model[k] = float(v)
-                    except (TypeError, ValueError):
-                        pass
-            else:
-                # Prorate: assume budget was used uniformly up to "now".
-                now = datetime.datetime.now(datetime.timezone.utc)
-                hours_elapsed = now.hour + now.minute / 60.0
-                prorated_spent = self.daily_limit_usd * (hours_elapsed / 24.0)
-                if prorated_spent > 0:
-                    self._spend_by_model["__prorate__"] = prorated_spent
+            if reset or saved_date != today:
+                return
+            for k, v in (saved or {}).get("spend_by_model", {}).items():
+                if k == "__prorate__":
+                    continue
+                try:
+                    self._spend_by_model[k] = float(v)
+                except (TypeError, ValueError):
+                    pass
 
     def spend_summary_for_planning(self, registry=None) -> str:
         """Extended budget summary with cost projections for budget planning.

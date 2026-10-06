@@ -29,3 +29,21 @@ def test_record_usage_uses_cached_tokens():
                                                    cached_tokens=270_000, model_id="gemini-3.8-flash"))
     spent = 1.0 - b.remaining_usd()
     assert abs(spent - B.estimate_cost("gemini-3.8-flash", 300_000, 5_000, 270_000)) < 1e-6
+
+
+def test_load_from_state_rules():
+    import datetime
+    today = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d")
+    b = B.DailyBudget(daily_limit_usd=1.0)
+    # Same day: exact restore, prorate line item dropped.
+    b.load_from_state({"date": today, "spend_by_model": {"__prorate__": 0.95, "gemini-3.8-flash": 0.24}})
+    assert abs(b.remaining_usd() - 0.76) < 1e-9
+    # Prior day: start at zero (no prorating).
+    b.load_from_state({"date": "2026-01-01", "spend_by_model": {"gemini-3.8-flash": 0.9}})
+    assert b.remaining_usd() == 1.0
+    # Nothing saved: zero.
+    b.load_from_state({})
+    assert b.remaining_usd() == 1.0
+    # Explicit reset ignores same-day spend.
+    b.load_from_state({"date": today, "spend_by_model": {"gemini-3.8-flash": 0.9}}, reset=True)
+    assert b.remaining_usd() == 1.0

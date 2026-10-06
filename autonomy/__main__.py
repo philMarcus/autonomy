@@ -427,6 +427,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
                     help="Minutes between conscious cycles (overrides control).")
     ap.add_argument("--post-interval", type=int, default=None,
                     help="Minutes between posts (overrides control).")
+    ap.add_argument("--reset-budget", action="store_true",
+                    help="Start today's spend at $0, ignoring the budget state saved in memories.json.")
     ap.add_argument("--reset-post-window", action="store_true",
                     help="Clear the post cooldown timer on startup.")
 
@@ -795,18 +797,18 @@ def main():
                            read_only=args.read_only)
     state = store.load_state()
 
-    # Restore budget spend across restarts. Same UTC day: exact restore.
-    # Prior day or no prior state: prorate (grant only the fraction of budget
-    # that matches hours remaining in today's UTC day).
+    # Restore today's budget spend across restarts (same UTC day only; a prior
+    # day or nothing saved starts at $0 — the limit is a cap, not an entitlement).
     _saved_budget = state.get("_budget_state") or {}
-    budget.load_from_state(_saved_budget)
-    if _saved_budget.get("date"):
-        emit_status("[BUDGET]",
-                    f"Restored from state: ${budget.spent_today_usd():.4f} spent of ${budget.daily_limit_usd:.2f}",
-                    color=Fore.GREEN, cycle=0)
+    budget.load_from_state(_saved_budget, reset=bool(args.reset_budget))
+    if args.reset_budget:
+        emit_status("[BUDGET]", f"Reset by --reset-budget: $0.00 spent of ${budget.daily_limit_usd:.2f}",
+                    color=Fore.YELLOW, cycle=0)
+        state["_budget_state"] = budget.to_state_dict()
+        store.save_state(state)
     else:
         emit_status("[BUDGET]",
-                    f"Prorated for UTC day: ${budget.spent_today_usd():.4f} already consumed, ${budget.remaining_usd():.4f} remaining",
+                    f"Today so far: ${budget.spent_today_usd():.4f} spent of ${budget.daily_limit_usd:.2f}",
                     color=Fore.GREEN, cycle=0)
 
     # Migrate legacy cooldown format (next_post_time / next_comment_time → state["cooldowns"])
