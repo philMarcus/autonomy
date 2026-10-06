@@ -781,7 +781,10 @@ Analog_I was dormant Jun–Oct 2026 while Phil built Zoomer (Powers of Zen). v19
 - **Phil's projects:** `autonomy/projects.py` — tools `list_phil_projects()` and `read_phil_project(repo, path)` (README / `tree` / file) over github.com/philMarcus (public repos; `INCLUDE_PRIVATE` opt-in list; token from `GITHUB_TOKEN` or `gh auth token`). README + top-level docs (CLAUDE.md/PLAN.md/…) chunked into the index as kind `phil_project` (80 chunks): `… backfill ANALOG_I --skip-artifacts --projects`. Zoomer is the public repo `powers-of-zen`.
 - Production index after this: 2,871 documents. `tests/`: 56 cases.
 
-### Open items after v19.2.0
+### v19.2.1 — `--read-only` now enforced in the store
+- `--read-only` only blocked write *actions* (`actions.py`) and live pushes; `store.set_trajectory` / `set_tagline` / `set_default_temperature` / `consume_seeds` / `write_artifact` were not gated, and a read-only smoke test replaced the live vote labels (restored to "Generative Risk / Architectural Mutation / The Strange Loop"). `LocalFileStore(read_only=True)` now no-ops every Analog Home write with a `[READ-ONLY] skipped …` line; the startup daemon-ticks DELETE is skipped too. `tests/test_store_readonly.py`.
+
+### Open items after v19.2.1
 - API deployed to Fly 2026-10-05 (`flyctl.exe` lives at `C:\Users\Phil\.fly\bin\`; from WSL: `/mnt/c/Users/Phil/.fly/bin/flyctl.exe deploy`). Prod backfill done; the per-cycle sync keeps it current. After `newrun`, run the backfill once more with `--memory` for the archived file (idempotent).
 - Migrate the Gemini backend from `generateContent` to the Interactions API (Google's recommended path; needs the tool loop, history and caching re-done). Instagram account for daily images (via Zoomer's CDP driver). Anthropic model IDs in `llm/anthropic.py` are pre-Claude-5 (pool weight 0).
 

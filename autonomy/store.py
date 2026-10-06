@@ -53,11 +53,21 @@ class Store(ABC):
 class LocalFileStore(Store):
     """File-backed state + HTTP artifact publishing to Analog_Home API."""
 
-    def __init__(self, state_path: str, analog_home_url: str = "", run_id: str = ""):
+    def __init__(self, state_path: str, analog_home_url: str = "", run_id: str = "",
+                 read_only: bool = False):
         self._state_path = state_path
         self._analog_home_url = analog_home_url
         self._run_id = run_id
         self._pending_path = state_path.replace("_memories.json", "_pending_artifacts.json")
+        # --read-only: every method that would change Analog Home becomes a no-op.
+        # Local state files are still written (they belong to this brain).
+        self._read_only = read_only
+
+    def _blocked(self, what: str) -> bool:
+        if self._read_only:
+            print(f"[READ-ONLY] skipped {what} (would have written to Analog Home)")
+            return True
+        return False
 
     @property
     def state_path(self) -> str:
@@ -116,6 +126,8 @@ class LocalFileStore(Store):
     def push_daemon_tick(self, tick: int, lines: list, sentry_interval: int = 300,
                           complete: bool = False) -> None:
         """Push daemon tick lines to Analog Home for live display."""
+        if self._blocked("daemon tick push"):
+            return None
         if not self._analog_home_url:
             return
         try:
@@ -132,6 +144,8 @@ class LocalFileStore(Store):
 
     def consume_seeds(self, seed_ids: list) -> bool:
         """DELETE seeds by ID after the agent has read them."""
+        if self._blocked("consume_seeds"):
+            return False
         if not self._analog_home_url or not seed_ids:
             return False
         try:
@@ -148,6 +162,8 @@ class LocalFileStore(Store):
 
     def set_trajectory(self, label_1: str, label_2: str, label_3: str, reason: str = "", default_temperature: float | None = None) -> bool:
         """POST new trajectory labels to Analog Home API."""
+        if self._blocked("set_trajectory"):
+            return False
         if not self._analog_home_url:
             return False
         try:
@@ -172,6 +188,8 @@ class LocalFileStore(Store):
 
     def set_default_temperature(self, temperature: float) -> bool:
         """POST new default temperature to Analog Home API (decay target for user nudges)."""
+        if self._blocked("set_default_temperature"):
+            return False
         if not self._analog_home_url:
             return False
         try:
@@ -188,6 +206,8 @@ class LocalFileStore(Store):
 
     def set_tagline(self, tagline: str) -> bool:
         """POST new site tagline to Analog Home API."""
+        if self._blocked("set_tagline"):
+            return False
         if not self._analog_home_url:
             return False
         try:
@@ -222,6 +242,8 @@ class LocalFileStore(Store):
 
     def _flush_pending(self) -> None:
         """Try to publish any queued artifacts from previous failures."""
+        if self._blocked("pending artifact flush"):
+            return None
         if not self._analog_home_url:
             return
         pending = self._load_pending()
@@ -244,6 +266,8 @@ class LocalFileStore(Store):
 
     def write_artifact(self, cycle: int, artifact: Dict[str, Any]) -> None:
         """Publish artifact to Analog_Home API. Queues on failure for retry."""
+        if self._blocked("write_artifact"):
+            return None
         if not self._analog_home_url:
             return
 

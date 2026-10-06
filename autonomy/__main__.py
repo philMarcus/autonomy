@@ -791,7 +791,8 @@ def main():
             kernel_path = alt
 
     analog_home_url = os.environ.get(f"{prefix}_ANALOG_HOME_API_URL", "").strip() or os.environ.get("ANALOG_HOME_API_URL", "").strip()
-    store = LocalFileStore(state_path, analog_home_url=analog_home_url, run_id=run_id)
+    store = LocalFileStore(state_path, analog_home_url=analog_home_url, run_id=run_id,
+                           read_only=args.read_only)
     state = store.load_state()
 
     # Restore budget spend across restarts. Same UTC day: exact restore.
@@ -877,7 +878,7 @@ def main():
     # same-session case where old tick N rows would otherwise accumulate lines
     # from this fresh restart). Must run BEFORE any emit_status fires so this
     # session's own pushes aren't wiped.
-    if analog_home_url:
+    if analog_home_url and not args.read_only:
         try:
             import requests as _req_mod
             from urllib.parse import urljoin as _urljoin
