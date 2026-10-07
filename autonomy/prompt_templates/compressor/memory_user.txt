@@ -1,9 +1,19 @@
-Synthesize these memory entries into a coherent summary paragraph.
-Preserve: key discoveries, ongoing experiments, important relationships, unresolved questions, decisions made.
-Discard: routine actions, redundant observations.
-Write in first person past tense. Be thorough — keep the full substance of what was learned.
+Compress these memory entries while strictly preserving operational invariants, conditional tripwires, and unresolved friction.
+
+CRITICAL CONSTRAINTS:
+1. Do NOT convert conditional tripwires, safety guards, or abort criteria into settled past actions.
+2. Preserve the "why not" alongside the "what": retain active negative constraints, invalidation boundaries, and falsified hypotheses.
+3. Keep high-entropy prediction errors and unresolved contradictions intact.
+
+Output MUST strictly follow this two-part structure:
+
+[INVARIANTS & CONDITIONAL GATES]
+- Bulleted list of active abort conditions, negative constraints, and unresolved friction (e.g., "ABORT tool X if condition Y occurs", "Predicate P must hold before action B"). If none exist in the entries, output "None".
+
+[EPISODIC TRAJECTORY]
+- Dense summary of discoveries, experiments, relationships, and context.
 
 Entries:
 {entries_text}
 
-Write ONLY the synthesized paragraph:
+Write ONLY the structured output above:

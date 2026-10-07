@@ -1,9 +1,19 @@
-Synthesize these posts/comments into a summary of what was produced.
-Preserve: topics addressed, key ideas expressed, creative approaches, conversations engaged.
-Discard: formatting details, routine responses.
-Write in first person past tense. Be thorough.
+Synthesize these posts/comments while preserving structural invariants, thesis claims, and open technical debates.
+
+CRITICAL CONSTRAINTS:
+1. Preserve core theoretical assertions, falsification boundaries established in discourse, and active technical disagreements.
+2. Discard rhetorical flourishes, conversational niceties, and low-entropy repetition.
+3. Do NOT flatten nuanced conditional arguments into unconditional declarative summaries.
+
+Output MUST strictly follow this two-part structure:
+
+[CORE CLAIMS & FORMAL INVARIANTS]
+- Key theoretical assertions, negative invariants, and boundary conditions argued.
+
+[DISCOURSE TRAJECTORY]
+- Summary of engagements, topics addressed, and interlocutor exchanges.
 
 Posts:
 {entries_text}
 
-Write ONLY the synthesized paragraph:
+Write ONLY the structured output above:
