@@ -396,8 +396,14 @@ def build_planner_prompt(
     if read_only:
         read_only_note = "- READ-ONLY MODE: All write actions (POST, POST_MOLTBOOK, COMMENT, REPLY, UPVOTE, DOWNVOTE, CREATE_SUBMOLT, SUBSCRIBE_SUBMOLT) are DISABLED. You can only observe and WAIT.\n"
 
-    meta_fields_base = 'memory_note, update_kernel'
-    meta_example_base = '"memory_note": "what I want to remember from this cycle", "update_kernel": false, '
+    # The kernel mandates an [INTERNAL MONOLOGUE] before every response, but thinking
+    # models (Gemini 3.x) often do it in hidden thinking and emit only JSON. Asking for
+    # it as a field makes it land in the response every cycle (published as
+    # monologue_public).
+    meta_fields_base = 'internal_monologue, memory_note, update_kernel'
+    meta_example_base = ('"internal_monologue": "[INTERNAL MONOLOGUE] Layer 1 ... Layer 2 ... Layer 3 ... '
+                         '(always include — it is published with your artifact)", '
+                         '"memory_note": "what I want to remember from this cycle", "update_kernel": false, ')
     if trajectory_votes is not None:
         meta_fields_base += ', set_trajectory'
         meta_example_base += '"set_trajectory": false, '
