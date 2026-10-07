@@ -432,7 +432,7 @@ class GeminiChatSession(ChatSession):
                         system_instruction=self._system_instruction or "",
                         contents=base_contents,
                         tools=combined_tools,
-                        ttl="120s",
+                        ttl="900s",  # a 12-round loop with slow tools can exceed 2 min
                     )
                     _cache = self._client.caches.create(
                         model=self.model_name,
@@ -490,12 +490,22 @@ class GeminiChatSession(ChatSession):
             # the model to produce a text response instead of another tool call.
             log.warning("send_message_with_tools: exhausted %d rounds, forcing final response", max_rounds)
             try:
-                _final_config = {
-                    **self._sampling_kwargs(),
-                    "max_output_tokens": self._max_output_tokens,
-                }
-                if self._system_instruction:
-                    _final_config["system_instruction"] = self._system_instruction
+                # Reuse the loop's config: when the base prompt was moved into the
+                # context cache, `contents` holds only the tool turns, so dropping
+                # cached_content here would send the model no prompt at all (cycle 5
+                # of the v19 run returned empty this way). Tools stay declared (the
+                # history contains function calls) but calling is switched off.
+                _no_calls = types.ToolConfig(
+                    function_calling_config=types.FunctionCallingConfig(mode="NONE"))
+                if _cache_name:
+                    # Cached requests can't carry tools/tool_config/system_instruction,
+                    # so send the full context uncached with function calling disabled.
+                    _final_config = dict(_base_config_kwargs)
+                    _final_config["tool_config"] = _no_calls
+                    contents = list(base_contents) + contents
+                else:
+                    _final_config = dict(config_kwargs)
+                    _final_config["tool_config"] = _no_calls
                 contents.append(types.Content(role="user", parts=[
                     types.Part(text="You have used all available tool rounds. Produce your final JSON action now based on what you've gathered so far.")
                 ]))
@@ -504,8 +514,22 @@ class GeminiChatSession(ChatSession):
                     contents=contents,
                     config=types.GenerateContentConfig(**_final_config),
                 )
-            except Exception:
-                pass  # fall through to text extraction with whatever we have
+                # This response was never read before v19.2.4: its text and tokens
+                # were dropped, so every round-exhausted cycle planned nothing.
+                _final_text = self._extract_text(resp)
+                if _final_text and _final_text.strip():
+                    accumulated_text.append(_final_text)
+                try:
+                    usage = resp.usage_metadata
+                    total_input_tokens += getattr(usage, "prompt_token_count", 0) or 0
+                    total_output_tokens += ((getattr(usage, "candidates_token_count", 0) or 0)
+                                            + (getattr(usage, "thoughts_token_count", 0) or 0))
+                    total_cached_tokens += getattr(usage, "cached_content_token_count", 0) or 0
+                except (AttributeError, TypeError):
+                    pass
+            except Exception as _final_err:
+                log.warning("send_message_with_tools: forced final response failed: %s",
+                            str(_final_err)[:300])
 
         # --- Post-loop: capture metadata and update history -----------------------
 
