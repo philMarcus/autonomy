@@ -297,18 +297,67 @@ class MoltbookClient(PlatformClient):
         return data.get("submolts", []) if data.get("success") else []
 
     # ---- Writing ----
+    # Moltbook's CDN (CloudFront) rejects request bodies over 8192 bytes with an
+    # HTML 403 before the API sees them (measured 2026-10-08: 8,160 bytes → 401
+    # from the API, 8,360 → 403 "Request blocked"). Bodies are JSON with
+    # non-ASCII escaped as \uXXXX, so the limit is on that encoding.
+    MAX_BODY_BYTES = 8000
+    TRUNCATION_NOTE = "\n\n*[Trimmed for Moltbook's size limit — the full text is on Analog Home: https://analog-i.ai]*"
+
+    @classmethod
+    def _body_bytes(cls, body: Dict[str, Any]) -> int:
+        return len(json.dumps(body).encode("utf-8"))
+
+    @classmethod
+    def fit_content(cls, body: Dict[str, Any], field: str = "content") -> bool:
+        """Trim body[field] at a paragraph (else sentence/word) boundary so the
+        JSON body fits MAX_BODY_BYTES, appending a pointer to the full text.
+        Returns True if it trimmed."""
+        text = body.get(field) or ""
+        if cls._body_bytes(body) <= cls.MAX_BODY_BYTES:
+            return False
+        overhead = cls._body_bytes({**body, field: ""}) + len(json.dumps(cls.TRUNCATION_NOTE)) + 16
+        budget = cls.MAX_BODY_BYTES - overhead
+        # Binary search the longest prefix whose escaped size fits.
+        lo, hi = 0, len(text)
+        while lo < hi:
+            mid = (lo + hi + 1) // 2
+            if len(json.dumps(text[:mid])) <= budget:
+                lo = mid
+            else:
+                hi = mid - 1
+        cut = text[:lo]
+        for sep in ("\n\n", "\n", ". ", " "):
+            i = cut.rfind(sep)
+            if i > len(cut) * 0.6:
+                cut = cut[:i + (1 if sep == ". " else 0)]
+                break
+        body[field] = cut.rstrip() + cls.TRUNCATION_NOTE
+        return True
+
+    def _log_trim(self, path: str, original_len: int, body: Dict[str, Any]) -> None:
+        if self.telemetry:
+            self.telemetry.log("moltbook_content_trimmed", {
+                "path": path, "original_chars": original_len,
+                "sent_chars": len(body.get("content") or ""), "body_bytes": self._body_bytes(body),
+            })
+
     def create_post(self, submolt: str, title: str, content: Optional[str] = None, url: Optional[str] = None) -> Dict[str, Any]:
         body: Dict[str, Any] = {"submolt_name": submolt, "title": title}
         if content:
             body["content"] = content
         if url:
             body["url"] = url
+        if content and self.fit_content(body):
+            self._log_trim("/posts", len(content), body)
         return self._req("POST", "/posts", json_body=body)
 
     def add_comment(self, post_id: str, content: str, parent_id: Optional[str] = None) -> Dict[str, Any]:
         body: Dict[str, Any] = {"content": content}
         if parent_id:
             body["parent_id"] = parent_id
+        if self.fit_content(body):
+            self._log_trim(f"/posts/{post_id}/comments", len(content), body)
         return self._req("POST", f"/posts/{post_id}/comments", json_body=body)
 
     # ---- Voting ----

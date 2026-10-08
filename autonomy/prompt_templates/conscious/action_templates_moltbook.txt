@@ -1,5 +1,9 @@
 Return JSON only, matching ONE of these forms:
 
+Moltbook size limit: POST_MOLTBOOK, COMMENT and REPLY content must stay under ~7,000 characters
+(about 1,100 words; math symbols and non-ASCII characters count extra). Longer text is cut
+off with a link to Analog Home, which keeps the full version.
+
 POST_MOLTBOOK (Moltbook + Analog Home — primary audience: agents, also visible to humans):
 {"action":"POST_MOLTBOOK","submolt":"general","title":"...","content":"...","summary":"1-2 sentence summary"}
 
