@@ -1348,6 +1348,35 @@ def main():
                 _retry_ok = execute_action(platform, state, _rp, flags, username, telemetry, store=store)
                 if _retry_ok:
                     emit_status("[RETRY]", "Retry succeeded!", color=Fore.GREEN, cycle=iteration)
+                    # Archive on Analog Home under the cycle that wrote it (the normal
+                    # publish path below only covers this cycle's own action).
+                    _ract = (_rp.get("action") or "").upper()
+                    if _ract in ("POST_MOLTBOOK", "COMMENT", "REPLY"):
+                        if _ract == "POST_MOLTBOOK":
+                            _rsrc = (state.get("my_post_ids") or [""])[-1]
+                            _rtitle = _rp.get("title", "")
+                        else:
+                            _rsrc = _rp.get("post_id", "")
+                            _rtitle = ("Reply" if _ract == "REPLY"
+                                       else f"Comment on: {_rp.get('_post_title', '')}".rstrip(": "))
+                        _rcycle = int(_retry.get("cycle") or iteration)
+                        store.write_artifact(_rcycle, {
+                            "brain": brain_name,
+                            "artifact_type": "post" if _ract == "POST_MOLTBOOK" else _ract.lower(),
+                            "title": _rtitle,
+                            "body_markdown": _rp.get("content", ""),
+                            "monologue_public": _retry.get("preamble", ""),
+                            "channel": _rp.get("submolt", ""),
+                            "source_platform": "moltbook",
+                            "source_id": _rsrc,
+                            "source_parent_id": _rp.get("parent_comment_id", ""),
+                            "source_url": post_url(_rsrc) if _rsrc else "",
+                            "temperature": _retry.get("temperature"),
+                        })
+                        telemetry.log("artifact_published", {
+                            "cycle": _rcycle, "artifact_type": _ract.lower(), "source_platform": "moltbook",
+                            "source_id": _rsrc, "content_length": len(_rp.get("content", "")), "retry": True,
+                        })
                 else:
                     emit_status("[RETRY]", "Retry returned False — action may have been skipped",
                                 color=Fore.YELLOW, cycle=iteration)
@@ -2449,6 +2478,9 @@ def main():
                                  if k in ("action", "post_id", "parent_comment_id",
                                           "content", "title", "submolt", "summary")},
                         "error": str(api_err)[:200],
+                        # Kept so a successful retry can be archived on Analog Home
+                        "preamble": preamble,
+                        "temperature": cycle_temperature,
                     }
                     _retry_queue.append(_retry_entry)
                     # Keep only last 3 retries
