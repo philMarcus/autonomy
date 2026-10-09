@@ -341,7 +341,7 @@ def build_default_registry(model_registry, blacklist_str: str = "") -> ControlRe
                 "Weighted model pool for MUSE (creative generation from memory)", "llm",
                 choices=subconscious_choices),
         Control("verification_model_weights", "weights",
-                "ollama:gemma4:12b=3,gemini-3.5-flash-lite=1",
+                "gemini-3.8-flash=1,gemini-3.5-flash-lite=0.01",
                 "Weighted model pool for math verification challenges", "llm",
                 choices=subconscious_choices + _GEMINI_TIER),
         Control("temperature", "float", 0.7,

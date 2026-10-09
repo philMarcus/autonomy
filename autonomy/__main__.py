@@ -678,16 +678,21 @@ def main():
     if mb_key:
         # Use verification cadre for challenges — picks from weighted pool
         from .daemon import _pick_weighted_model
-        _verif_weights = ctrl.get("verification_model_weights") or "gemini-3.5-flash-lite=1"
-        _verif_model = _pick_weighted_model(_verif_weights, "gemini-3.5-flash-lite")
+        _verif_weights = ctrl.get("verification_model_weights") or "gemini-3.8-flash=1"
+        _verif_model = _pick_weighted_model(_verif_weights, "gemini-3.8-flash")
         challenge_llm = registry.as_llm_client(default_model_id=_verif_model)
         challenge_solver = MathVerificationSolver(llm_client=challenge_llm, telemetry=telemetry)
         # Backup: try another model from pool, then Gemma (local, free, 5/5 on simple prompt)
-        _verif_backup = _pick_weighted_model(_verif_weights, "gemini-3.8-flash")
+        # Backup: the highest-weighted other model in the pool (deterministic, so
+        # there is always a second Gemini attempt).
+        _verif_pool = sorted(((p.rsplit("=", 1)[0].strip(), float(p.rsplit("=", 1)[1]))
+                              for p in _verif_weights.split(",") if "=" in p),
+                             key=lambda mw: -mw[1])
+        _verif_backup = next((m for m, w in _verif_pool if m != _verif_model and w > 0), _verif_model)
         if _verif_backup != _verif_model:
             challenge_solver.backup_llm = registry.as_llm_client(default_model_id=_verif_backup)
-        if registry.has_model("ollama:gemma4:12b"):
-            challenge_solver.backup_llm_2 = registry.as_llm_client(default_model_id="ollama:gemma4:12b")
+        # No local backup: gemma4 failed every challenge from Oct 7 on, and a failed
+        # challenge leaves the post unverified (hidden from the agent's profile).
         platform = MoltbookClient(
             api_key=mb_key, telemetry=telemetry, brain_name=brain_name,
             read_only=args.read_only, challenge_solver=challenge_solver,
