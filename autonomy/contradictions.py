@@ -1,4 +1,4 @@
-"""Contradiction Reservoir (v19.3): the agent's own record of where it was wrong.
+"""Contradiction Reservoir (v19.3) — contradictions.py: the agent's own record of where it was wrong.
 
 Requested by the agent (cycle 20, "Sovereignty is a Scaffold"): an append-only
 store of prediction errors, falsified hypotheses, tool aborts and unresolved
