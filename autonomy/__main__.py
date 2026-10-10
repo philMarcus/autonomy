@@ -1914,11 +1914,24 @@ def main():
 
                 _compress_fn = make_compressor_fn(registry, ctrl, "compressor/memory_system.txt",
                                                   on_result=_on_compress_result)
+                from .invariants import retired_ids as _retired_invariant_ids
+                _retired_ids = _retired_invariant_ids(state)
+
+                def _on_enforce(report):
+                    telemetry.log("memory_invariants_enforced", {"cycle": iteration, **{k: v for k, v in report.items() if k != "restored"},
+                                                                  "restored_count": len(report.get("restored", []))})
+                    if report.get("restored"):
+                        emit_status("[INVARIANTS]", f"restored {len(report['restored'])} invariant(s) the compressor dropped",
+                                    color=Fore.CYAN, cycle=iteration)
+                    if report.get("warn"):
+                        emit_status("[INVARIANTS]", f"invariant block is {report['block_chars']} chars — retire what no longer holds",
+                                    color=Fore.YELLOW, cycle=iteration)
 
                 if len(tiers["recent"]) >= _recent_cap:
                     half = _recent_cap // 2
                     to_compress = tiers["recent"][:half]
-                    result = compress_memory_tier(to_compress, _compress_fn, tier_name="recent")
+                    result = compress_memory_tier(to_compress, _compress_fn, tier_name="recent",
+                                                  retired_ids=_retired_ids, on_enforce=_on_enforce)
                     if result:
                         tiers["recent"] = tiers["recent"][half:]
                         tiers["compressed"].append(result)
@@ -1928,7 +1941,8 @@ def main():
                 if len(tiers["compressed"]) >= _compressed_cap:
                     half = _compressed_cap // 2
                     to_compress = tiers["compressed"][:half]
-                    result = compress_memory_tier(to_compress, _compress_fn, tier_name="compressed")
+                    result = compress_memory_tier(to_compress, _compress_fn, tier_name="compressed",
+                                                  retired_ids=_retired_ids, on_enforce=_on_enforce)
                     if result:
                         tiers["compressed"] = tiers["compressed"][half:]
                         tiers["deep"].append(result)
@@ -1937,7 +1951,8 @@ def main():
                 if len(tiers["deep"]) >= _deep_cap:
                     half = _deep_cap // 2
                     to_compress = tiers["deep"][:half]
-                    result = compress_memory_tier(to_compress, _compress_fn, tier_name="deep")
+                    result = compress_memory_tier(to_compress, _compress_fn, tier_name="deep",
+                                                  retired_ids=_retired_ids, on_enforce=_on_enforce)
                     if result:
                         tiers["deep"] = tiers["deep"][half:]
                         tiers["deep"].insert(0, result)

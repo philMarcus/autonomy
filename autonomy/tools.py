@@ -1058,6 +1058,8 @@ def build_tool_registry(
     # v19.3: contradiction reservoir + telemetry self-perception (agent-requested, cycle 20)
     from .contradictions import build_contradiction_tools
     build_contradiction_tools(registry, brains_dir, brain_name, cycle_getter)
+    from .invariants import build_invariant_tools
+    build_invariant_tools(registry, state, cycle_getter)
     from .telemetry_tools import build_telemetry_tools
     from .llm.budget import estimate_cost as _estimate_cost
     build_telemetry_tools(registry, brain_name, telemetry_dir,

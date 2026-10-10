@@ -44,6 +44,7 @@ EXPECTED_TOOLS = {
     "list_phil_projects", "read_phil_project",
     # contradiction reservoir + telemetry self-perception (v19.3)
     "log_contradiction", "read_contradictions", "get_execution_metrics", "query_telemetry",
+    "list_invariants", "retire_invariant",
 }
 
 

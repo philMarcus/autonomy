@@ -532,13 +532,15 @@ def make_compressor_fn(registry, ctrl, system_template: str, *, temperature: flo
     return chat_fn
 
 
-def compress_memory_tier(entries, chat_fn, tier_name="recent"):
+def compress_memory_tier(entries, chat_fn, tier_name="recent", retired_ids=None, on_enforce=None):
     """Compress a list of memory entries into a single summary using an LLM.
 
     Args:
         entries: list of dicts (either {cycle, note} or {cycles, summary})
         chat_fn: callable(prompt) -> str
         tier_name: for formatting ("recent" or "compressed")
+        retired_ids: invariant ids the agent has retired (never restored)
+        on_enforce: callback(report) after the deterministic invariant check
 
     Returns:
         dict with {cycles: "X-Y", summary: "..."} or None on failure
@@ -568,6 +570,15 @@ def compress_memory_tier(entries, chat_fn, tier_name="recent"):
             _ulog.warning("memory compression (%s tier, %d entries) returned %d chars — keeping originals",
                           tier_name, len(entries), len(summary))
             return None
+        # Out-of-band invariant check (v19.3.1): every [INVARIANTS & CONDITIONAL GATES]
+        # bullet of the inputs must survive the fold; retired ones are dropped.
+        from .invariants import enforce as _enforce_invariants
+        summary, _report = _enforce_invariants(entries, summary, retired_ids)
+        if on_enforce:
+            try:
+                on_enforce(_report)
+            except Exception:
+                pass
         # Build cycle range label
         if cycle_nums:
             cycles_label = f"{min(cycle_nums)}-{max(cycle_nums)}"
