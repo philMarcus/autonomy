@@ -53,6 +53,7 @@ from .actions import (
     pick_outside_post_for_comment,
 )
 from .cooldowns import can_do, set_cooldown, cooldown_status_text, migrate_legacy_cooldowns
+from . import reservoir as _reservoir
 from .schedule import describe as describe_active_hours, is_active, next_active_at, seconds_until_active, seconds_until_inactive
 
 colorama_init(autoreset=True)
@@ -1387,6 +1388,8 @@ def main():
                                 color=Fore.YELLOW, cycle=iteration)
             except Exception as _retry_err:
                 emit_status("[RETRY]", f"Retry failed again: {_retry_err}", color=Fore.RED, cycle=iteration)
+                _reservoir.harness_note(BRAINS_DIR, brain_name, iteration,
+                                        f"Retry of {_rp.get('action')} from cycle {_retry.get('cycle')} failed again: {str(_retry_err)[:160]}; dropped")
                 # Don't re-queue — it's had two chances
             store.save_state(state)
 
@@ -1701,6 +1704,9 @@ def main():
             daemon_active=daemon is not None,
             platform_status=platform_status,
             nudge_note=nudge_note,
+            contradictions=_reservoir.prompt_block(
+                _reservoir.load(BRAINS_DIR, brain_name),
+                max_items=int(ctrl.get("contradiction_reservoir_in_prompt") or 20)),
             self_telemetry=(
                 _build_self_telemetry(state, budget, iteration, daemon) + "\n"
                 + _build_featured_note(store) + "\n"
@@ -2411,6 +2417,9 @@ def main():
                                     "error": str(first_error)[:500],
                                 })
                                 state["_failed_image_prompts"] = failed[-5:]
+                                _reservoir.harness_note(BRAINS_DIR, brain_name, iteration,
+                                                        f"GENERATE_IMAGE failed: {str(first_error)[:200]}",
+                                                        context=f"title: {str(plan.get('title', ''))[:80]}")
                                 telemetry.log("image_error", {
                                     "cycle": iteration,
                                     "prompt": image_prompt,
@@ -2476,6 +2485,9 @@ def main():
                     # Moltbook API failure (500, timeout, etc.) — save plan for retry next cycle.
                     # Content would otherwise be lost since the planner won't regenerate it.
                     emit_status("[ERROR]", f"Action failed: {api_err}", color=Fore.RED, cycle=iteration)
+                    _reservoir.harness_note(BRAINS_DIR, brain_name, iteration,
+                                            f"{plan.get('action')} failed: {str(api_err)[:200]}",
+                                            context=f"title: {str(plan.get('title', ''))[:80]}" if plan.get("title") else "")
                     _retry_queue = state.setdefault("_retry_queue", [])
                     _retry_entry = {
                         "cycle": iteration,

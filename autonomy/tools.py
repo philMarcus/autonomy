@@ -1055,6 +1055,15 @@ def build_tool_registry(
     from .projects import build_project_tools
     build_project_tools(registry)
 
+    # v19.3: contradiction reservoir + telemetry self-perception (agent-requested, cycle 20)
+    from .reservoir import build_contradiction_tools
+    build_contradiction_tools(registry, brains_dir, brain_name, cycle_getter)
+    from .telemetry_tools import build_telemetry_tools
+    from .llm.budget import estimate_cost as _estimate_cost
+    build_telemetry_tools(registry, brain_name, telemetry_dir,
+                          cost_fn=lambda m, i, o, k: _estimate_cost(m, i, o, k),
+                          cycle_getter=cycle_getter)
+
     log.info("Tool registry built: %s", ", ".join(registry.list_names()))
     return registry
 

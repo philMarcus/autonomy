@@ -42,6 +42,8 @@ EXPECTED_TOOLS = {
     "lookup_agent", "get_thread",
     # phil's projects (v19.2)
     "list_phil_projects", "read_phil_project",
+    # contradiction reservoir + telemetry self-perception (v19.3)
+    "log_contradiction", "read_contradictions", "get_execution_metrics", "query_telemetry",
 }
 
 

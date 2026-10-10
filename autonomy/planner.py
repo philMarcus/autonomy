@@ -388,6 +388,7 @@ def build_planner_prompt(
     cooldown_status: str = "",
     nudge_note: str = "",
     self_telemetry: str = "",
+    contradictions: str = "",
     recent_posts: str = "",
     post_memory: str = "",
     gear_instructions: Optional[Dict[str, str]] = None,
@@ -487,6 +488,7 @@ CONFIG/CONSTRAINTS:
 Personal memory (your journal — grows each cycle from your memory_note):
 {memory}
 {self_telemetry}
+{contradictions}
 Knowledge (excerpt):
 {knowledge}
 
@@ -651,6 +653,7 @@ def _plan_with_tools(chat, prompt, tool_registry,
                     "tool": call.name,
                     "args": call.args,
                     "result_length": len(result.content),
+                    "error": result.content.lstrip().startswith('{"error"'),
                     "tag": "planner",
                 })
         return results

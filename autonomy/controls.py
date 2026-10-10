@@ -370,6 +370,10 @@ def build_default_registry(model_registry, blacklist_str: str = "") -> ControlRe
         # High-score items add charge_weight_feed to wake_potential. When wake_potential
         # crosses an auto-calibrated threshold (tuned to hit target_wake_minutes on average),
         # conscious fires. If no wake event by cycle_interval_minutes, conscious fires anyway.
+        Control("contradiction_reservoir_in_prompt", "int", 20,
+                "How many of the newest Contradiction Reservoir entries appear verbatim in your prompt "
+                "(the full reservoir is always readable with read_contradictions)",
+                "context", min_val=0, max_val=100),
         Control("recall_sync_per_cycle", "int", 50,
                 "Max artifacts embedded for semantic recall at the start of each cycle "
                 "(0 disables the per-cycle sync; backfill with python -m autonomy.recall)",

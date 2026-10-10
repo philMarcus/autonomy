@@ -38,9 +38,10 @@ ARCHIVE_SUFFIXES = (
     "memories.json", "todos.json", "experiments.json", "daemon_io.jsonl",
     "pending_artifacts.json", "dev_requests.txt", "kernel_prompt.txt",
     "kernel_prompt.backup.txt", "knowledge.txt", "controls.json", "dream_topics.txt",
+    "contradictions.jsonl",
 )
 RESET_EMPTY_JSON = ("todos.json", "experiments.json")
-REMOVE = ("daemon_io.jsonl",)
+REMOVE = ("daemon_io.jsonl", "contradictions.jsonl")
 
 
 def _path(brains_dir: str, brain: str, suffix: str) -> str:
